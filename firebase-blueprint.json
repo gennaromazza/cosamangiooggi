@@ -1,0 +1,174 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Stores user settings and family preferences",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "dietaryRestrictions": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["gluten-free", "lactose-free", "vegan"] }
+        },
+        "excludedIngredients": { "type": "array", "items": { "type": "string" } },
+        "pantryId": { "type": "string" }
+      },
+      "required": ["id"]
+    },
+    "FamilyMember": {
+      "title": "Family Member",
+      "description": "Preferences for a family member",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "likedIngredients": { "type": "array", "items": { "type": "string" } },
+        "dislikedIngredients": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "PantryItem": {
+      "title": "Pantry Item",
+      "description": "Item in the pantry",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "quantity": { "type": "number" },
+        "unit": { "type": "string" },
+        "category": { "type": "string" }
+      }
+    },
+    "Recipe": {
+      "title": "Recipe",
+      "description": "Cooking recipe",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "ingredients": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "amount": { "type": "number" },
+              "unit": { "type": "string" }
+            }
+          }
+        },
+        "instructions": { "type": "array", "items": { "type": "string" } },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "season": { "type": "string" },
+        "isWHOCompliant": { "type": "boolean" },
+        "category": { "type": "string" }
+      }
+    },
+    "MealPlan": {
+      "title": "Weekly Meal Plan",
+      "description": "Planning for the week",
+      "type": "object",
+      "properties": {
+        "startDate": { "type": "string", "format": "date" },
+        "days": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "lunch": { "$ref": "Recipe" },
+              "dinner": { "$ref": "Recipe" }
+            }
+          }
+        }
+      }
+    },
+    "VoiceShoppingItem": {
+      "title": "Voice or Manual Shopping Item",
+      "description": "Items added to shopping list manually or via voice command",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "amount": { "type": "number" },
+        "unit": { "type": "string" },
+        "needed": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["name"]
+    },
+    "FavoriteRecipe": {
+      "title": "Favorite Recipe",
+      "description": "A reference to a user favorited recipe",
+      "type": "object",
+      "properties": {
+        "createdAt": { "type": "string" }
+      }
+    },
+    "VacationPlan": {
+      "title": "Vacation Meal Plan",
+      "description": "Beach vacation meal plan",
+      "type": "object",
+      "properties": {
+        "updatedAt": { "type": "string" }
+      }
+    },
+    "AdminAuditLog": {
+      "title": "Admin Audit Log",
+      "description": "Log of admin actions and configuration changes",
+      "type": "object",
+      "properties": {
+        "adminId": { "type": "string" },
+        "adminEmail": { "type": "string" },
+        "action": { "type": "string" },
+        "targetUserId": { "type": "string" },
+        "targetUserEmail": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "details": { "type": "string" }
+      },
+      "required": ["adminId", "adminEmail", "action", "targetUserId", "targetUserEmail", "details"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Primary user document"
+    },
+    "/users/{userId}/familyMembers/{memberId}": {
+      "schema": "FamilyMember",
+      "description": "Family members for the user"
+    },
+    "/users/{userId}/pantry/{itemId}": {
+      "schema": "PantryItem",
+      "description": "Pantry items for the user"
+    },
+    "/users/{userId}/mealPlans/{planId}": {
+      "schema": "MealPlan",
+      "description": "Weekly meal plans"
+    },
+    "/users/{userId}/customRecipes/{recipeId}": {
+      "schema": "Recipe",
+      "description": "User-added custom recipes"
+    },
+    "/users/{userId}/favorites/{recipeId}": {
+      "schema": "FavoriteRecipe",
+      "description": "User-selected favorite recipes"
+    },
+    "/users/{userId}/voiceShoppingItems/{itemId}": {
+      "schema": "VoiceShoppingItem",
+      "description": "Custom voice and manually added shopping items"
+    },
+    "/users/{userId}/vacationPlan/{planId}": {
+      "schema": "VacationPlan",
+      "description": "User vacation meal plans"
+    },
+    "/users/{userId}/shoppingList/{itemId}": {
+      "schema": "VoiceShoppingItem",
+      "description": "Shopping list items"
+    },
+    "recipes": {
+      "schema": "Recipe",
+      "description": "Global recipe database"
+    },
+    "/admin_audit_logs/{logId}": {
+      "schema": "AdminAuditLog",
+      "description": "Audit logs updated by administrators"
+    }
+  }
+}

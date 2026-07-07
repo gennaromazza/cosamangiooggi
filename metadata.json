@@ -1,0 +1,12 @@
+{
+  "name": "Che cucino oggi? 0 stress Meal planner",
+  "description": "Un'app intelligente per pianificare menù settimanali stagionali seguendo le linee guida OMS, gestire la dispensa e generare liste della spesa personalizzate.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API",
+    "DIETARY_FILTERS",
+    "PANTRY_SYNC",
+    "PDF_EXPORT",
+    "AI_MENU_GENERATION"
+  ]
+}

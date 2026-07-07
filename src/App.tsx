@@ -1,0 +1,935 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { 
+  Calendar, 
+  Utensils, 
+  ShoppingCart, 
+  Users, 
+  Package, 
+  ChefHat,
+  LogOut,
+  Info,
+  Sparkles,
+  Mic,
+  MicOff,
+  TrendingUp,
+  ShieldCheck,
+  ShieldAlert,
+  AlertTriangle,
+  X,
+  Lock,
+  MessageSquare,
+  Wallet,
+  Sun
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import MealPlanner from './components/MealPlanner';
+import VacationPlanner from './components/VacationPlanner';
+import Pantry from './components/Pantry';
+import ShoppingList from './components/ShoppingList';
+import FamilySettings from './components/FamilySettings';
+import RecipeList from './components/RecipeList';
+import FlyerAnalysis from './components/FlyerAnalysis';
+import { FoodPyramid } from './components/FoodPyramid';
+import VoiceAssistant from './components/VoiceAssistant';
+import BusinessModel from './components/BusinessModel';
+import AdminDashboard from './components/AdminDashboard';
+import WelcomeTour from './components/WelcomeTour';
+import PWAInstallPrompt from './components/PWAInstallPrompt';
+import { auth, db } from './lib/firebase';
+import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
+import { doc, onSnapshot, collection } from 'firebase/firestore';
+import { handleFirestoreError, OperationType } from './lib/firebaseUtils';
+import { UserProfile } from './types';
+
+type Tab = 'planner' | 'vacation' | 'pantry' | 'shopping' | 'family' | 'recipes' | 'guide' | 'offers' | 'business' | 'admin';
+
+export default function App() {
+  const [activeTab, setActiveTab] = useState<Tab>('planner');
+  const [user, setUser] = useState<any>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [voiceSearchQuery, setVoiceSearchQuery] = useState('');
+  const [voiceIsListening, setVoiceIsListening] = useState(false);
+  
+  // Premium Gate Trigger State
+  const [showPremiumGate, setShowPremiumGate] = useState<'voice' | 'offers' | null>(null);
+
+  // Shopping List Visibility Constraints
+  const [hasMealPlan, setHasMealPlan] = useState<boolean>(false);
+  const [hasFamilyMember, setHasFamilyMember] = useState<boolean>(false);
+
+  // Email and Password Login States
+  const [loginMethod, setLoginMethod] = useState<'signin' | 'signup'>('signin');
+  const [emailInput, setEmailInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
+  const [nameInput, setNameInput] = useState('');
+
+  useEffect(() => {
+    const handleStatus = (e: any) => {
+      setVoiceIsListening(!!e.detail?.isListening);
+    };
+    window.addEventListener('voice-assistant-listening-change', handleStatus);
+    return () => {
+      window.removeEventListener('voice-assistant-listening-change', handleStatus);
+    };
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setAuthLoading(false);
+    }, (error) => {
+      console.error("Auth state error:", error);
+      setAuthLoading(false);
+      setLoginError("Errore nel caricamento delle credenziali.");
+    });
+    
+    const timeout = setTimeout(() => {
+      if (authLoading) {
+        setAuthLoading(false);
+      }
+    }, 5000);
+
+    return () => {
+      unsubscribe();
+      clearTimeout(timeout);
+    };
+  }, [authLoading]);
+
+  // Sync profile & Initialize missing database fields for new accounts
+  useEffect(() => {
+    if (!user) return;
+    if (user.uid === 'demo-family-user') return;
+    const profilePath = `users/${user.uid}`;
+    const uDoc = doc(db, profilePath);
+
+    const unsubProfile = onSnapshot(uDoc, async (snapshot) => {
+      const emailLower = user.email?.toLowerCase() || '';
+      const isDefaultDbAdmin = 
+        emailLower === 'debora.dibellucci12@gmail.com' || 
+        emailLower === 'debora.dibellucci12@gmail.co' || 
+        emailLower === 'info.mondogadgets@gmail.com' ||
+        emailLower.includes('admin');
+
+      console.debug('[ADMIN DEBUG] onSnapshot triggered:', {
+        uid: user.uid,
+        email: user.email,
+        emailLower,
+        isDefaultDbAdmin,
+        snapshotExists: snapshot.exists(),
+        snapId: snapshot.id
+      });
+
+      if (snapshot.exists()) {
+        const data = snapshot.data() || {};
+        console.debug('[ADMIN DEBUG] Profile document data found:', data);
+
+        if (isDefaultDbAdmin && !data.isAdmin) {
+          console.debug('[ADMIN DEBUG] User qualifies as default DB Admin but is NOT marked as Admin in database. Attempting to updateDoc in Firestore...');
+          try {
+            const { updateDoc } = await import('firebase/firestore');
+            await updateDoc(uDoc, { isAdmin: true });
+            console.debug('[ADMIN DEBUG] successfully executed updateDoc for isAdmin: true');
+          } catch (e: any) {
+            console.error("[ADMIN DEBUG] Error upgrading profile to admin in Firestore:", e);
+          }
+        }
+        
+        const finalProfile = { id: snapshot.id, ...data, isAdmin: isDefaultDbAdmin ? true : !!data.isAdmin } as UserProfile;
+        console.debug('[ADMIN DEBUG] Setting profile local state to:', finalProfile);
+        setProfile(finalProfile);
+      } else {
+        console.debug('[ADMIN DEBUG] Profile document does not exist. Creating default profile with isAdmin:', isDefaultDbAdmin);
+        // Automatically default roles/plans on first registration
+        const defaultProfile: Partial<UserProfile> = {
+          name: user.displayName || 'Nuova Famiglia spesa',
+          email: user.email || '',
+          dietaryRestrictions: [],
+          excludedIngredients: [],
+          plan: 'free',
+          isAdmin: isDefaultDbAdmin,
+          isSuspended: false,
+          createdAt: new Date().toISOString(),
+          aiInteractionsThisMonth: 0
+        };
+
+        try {
+          const { setDoc } = await import('firebase/firestore');
+          await setDoc(uDoc, defaultProfile);
+          console.debug('[ADMIN DEBUG] Default profile successfully created with setDoc.');
+        } catch (e: any) {
+          console.error("[ADMIN DEBUG] Error creating default profile:", e);
+        }
+      }
+    }, (error) => {
+      console.error("[ADMIN DEBUG] Profile onSnapshot error listener failed:", error);
+      handleFirestoreError(error, OperationType.GET, profilePath);
+    });
+
+    return () => unsubProfile();
+  }, [user]);
+
+  // Listen to meal plan and family members count to determine if Shopping List is unlocked/visible
+  useEffect(() => {
+    if (!user) {
+      setHasMealPlan(false);
+      setHasFamilyMember(false);
+      return;
+    }
+
+    const isLocal = user.uid === 'demo-family-user' || user.uid.startsWith('local-');
+
+    if (isLocal) {
+      const checkLocalData = () => {
+        // Check meal plan
+        const savedPlan = localStorage.getItem(`mealPlan_${user.uid}`);
+        if (savedPlan) {
+          try {
+            const parsed = JSON.parse(savedPlan);
+            setHasMealPlan(!!(parsed && parsed.days && Object.keys(parsed.days).length > 0));
+          } catch (e) {
+            setHasMealPlan(false);
+          }
+        } else {
+          setHasMealPlan(false);
+        }
+
+        // Check members
+        const savedMembers = localStorage.getItem(`members_${user.uid}`);
+        if (savedMembers) {
+          try {
+            const parsed = JSON.parse(savedMembers);
+            setHasFamilyMember(Array.isArray(parsed) && parsed.length > 0);
+          } catch (e) {
+            setHasFamilyMember(false);
+          }
+        } else {
+          setHasFamilyMember(false);
+        }
+      };
+
+      checkLocalData();
+
+      const interval = setInterval(checkLocalData, 1000);
+      window.addEventListener('storage', checkLocalData);
+
+      return () => {
+        clearInterval(interval);
+        window.removeEventListener('storage', checkLocalData);
+      };
+    } else {
+      // Real user with Firestore
+      const planDocRef = doc(db, 'users', user.uid, 'mealPlans', 'current');
+      const unsubPlan = onSnapshot(planDocRef, (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+          setHasMealPlan(!!(data && data.days && Object.keys(data.days).length > 0));
+        } else {
+          setHasMealPlan(false);
+        }
+      }, (err) => {
+        console.error("Error listening to meal plan:", err);
+      });
+
+      const membersColRef = collection(db, 'users', user.uid, 'familyMembers');
+      const unsubMembers = onSnapshot(membersColRef, (snapshot) => {
+        setHasFamilyMember(snapshot.size > 0);
+      }, (err) => {
+        console.error("Error listening to family members:", err);
+      });
+
+      return () => {
+        unsubPlan();
+        unsubMembers();
+      };
+    }
+  }, [user]);
+
+  // Handle activeTab redirection if Shopping List becomes unavailable
+  useEffect(() => {
+    if (activeTab === 'shopping' && !(hasMealPlan && hasFamilyMember)) {
+      setActiveTab('planner');
+    }
+  }, [activeTab, hasMealPlan, hasFamilyMember]);
+
+  const handleLogin = async () => {
+    setIsLoggingIn(true);
+    setLoginError(null);
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    
+    try {
+      const { setPersistence, browserLocalPersistence } = await import('firebase/auth');
+      await setPersistence(auth, browserLocalPersistence);
+      await signInWithPopup(auth, provider);
+    } catch (error: any) {
+      console.error("Login error:", error);
+      let message = "Errore durante l'accesso. Riprova.";
+      if (error.code === 'auth/popup-blocked') {
+        message = "Il popup di accesso è stato bloccato. Abilita i popup per questo sito.";
+      } else if (error.code === 'auth/cancelled-popup-request') {
+        message = "Accesso annullato.";
+      } else if (error.code === 'auth/internal-error') {
+        message = "Errore interno di Firebase. Verifica la connessione.";
+      }
+      setLoginError(message);
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleEmailAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!emailInput.trim() || !passwordInput.trim()) {
+      setLoginError("Compila tutti i campi richiesti.");
+      return;
+    }
+    if (loginMethod === 'signup' && !nameInput.trim()) {
+      setLoginError("Inserisci il nome della famiglia.");
+      return;
+    }
+
+    setIsLoggingIn(true);
+    setLoginError(null);
+
+    try {
+      if (loginMethod === 'signin') {
+        await signInWithEmailAndPassword(auth, emailInput.trim(), passwordInput);
+      } else {
+        const userCredential = await createUserWithEmailAndPassword(auth, emailInput.trim(), passwordInput);
+        if (userCredential.user) {
+          await updateProfile(userCredential.user, {
+            displayName: nameInput.trim()
+          });
+        }
+      }
+    } catch (error: any) {
+      console.error("Email auth error:", error);
+      let message = "Errore durante l'autenticazione. Riprova.";
+      if (
+        error.code === 'auth/invalid-credential' || 
+        error.code === 'auth/wrong-password' || 
+        error.code === 'auth/user-not-found'
+      ) {
+        message = "Credenziali non valide. Riprova o registrati.";
+      } else if (error.code === 'auth/email-already-in-use') {
+        message = "Questa email è già registrata. Effettua l'accesso.";
+      } else if (error.code === 'auth/weak-password') {
+        message = "La password deve contenere almeno 6 caratteri.";
+      } else if (error.code === 'auth/invalid-email') {
+        message = "Indirizzo email non valido.";
+      } else if (error.code === 'auth/operation-not-allowed' || error.code === 'auth/admin-restricted-operation') {
+        message = "[ABILITAZIONE FIREBASE RICHIESTA] Su Firebase è attivo di default solo Google. Per registrarti con la tua email su cloud, vai su Console Firebase -> Authentication -> Sign-in method -> Email/Password e clicca 'Abilita'. OPPURE entra subito cliccando il pulsante verde 'Entra con la mia Email in Modalità Locale' qui sotto!";
+      }
+      setLoginError(message);
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleLocalEmailLogin = () => {
+    if (!emailInput.trim()) {
+      setLoginError("Inserisci prima il tuo indirizzo email nel campo qui sopra.");
+      return;
+    }
+    setIsLoggingIn(true);
+    setLoginError(null);
+    const cleanEmail = emailInput.trim().toLowerCase();
+    const localUid = 'local-' + cleanEmail.replace(/[^a-z0-9]/g, '');
+    const displayName = nameInput.trim() || cleanEmail.split('@')[0] || 'Utente Locale';
+    const localUser = {
+      uid: localUid,
+      email: cleanEmail,
+      displayName: displayName
+    };
+    setUser(localUser as any);
+    setProfile({
+      id: localUid,
+      name: displayName,
+      email: cleanEmail,
+      dietaryRestrictions: [],
+      excludedIngredients: [],
+      plan: 'premium',
+      isAdmin: cleanEmail === 'debora.dibellucci12@gmail.com' || cleanEmail.includes('admin'),
+      isSuspended: false,
+      createdAt: new Date().toISOString(),
+      aiInteractionsThisMonth: 0
+    });
+    setIsLoggingIn(false);
+  };
+
+  const handleDemoLogin = () => {
+    setIsLoggingIn(true);
+    setLoginError(null);
+    const demoUser = {
+      uid: 'demo-family-user',
+      email: 'demo@che-cucino-oggi.it',
+      displayName: nameInput.trim() || 'Famiglia Demo'
+    };
+    setUser(demoUser as any);
+    setProfile({
+      id: 'demo-family-user',
+      name: demoUser.displayName,
+      email: demoUser.email,
+      dietaryRestrictions: [],
+      excludedIngredients: [],
+      plan: 'premium',
+      isAdmin: false,
+      isSuspended: false,
+      createdAt: new Date().toISOString(),
+      aiInteractionsThisMonth: 0
+    });
+    setIsLoggingIn(false);
+  };
+
+  const handleLogout = () => {
+    if (user?.uid === 'demo-family-user' || user?.uid.startsWith('local-')) {
+      setUser(null);
+      setProfile(null);
+    } else {
+      signOut(auth);
+    }
+  };
+
+  // Check Admin flag based on profile or known administrator email
+  const userIsAdmin = useMemo(() => {
+    if (!user || !user.email) {
+      console.debug('[ADMIN DEBUG] userIsAdmin returning false: user or user.email is null/undefined.', { user });
+      return false;
+    }
+    const emailLower = user.email.toLowerCase();
+    const isProfileAdmin = !!profile?.isAdmin;
+    const isExplicitEmailAdmin = 
+      emailLower === 'debora.dibellucci12@gmail.com' || 
+      emailLower === 'debora.dibellucci12@gmail.co' || 
+      emailLower === 'info.mondogadgets@gmail.com';
+    
+    const result = isProfileAdmin || isExplicitEmailAdmin;
+    console.debug('[ADMIN DEBUG] userIsAdmin evaluation:', {
+      emailLower,
+      profileIsAdmin: profile?.isAdmin,
+      isProfileAdmin,
+      isExplicitEmailAdmin,
+      result
+    });
+    return result;
+  }, [user, profile]);
+
+  // Auto-switch to Admin Dashboard if admin logs in
+  useEffect(() => {
+    if (userIsAdmin) {
+      setActiveTab('admin');
+    }
+  }, [userIsAdmin]);
+
+  // Compile active tabs dynamically
+  const tabs = useMemo(() => {
+    const isShoppingVisible = hasMealPlan && hasFamilyMember;
+    const list = [
+      { id: 'planner', label: 'Menu', icon: Calendar },
+      ...(isShoppingVisible ? [{ id: 'shopping', label: 'Spesa', icon: ShoppingCart }] : []),
+      { id: 'pantry', label: 'Dispensa', icon: Package },
+      { id: 'recipes', label: 'Ricette', icon: ChefHat },
+      { id: 'family', label: 'Famiglia', icon: Users },
+      { id: 'offers', label: 'Offerte', icon: Sparkles },
+      { id: 'vacation', label: 'Vacanze', icon: Sun },
+      { id: 'guide', label: 'Guida', icon: Info },
+    ];
+    if (userIsAdmin) {
+      list.push({ id: 'business', label: 'Business', icon: TrendingUp });
+      list.push({ id: 'admin', label: 'Admin', icon: ShieldCheck });
+    } else {
+      list.push({ id: 'business', label: 'Abbonamento', icon: Wallet });
+    }
+    return list;
+  }, [userIsAdmin, hasMealPlan, hasFamilyMember]);
+
+  if (authLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-slate-50">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-600"></div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white rounded-3xl shadow-xl p-8 border border-slate-100">
+          <div className="text-center">
+            <div className="bg-indigo-600 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg rotate-3 overflow-hidden">
+               <Utensils className="text-white w-8 h-8" />
+            </div>
+            <h1 className="text-3xl font-extrabold text-slate-900 mb-2">Che cucino oggi?</h1>
+            <p className="text-slate-500 mb-6 text-sm leading-relaxed">
+              0 stress Meal planner: menù stagionali, dispensa sotto controllo e benessere per tutta la famiglia.
+            </p>
+          </div>
+          
+          {/* Tabs for Login / Register */}
+          <div className="flex border-b border-slate-100 mb-6">
+            <button
+              onClick={() => {
+                setLoginMethod('signin');
+                setLoginError(null);
+              }}
+              className={`flex-1 pb-3 text-sm font-bold border-b-2 transition-all ${
+                loginMethod === 'signin'
+                  ? 'border-indigo-600 text-indigo-600 font-extrabold'
+                  : 'border-transparent text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              Accedi
+            </button>
+            <button
+              onClick={() => {
+                setLoginMethod('signup');
+                setLoginError(null);
+              }}
+              className={`flex-1 pb-3 text-sm font-bold border-b-2 transition-all ${
+                loginMethod === 'signup'
+                  ? 'border-indigo-600 text-indigo-600 font-extrabold'
+                  : 'border-transparent text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              Registrati
+            </button>
+          </div>
+
+          {loginError && (
+            <div className="mb-4 p-4 bg-amber-50 text-amber-900 text-xs rounded-2xl border border-amber-200 shadow-xs space-y-3">
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-bold text-sm text-amber-950 mb-1">
+                    {loginError.includes('ABILITAZIONE FIREBASE') 
+                      ? 'Registrazione Email disabilitata sul Cloud Firebase' 
+                      : 'Avviso Accesso'}
+                  </p>
+                  <p className="leading-relaxed text-amber-800">{loginError}</p>
+                </div>
+              </div>
+
+              {loginError.includes('ABILITAZIONE FIREBASE') && (
+                <div className="bg-white/90 rounded-xl p-3 border border-amber-100 space-y-2.5 shadow-2xs">
+                  <p className="font-semibold text-amber-950 text-xs">
+                    🔧 Come abilitare la registrazione in 3 passaggi (richiede 30 secondi):
+                  </p>
+                  <ol className="list-decimal list-inside space-y-1 text-slate-700 text-xs pl-1 font-medium">
+                    <li>Apri la <a href="https://console.firebase.google.com/" target="_blank" rel="noreferrer" className="text-indigo-600 font-bold underline">Console Firebase</a> e seleziona il progetto.</li>
+                    <li>Nel menu di sinistra vai su <b>Authentication</b> ➔ scheda <b>Sign-in method</b>.</li>
+                    <li>Clicca sulla voce <b>Email/Password</b>, attiva la levetta <b>Abilita</b> e premi <b>Salva</b>.</li>
+                  </ol>
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={handleLocalEmailLogin}
+                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-3 rounded-xl flex items-center justify-center gap-2 text-xs shadow-xs transition-all cursor-pointer"
+              >
+                <Sparkles className="w-4 h-4" />
+                <span>Entra subito in Modalità Locale con {emailInput ? `"${emailInput}"` : 'questa email'}</span>
+              </button>
+            </div>
+          )}
+
+          <form onSubmit={handleEmailAuth} className="space-y-4">
+            {loginMethod === 'signup' && (
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">
+                  Nome Famiglia / Utente
+                </label>
+                <input
+                  type="text"
+                  placeholder="Es. Famiglia Rossi"
+                  value={nameInput}
+                  onChange={(e) => setNameInput(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  required
+                />
+              </div>
+            )}
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">
+                Indirizzo Email
+              </label>
+              <input
+                type="email"
+                placeholder="nome@esempio.com"
+                value={emailInput}
+                onChange={(e) => setEmailInput(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">
+                Password
+              </label>
+              <input
+                type="password"
+                placeholder="••••••••"
+                value={passwordInput}
+                onChange={(e) => setPasswordInput(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                required
+                minLength={6}
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={isLoggingIn}
+              className="w-full bg-indigo-600 text-white font-bold py-3.5 px-6 rounded-xl hover:bg-indigo-700 transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-3 active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed cursor-pointer"
+            >
+              {isLoggingIn ? (
+                <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-white"></div>
+              ) : (
+                <span>{loginMethod === 'signin' ? 'Accedi' : 'Crea Account'}</span>
+              )}
+            </button>
+          </form>
+
+          <div className="relative flex items-center justify-center my-6">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-slate-100"></div>
+            </div>
+            <span className="relative bg-white px-4 text-xs font-bold text-slate-400 uppercase tracking-widest">
+              Oppure
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleLogin}
+            disabled={isLoggingIn}
+            className="w-full bg-white border border-slate-200 text-slate-700 font-bold py-3.5 px-6 rounded-xl hover:bg-slate-50 transition-all shadow-xs flex items-center justify-center gap-3 active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed cursor-pointer"
+          >
+            <Users className="w-5 h-5 text-indigo-600" />
+            <span>Accedi con Google</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleDemoLogin}
+            disabled={isLoggingIn}
+            className="w-full mt-3 bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold py-3 px-6 rounded-xl hover:bg-emerald-100/70 transition-all shadow-xs flex items-center justify-center gap-2 text-sm active:scale-[0.98] cursor-pointer"
+          >
+            <Sparkles className="w-4 h-4 text-emerald-600" />
+            <span>Entra in Modalità Demo (Esplora l'App)</span>
+          </button>
+
+          <div className="mt-8 pt-6 border-t border-slate-100 grid grid-cols-3 gap-4 text-[10px] uppercase font-bold text-slate-400 tracking-widest text-center">
+            <span>Stagionale</span>
+            <span>OMS</span>
+            <span>Pantry</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Account Suspension Enforcement Screen
+  if (profile?.isSuspended) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white rounded-3xl shadow-2xl p-8 text-center border-t-4 border-t-red-600 border border-slate-100 space-y-6">
+          <div className="w-16 h-16 bg-red-50 text-red-600 border border-red-150 rounded-2xl flex items-center justify-center mx-auto shadow-sm">
+            <ShieldAlert className="w-8 h-8" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-black text-slate-900">Account temporaneamente Sospeso</h1>
+            <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+              Gentile utente, l'accesso a questa famiglia è stato disattivato dall'amministrazione per violazione dei termini di vendita, sospetto phishing o insoluti nei pagamenti Stripe.
+            </p>
+          </div>
+          
+          <div className="p-3 bg-slate-50 rounded-xl text-[11px] font-medium text-slate-500 flex items-center justify-center gap-2">
+            <Lock className="w-4 h-4 text-slate-400 shrink-0" />
+            <span>Contattare: info.mondogadgets@gmail.com</span>
+          </div>
+
+          <button 
+            onClick={handleLogout}
+            className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl transition-all cursor-pointer active:scale-97"
+          >
+            Scollegati
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-50 flex flex-col">
+      {/* Header */}
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
+        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="bg-indigo-600 p-2 rounded-lg">
+              <Utensils className="text-white w-6 h-6" />
+            </div>
+            <h1 className="text-xl font-bold bg-gradient-to-r from-indigo-600 to-violet-600 bg-clip-text text-transparent">
+              Che cucino oggi?
+            </h1>
+          </div>
+          <div className="flex items-center gap-4">
+            {/* Pulsante per l'Assistente Vocale (Con restrizione licenza Pro) */}
+            <button
+              onClick={() => {
+                if (profile?.plan !== 'pro') {
+                  setShowPremiumGate('voice');
+                } else {
+                  window.dispatchEvent(new CustomEvent('toggle-voice-assistant'));
+                }
+              }}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-full text-xs font-bold transition-all shadow-sm active:scale-95 border cursor-pointer ${
+                voiceIsListening 
+                  ? 'bg-red-500 hover:bg-red-600 text-white border-red-400 ring-2 ring-red-100' 
+                  : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-100 hover:border-indigo-200'
+              }`}
+              title={voiceIsListening ? "Interrompi ascolto" : "Attiva Assistente Vocale"}
+            >
+              {voiceIsListening ? (
+                <>
+                  <MicOff className="w-3.5 h-3.5 animate-pulse" />
+                  <span className="flex items-center gap-1">
+                    <span className="hidden sm:inline">In ascolto...</span>
+                    <span className="flex gap-0.5 ml-1">
+                      <span className="w-1 h-3 bg-white rounded-full animate-pulse"></span>
+                      <span className="w-1 h-3 bg-white rounded-full animate-pulse delay-100"></span>
+                      <span className="w-1 h-3 bg-white rounded-full animate-pulse delay-200"></span>
+                    </span>
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Mic className="w-3.5 h-3.5 text-indigo-600" />
+                  <span className="hidden sm:inline font-bold">Assistente Vocale IA</span>
+                </>
+              )}
+            </button>
+
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-slate-400 hidden md:inline">Benvenuto, {user.displayName?.split(' ')[0]}</span>
+              {profile?.plan && profile.plan !== 'free' && (
+                <span className={`hidden sm:inline-flex items-center gap-1 text-[9px] font-black uppercase px-2 py-0.5 rounded-full border ${
+                  profile.autoRenew !== false && profile.subscriptionStatus !== 'pending_renewal'
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-150'
+                    : 'bg-amber-50 text-amber-700 border-amber-150'
+                }`} title={profile.autoRenew !== false && profile.subscriptionStatus !== 'pending_renewal' ? 'Premium Attivo (Rinnovo automatico)' : 'In attesa di rinnovo (Rinnovo disattivato)'}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${
+                    profile.autoRenew !== false && profile.subscriptionStatus !== 'pending_renewal'
+                      ? 'bg-emerald-500 animate-pulse'
+                      : 'bg-amber-500'
+                  }`} />
+                  {profile.plan === 'pro' ? 'CHEF PRO' : 'SMART'}
+                </span>
+              )}
+            </div>
+            <button 
+              onClick={handleLogout}
+              className="p-2 text-slate-400 hover:text-red-500 transition-colors cursor-pointer"
+              title="Logout"
+            >
+              <LogOut className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="flex-1 max-w-7xl mx-auto w-full p-4 pb-24 md:pb-8 md:pl-24">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={activeTab}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.2 }}
+            className="h-full"
+          >
+            {activeTab === 'planner' && (
+              <MealPlanner 
+                userId={user.uid} 
+                onNavigateToShopping={() => setActiveTab('shopping')} 
+                onNavigateToFamily={() => setActiveTab('family')} 
+                onNavigateToPantry={() => setActiveTab('pantry')}
+              />
+            )}
+            {activeTab === 'vacation' && (
+              <VacationPlanner 
+                userId={user.uid} 
+                onNavigateToShopping={() => setActiveTab('shopping')} 
+              />
+            )}
+            {activeTab === 'offers' && (
+              profile?.plan === 'pro' ? (
+                <FlyerAnalysis userId={user.uid} profile={profile} />
+              ) : (
+                <div className="bg-white border rounded-3xl p-8 text-center space-y-4 py-16 max-w-xl mx-auto mt-8 border-slate-150 shadow-sm">
+                  <div className="w-16 h-16 bg-purple-50 text-purple-600 rounded-2xl flex items-center justify-center text-3xl mx-auto border border-purple-100">
+                    <Sparkles className="w-8 h-8 animate-pulse" />
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-slate-900 text-lg">Scansione Volantini con OCR</h3>
+                    <p className="text-xs text-slate-500 mt-2 max-w-sm mx-auto leading-relaxed">
+                      L'analisi intelligente dei volantini promozionali della spesa ti garantisce risparmi eccezionali. Questa funzionalità richiede il piano <strong>Chef IA & OCR</strong>.
+                    </p>
+                  </div>
+                  <button 
+                    onClick={() => setActiveTab('business')}
+                    className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm active:scale-97 cursor-pointer"
+                  >
+                    Vedi Piani di Monetizzazione
+                  </button>
+                </div>
+              )
+            )}
+            {activeTab === 'pantry' && (
+              <Pantry 
+                userId={user.uid} 
+                profile={profile} 
+                onNavigateToPlanner={() => setActiveTab('planner')}
+              />
+            )}
+            {activeTab === 'shopping' && (
+              <ShoppingList 
+                userId={user.uid} 
+                profile={profile} 
+                onNavigateToBusiness={() => setActiveTab('business')} 
+              />
+            )}
+            {activeTab === 'family' && (
+              <FamilySettings 
+                userId={user.uid} 
+                profile={profile}
+                onProfileUpdate={setProfile}
+                onNavigateToPantry={() => setActiveTab('pantry')}
+                onNavigateToPlanner={() => setActiveTab('planner')}
+              />
+            )}
+            {activeTab === 'recipes' && (
+              <RecipeList 
+                userId={user.uid} 
+                voiceSearchQuery={voiceSearchQuery} 
+                setVoiceSearchQuery={setVoiceSearchQuery} 
+              />
+            )}
+            {activeTab === 'guide' && <FoodPyramid />}
+            {activeTab === 'business' && (
+              <BusinessModel 
+                userId={user.uid} 
+                profile={profile} 
+                isAdmin={userIsAdmin} 
+                onProfileUpdate={setProfile}
+                hasMealPlan={hasMealPlan}
+                hasFamilyMember={hasFamilyMember}
+              />
+            )}
+            {activeTab === 'admin' && userIsAdmin && <AdminDashboard />}
+          </motion.div>
+        </AnimatePresence>
+      </main>
+
+      {/* Bottom Navigation (Mobile) */}
+      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-4 pt-2.5 pb-1 flex items-center gap-2 overflow-x-auto z-40 md:hidden [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] snap-x snap-mandatory">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id as Tab)}
+            className={`flex flex-col items-center gap-1 transition-colors min-w-[64px] shrink-0 pb-1 cursor-pointer snap-start ${
+              activeTab === tab.id ? 'text-indigo-600 font-bold' : 'text-slate-400'
+            }`}
+          >
+            <tab.icon className="w-5.5 h-5.5" />
+            <span className="text-[10px] font-medium">{tab.label}</span>
+          </button>
+        ))}
+      </nav>
+
+      {/* Sidebar Navigation (Desktop) */}
+      <nav className="hidden md:flex fixed left-0 top-16 bottom-0 w-20 bg-white border-r border-slate-200 flex-col items-center py-4 gap-4 overflow-y-auto z-20 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id as Tab)}
+            title={tab.label}
+            className={`p-3 rounded-xl transition-all shrink-0 cursor-pointer ${
+              activeTab === tab.id 
+                ? 'bg-indigo-50 text-indigo-600 shadow-sm' 
+                : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            <tab.icon className="w-6 h-6" />
+          </button>
+        ))}
+      </nav>
+
+      {/* Only Load voice assistant panel for premium PRO users */}
+      {profile?.plan === 'pro' && (
+        <VoiceAssistant 
+          userId={user.uid}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          voiceSearchQuery={voiceSearchQuery}
+          setVoiceSearchQuery={setVoiceSearchQuery}
+        />
+      )}
+
+      {/* Friendly upgrade gate modal popup for header Voice Assistant button */}
+      <AnimatePresence>
+        {showPremiumGate && (
+          <div className="fixed inset-0 z-55 flex items-center justify-center p-4 bg-slate-950/50 backdrop-blur-xs">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-3xl p-6 max-w-sm w-full border border-slate-200 text-center space-y-4"
+            >
+              <div className="w-14 h-14 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center text-xl mx-auto border border-indigo-150 animate-pulse">
+                <Sparkles size={24} />
+              </div>
+              <div>
+                <h4 className="font-extrabold text-slate-950 text-sm">Sblocca l'Assistente Vocale IA!</h4>
+                <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+                  Controlla i menu, parla a voce spontaneamente per inserire le uova esaurite nella lista e ricalcola le ricette con l'esclusivo Assistente Vocale del piano <strong>Chef IA & OCR</strong>.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => setShowPremiumGate(null)}
+                  className="w-1/3 py-2 border border-slate-200 text-xs font-semibold rounded-xl hover:bg-slate-50 transition-colors cursor-pointer text-slate-500"
+                >
+                  Indietro
+                </button>
+                <button 
+                  onClick={() => {
+                    setShowPremiumGate(null);
+                    setActiveTab('business');
+                  }}
+                  className="w-2/3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all active:scale-95 cursor-pointer text-center"
+                >
+                  Sblocca Ora
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <WelcomeTour 
+        user={user} 
+        profile={profile} 
+        onNavigateToFamily={() => setActiveTab('family')} 
+      />
+
+      <PWAInstallPrompt />
+    </div>
+  );
+}

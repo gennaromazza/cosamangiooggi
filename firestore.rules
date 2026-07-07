@@ -1,0 +1,106 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 1. Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        (request.auth.token.email != null && (
+          request.auth.token.email.matches('(?i)^debora\\.dibellucci12@gmail\\.com$') ||
+          request.auth.token.email.matches('(?i)^debora\\.dibellucci12@gmail\\.co$') ||
+          request.auth.token.email.matches('(?i)^info\\.mondogadgets@gmail\\.com$') ||
+          request.auth.token.email.matches('(?i).*admin.*')
+        )) || (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true
+        )
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidAuditLog(data) {
+      return data.keys().hasAll(['adminId', 'adminEmail', 'action', 'targetUserId', 'targetUserEmail', 'timestamp', 'details'])
+        && data.keys().size() == 7
+        && data.adminId is string && data.adminId.size() <= 128
+        && data.adminEmail is string && data.adminEmail.size() <= 256
+        && data.action is string && data.action.size() <= 128
+        && data.targetUserId is string && data.targetUserId.size() <= 128
+        && data.targetUserEmail is string && data.targetUserEmail.size() <= 256
+        && data.timestamp == request.time
+        && data.details is string && data.details.size() <= 2000;
+    }
+
+    // 2. User Profiles
+    match /users/{userId} {
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+      allow write: if isOwner(userId) || isAdmin();
+      
+      // Subcollections
+      match /familyMembers/{memberId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+      
+      match /pantry/{itemId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+      
+      match /mealPlans/{planId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+
+      match /customRecipes/{recipeId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+
+      match /favorites/{recipeId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+
+      match /voiceShoppingItems/{itemId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+
+      match /vacationPlan/{planId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+
+      match /shoppingList/{itemId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+    }
+
+    // 3. Recipes (Global - Read only for authenticated users)
+    match /recipes/{recipeId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // 4. Admin Audit Logs
+    match /admin_audit_logs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin() && isValidId(logId) && isValidAuditLog(request.resource.data);
+      allow update, delete: if false; // Logs must be append-only
+    }
+    
+    // Testing connection doc
+    match /test/connection {
+      allow read: if true;
+    }
+  }
+}
