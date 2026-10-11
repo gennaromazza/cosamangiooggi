@@ -669,3 +669,13 @@ test('link ai familiari: le risposte unite alla scheda restano coerenti con le p
   assert.deepEqual(member.dislikedMeals, ['meal-101']);
   assert.equal(fitsMember(INITIAL_RECIPES.find((r) => r.id === 'meal-4')!, member), false, 'allergia e dieta vegana arrivate dal link vengono rispettate');
 });
+
+test('pagamenti: il client Stripe si crea solo dopo aver controllato che la chiave sia quella segreta', () => {
+  const functions = readFileSync('functions/index.js', 'utf8');
+  assert.equal((functions.match(/new Stripe\(/g) || []).length, 1, 'ogni uso di Stripe passa da getStripe()');
+  assert.ok(functions.includes('isStripeSecretKey(key)'));
+  assert.ok(functions.includes("throw stripeFailure(err, 'apertura del pagamento')"), 'gli errori del pagamento sono leggibili');
+  const workflow = readFileSync('.github/workflows/deploy-firebase.yml', 'utf8');
+  assert.ok(workflow.includes('sk_live_*|sk_test_*|rk_live_*|rk_test_*'), 'il deploy rifiuta chiavi che non sono segrete');
+  assert.ok(workflow.includes('whsec_*'));
+});

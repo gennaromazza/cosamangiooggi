@@ -5,6 +5,7 @@ const { getAuth } = require('firebase-admin/auth');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const Stripe = require('stripe');
 const invites = require('./invites');
+const { isStripeSecretKey, describeStripeKey } = require('./config-checks');
 const { GoogleGenAI, Type } = require('@google/genai');
 
 const REGION = 'europe-west1';
@@ -36,6 +37,24 @@ const requireAuth = (request) => {
 };
 
 const userRef = (uid) => db.collection('users').doc(uid);
+
+// Cliente Stripe: se la chiave non è quella segreta (per esempio è stata incollata la chiave pubblicabile pk_...)
+// lo si dice chiaramente, invece di far fallire ogni pagamento con un errore generico.
+function getStripe() {
+  const key = STRIPE_SECRET_KEY.value();
+  if (!isStripeSecretKey(key)) {
+    console.error(`STRIPE_SECRET_KEY non valida: ${describeStripeKey(key)}`);
+    throw new HttpsError('failed-precondition', 'I pagamenti non sono configurati correttamente: la chiave di Stripe non è quella segreta. Contatta l\'assistenza.');
+  }
+  return new Stripe(key.trim());
+}
+
+// Errori di Stripe: si registra il motivo vero e all'utente si mostra un messaggio comprensibile
+function stripeFailure(err, what) {
+  if (err instanceof HttpsError) return err;
+  console.error(`Stripe: ${what} non riuscito`, err && err.type, err && err.code, err && err.message);
+  return new HttpsError('internal', 'Il pagamento non è disponibile in questo momento. Riprova tra poco.');
+}
 
 // ---------------------------------------------------------------------------
 // Stripe: abbonamenti
@@ -71,8 +90,13 @@ exports.createCheckoutSession = onCall(
       pro: { month: PRICE_PRO.value(), year: PRICE_PRO_YEAR.value() },
     };
 
-    const stripe = new Stripe(STRIPE_SECRET_KEY.value());
-    const customer = await getOrCreateCustomer(stripe, uid, request.auth.token.email);
+    const stripe = getStripe();
+    let customer;
+    try {
+      customer = await getOrCreateCustomer(stripe, uid, request.auth.token.email);
+    } catch (err) {
+      throw stripeFailure(err, 'creazione del cliente');
+    }
     const userSnap = await userRef(uid).get();
     // La prova gratuita spetta una sola volta per cliente
     const alreadyHadSubscription = userSnap.exists && userSnap.data().hadSubscription === true;
@@ -80,7 +104,9 @@ exports.createCheckoutSession = onCall(
     const base = APP_URL.value().replace(/\/$/, '');
     // Nell'app Android il pagamento si apre nel browser: al ritorno basta una pagina che dica di tornare all'app
     const native = !!(request.data && request.data.native);
-    const session = await stripe.checkout.sessions.create({
+    let session;
+    try {
+      session = await stripe.checkout.sessions.create({
       mode: 'subscription',
       customer,
       client_reference_id: uid,
@@ -93,7 +119,10 @@ exports.createCheckoutSession = onCall(
       locale: 'it',
       success_url: native ? `${base}/pagamento.html?esito=ok` : `${base}/?checkout=success`,
       cancel_url: native ? `${base}/pagamento.html?esito=annullato` : `${base}/?checkout=cancel`,
-    });
+      });
+    } catch (err) {
+      throw stripeFailure(err, 'apertura del pagamento');
+    }
     return { url: session.url };
   }
 );
@@ -106,7 +135,7 @@ exports.createPortalSession = onCall(
     const snap = await userRef(uid).get();
     const customer = snap.exists ? snap.data().stripeCustomerId : null;
     if (!customer) throw new HttpsError('failed-precondition', 'Nessun abbonamento da gestire.');
-    const stripe = new Stripe(STRIPE_SECRET_KEY.value());
+    const stripe = getStripe();
     const native = !!(request.data && request.data.native);
     try {
       const session = await stripe.billingPortal.sessions.create({
@@ -117,7 +146,7 @@ exports.createPortalSession = onCall(
     } catch (err) {
       // Cliente di prova che in produzione non esiste: non c'è nessun abbonamento da gestire
       if (err && err.code === 'resource_missing') throw new HttpsError('failed-precondition', 'Nessun abbonamento da gestire.');
-      throw err;
+      throw stripeFailure(err, 'apertura del portale');
     }
   }
 );
@@ -187,7 +216,7 @@ async function recordInvoice(invoice) {
 exports.stripeWebhook = onRequest(
   { region: REGION, secrets: [STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET] },
   async (req, res) => {
-    const stripe = new Stripe(STRIPE_SECRET_KEY.value());
+    const stripe = getStripe();
     let event;
     try {
       event = stripe.webhooks.constructEvent(req.rawBody, req.headers['stripe-signature'], STRIPE_WEBHOOK_SECRET.value());
@@ -364,7 +393,7 @@ async function eraseAccount(targetUid, actor) {
 
   // Prima l'abbonamento: se non si riesce a chiudere, non si elimina nulla (nessun addebito orfano)
   if (data.stripeSubscriptionId) {
-    const stripe = new Stripe(STRIPE_SECRET_KEY.value());
+    const stripe = getStripe();
     try {
       await stripe.subscriptions.cancel(data.stripeSubscriptionId);
     } catch (err) {
