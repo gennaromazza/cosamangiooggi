@@ -38,4 +38,5 @@ async function testConnection() {
     }
   }
 }
-testConnection();
+// Solo nel browser: nei test non c'è nessuna connessione da controllare (e il processo resterebbe in attesa)
+if (typeof window !== 'undefined') testConnection();

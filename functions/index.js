@@ -4,6 +4,7 @@ const { initializeApp } = require('firebase-admin/app');
 const { getAuth } = require('firebase-admin/auth');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const Stripe = require('stripe');
+const invites = require('./invites');
 const { GoogleGenAI, Type } = require('@google/genai');
 
 const REGION = 'europe-west1';
@@ -24,6 +25,7 @@ const PRICE_SMART_YEAR = defineString('PRICE_SMART_YEAR');
 const PRICE_PRO_YEAR = defineString('PRICE_PRO_YEAR');
 const ADMIN_EMAILS = defineString('ADMIN_EMAILS', { default: '' });
 const APP_URL = defineString('APP_URL');
+const SITE_URL = defineString('SITE_URL', { default: 'https://che-cucino-oggi.web.app' });
 
 initializeApp();
 const db = getFirestore(FIRESTORE_DB_ID);
@@ -222,6 +224,124 @@ exports.stripeWebhook = onRequest(
   }
 );
 
+
+// ---------------------------------------------------------------------------
+// Inviti ai familiari: un link riservato per ogni persona, per compilare da sola allergie e gusti
+// ---------------------------------------------------------------------------
+
+const memberRef = (uid, memberId) => userRef(uid).collection('familyMembers').doc(memberId);
+
+// Chi ha l'abbonamento crea (o rinnova) il link per una persona a tavola
+exports.createMemberInvite = onCall({ region: REGION }, async (request) => {
+  const uid = requireAuth(request);
+  const memberId = request.data && request.data.memberId;
+  if (typeof memberId !== 'string' || !memberId) throw new HttpsError('invalid-argument', 'Persona non valida.');
+  const member = await memberRef(uid, memberId).get();
+  if (!member.exists) throw new HttpsError('not-found', 'Persona non trovata.');
+  if (member.data().isSelf) throw new HttpsError('failed-precondition', 'Questa persona sei tu: compila direttamente le sue schede.');
+
+  // Un solo link attivo per persona: il precedente smette di funzionare
+  const previous = await db.collection('invites').where('uid', '==', uid).where('memberId', '==', memberId).where('revoked', '==', false).get();
+  await Promise.all(previous.docs.map((d) => d.ref.update({ revoked: true })));
+
+  const token = invites.newToken();
+  const now = Date.now();
+  const expiresAt = now + invites.INVITE_DAYS * 24 * 60 * 60 * 1000;
+  const profile = await userRef(uid).get();
+  await db.collection('invites').doc(invites.hashToken(token)).set({
+    uid,
+    memberId,
+    memberName: String(member.data().name || '').slice(0, 60),
+    // 'Nuova Famiglia spesa' è solo il segnaposto del profilo, non un nome
+    ownerName: (() => { const n = String((profile.exists && profile.data().name) || ''); return n === 'Nuova Famiglia spesa' ? '' : n.slice(0, 60); })(),
+    createdAt: now,
+    expiresAt,
+    revoked: false,
+    submissions: 0,
+  });
+  await memberRef(uid, memberId).update({ inviteStatus: 'sent', inviteExpiresAt: expiresAt, inviteAnsweredAt: FieldValue.delete() });
+  return { url: `${SITE_URL.value().replace(/\/$/, '')}/invito#${token}`, expiresAt };
+});
+
+// Annulla il link: smette di funzionare subito
+exports.revokeMemberInvite = onCall({ region: REGION }, async (request) => {
+  const uid = requireAuth(request);
+  const memberId = request.data && request.data.memberId;
+  if (typeof memberId !== 'string' || !memberId) throw new HttpsError('invalid-argument', 'Persona non valida.');
+  const active = await db.collection('invites').where('uid', '==', uid).where('memberId', '==', memberId).where('revoked', '==', false).get();
+  await Promise.all(active.docs.map((d) => d.ref.update({ revoked: true })));
+  const member = await memberRef(uid, memberId).get();
+  if (member.exists && member.data().inviteStatus === 'sent') await memberRef(uid, memberId).update({ inviteStatus: 'revoked' });
+  return { revoked: active.size };
+});
+
+const readToken = (req) => {
+  const fromBody = req.body && typeof req.body === 'object' ? req.body.t : undefined;
+  return fromBody || req.query.t;
+};
+const reply = (res, status, body) => {
+  res.set('Cache-Control', 'no-store');
+  res.status(status).json(body);
+};
+const unusable = { missing: 404, revoked: 410, expired: 410, full: 429 };
+const unusableText = {
+  missing: 'Questo link non è valido. Chiedi un nuovo invito.',
+  revoked: 'Questo link è stato annullato. Chiedi un nuovo invito.',
+  expired: 'Questo link è scaduto. Chiedi un nuovo invito.',
+  full: 'Hai già inviato molte risposte con questo link.',
+};
+
+// Pagina pubblica dell'invito: dice per chi è e quali piatti proporre (nessun dato oltre al nome)
+exports.getMemberInvite = onRequest({ region: REGION, cors: true }, async (req, res) => {
+  const token = readToken(req);
+  if (!invites.looksLikeToken(token)) return reply(res, 404, { ok: false, error: unusableText.missing });
+  const snap = await db.collection('invites').doc(invites.hashToken(token)).get();
+  const invite = snap.exists ? snap.data() : null;
+  const state = invites.inviteState(invite);
+  if (state !== 'ok') return reply(res, unusable[state], { ok: false, error: unusableText[state] });
+  return reply(res, 200, {
+    ok: true,
+    memberName: invite.memberName,
+    ownerName: invite.ownerName,
+    dishes: invites.INVITE_DISHES,
+  });
+});
+
+// Riceve le risposte della persona e le unisce alla sua scheda
+exports.submitMemberInvite = onRequest({ region: REGION, cors: true }, async (req, res) => {
+  if (req.method !== 'POST') return reply(res, 405, { ok: false, error: 'Metodo non consentito.' });
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const token = body.t;
+  if (!invites.looksLikeToken(token)) return reply(res, 404, { ok: false, error: unusableText.missing });
+  const checked = invites.sanitizeAnswers(body);
+  if (!checked.ok) return reply(res, 400, { ok: false, error: checked.error });
+
+  const inviteRef = db.collection('invites').doc(invites.hashToken(token));
+  try {
+    const outcome = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(inviteRef);
+      const invite = snap.exists ? snap.data() : null;
+      const state = invites.inviteState(invite);
+      if (state !== 'ok') return { status: unusable[state], error: unusableText[state] };
+      const ref = memberRef(invite.uid, invite.memberId);
+      const member = await tx.get(ref);
+      if (!member.exists) {
+        tx.update(inviteRef, { revoked: true });
+        return { status: 410, error: unusableText.revoked };
+      }
+      const merged = invites.mergeAnswers(member.data(), checked.answers);
+      tx.update(ref, { ...merged, inviteStatus: 'answered', inviteAnsweredAt: Date.now() });
+      tx.update(inviteRef, { submissions: (invite.submissions || 0) + 1, answeredAt: Date.now() });
+      return { status: 200 };
+    });
+    if (outcome.status !== 200) return reply(res, outcome.status, { ok: false, error: outcome.error });
+    return reply(res, 200, { ok: true });
+  } catch (err) {
+    console.error('Errore invito', err);
+    return reply(res, 500, { ok: false, error: 'Non è stato possibile salvare. Riprova tra poco.' });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Amministratori: decisi da elenco email (parametro ADMIN_EMAILS), non dal client
 // ---------------------------------------------------------------------------
@@ -254,6 +374,10 @@ async function eraseAccount(targetUid, actor) {
       }
     }
   }
+
+  // Gli inviti ai familiari contengono solo l'impronta del link e il nome della persona: spariscono con l'account
+  const owned = await db.collection('invites').where('uid', '==', targetUid).get();
+  await Promise.all(owned.docs.map((d) => d.ref.delete()));
 
   await db.recursiveDelete(userRef(targetUid));
   try {

@@ -12,6 +12,8 @@ import { INITIAL_RECIPES } from '../data/recipes';
 import IngredientPicker from './IngredientPicker';
 import QuickDishModal from './QuickDishModal';
 import TastingGame from './TastingGame';
+import MemberInvite from './MemberInvite';
+import { inviteLabel } from '../lib/inviteStatus';
 import { hasPersonalRules } from '../lib/memberAlternatives';
 import { applyAccountName } from '../lib/selfMember';
 
@@ -429,6 +431,7 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
   // Le schede di una persona (Non mangia / Ama / Piatti / Dieta): usate qui e nella guida iniziale
   const renderMemberPanel = (member: FamilyMember) => (
                     <div className="px-4 pb-5 space-y-4 bg-slate-50/60">
+      <MemberInvite member={member} userId={userId} />
                       <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-2xl" role="group" aria-label="Gusti di questa persona">
                         {([
                           ['dislike', 'Non mangia'],
@@ -690,6 +693,9 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
                         <span className="block text-sm text-slate-500">
                           {likes + dislikes === 0 ? 'Nessun gusto indicato' : `${likes} piace · ${dislikes} da evitare`}
                         </span>
+                        {inviteLabel(member) && (
+                          <span className="block text-sm text-slate-500">{inviteLabel(member)}</span>
+                        )}
                         {hasPersonalRules(member) && (
                           <span className="block text-sm font-semibold text-indigo-700">
                             {[

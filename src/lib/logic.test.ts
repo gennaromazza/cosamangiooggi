@@ -21,6 +21,8 @@ import { extractVoiceArgument } from './voiceText';
 import { INITIAL_RECIPES } from '../data/recipes';
 import type { PantryItem, Recipe } from '../types';
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { inviteLabel } from './inviteStatus';
 import { isNewer } from './updateCheck';
 import { fillPlaceholders } from '../../scripts/landing';
 import { PAGES, pageText, renderPage } from '../../scripts/landing-pages';
@@ -588,4 +590,82 @@ test('ricostruzione: un pasto cambiato non resta segnato come "tutti insieme"', 
   const out = rebuildAffectedMeals({ plan, issues, recipes: tutte, pool: tutte.filter((r) => (r.tags || []).includes('gluten-free')), members: [], random: () => 0 });
   assert.equal(out.plan.days.Monday.lunchTogether, undefined);
   assert.deepEqual(out.plan.days.Monday.dinnerTogether, { mode: 'all', fits: 2, total: 2 }, 'il pasto non toccato resta com\'era');
+});
+
+
+// ---- Link ai familiari ---------------------------------------------------------------
+
+const invitesLib = createRequire(import.meta.url)('../../functions/invites.js') as {
+  INVITE_DISHES: { id: string; title: string; ingredients: string[] }[];
+  mergeAnswers: (a: unknown, b: unknown) => unknown;
+};
+
+test('link ai familiari: i piatti proposti sono ricette vere dell\'app, con lo stesso titolo', () => {
+  const byId = new Map(INITIAL_RECIPES.map((r) => [r.id, r]));
+  for (const dish of invitesLib.INVITE_DISHES) {
+    const recipe = byId.get(dish.id);
+    assert.ok(recipe, `piatto dell'invito senza ricetta: ${dish.id}`);
+    assert.equal(recipe!.title, dish.title, `titolo diverso per ${dish.id}`);
+  }
+});
+
+test('link ai familiari: la pagina pubblica è riservata, chiede il consenso e parla con le funzioni giuste', () => {
+  const page = readFileSync('landing/invito.html', 'utf8');
+  assert.ok(page.includes('name="robots" content="noindex, nofollow"'), 'la pagina non deve finire su Google');
+  assert.ok(page.includes('location.hash'), 'il codice sta dopo il # (non finisce nei registri dei server)');
+  assert.ok(!page.includes('location.search'), 'il codice non va letto dall\'indirizzo normale');
+  assert.ok(page.includes('type="checkbox" id="consent"') && page.includes('disabled'), 'serve il consenso prima di inviare');
+  assert.ok(page.includes('allergie e intolleranze'), 'il consenso nomina le allergie');
+  assert.ok(page.includes('europe-west1-gen-lang-client-0532460534.cloudfunctions.net'));
+  const functions = readFileSync('functions/index.js', 'utf8');
+  for (const name of ['getMemberInvite', 'submitMemberInvite']) {
+    assert.ok(page.includes(`'${name}'`), `la pagina non chiama ${name}`);
+    assert.ok(functions.includes(`exports.${name} = onRequest`), `funzione mancante: ${name}`);
+  }
+  // stesse allergie dell'app
+  const appAllergens = /const ALLERGEN_OPTIONS = \[([^\]]+)\]/.exec(readFileSync('src/components/FamilySettings.tsx', 'utf8'))![1];
+  const pageAllergens = /var ALLERGENS = \[([^\]]+)\]/.exec(page)![1];
+  assert.equal(pageAllergens.replace(/\s/g, ''), appAllergens.replace(/\s/g, ''), 'le allergie della pagina devono essere quelle dell\'app');
+  // il token non si mette mai nel nome di un file né si stampa
+  assert.ok(!/console\.log\(.*token/.test(page));
+});
+
+test('link ai familiari: non indicizzato, nessun accesso diretto al database, funzioni protette', () => {
+  assert.ok(readFileSync('landing/robots.txt', 'utf8').includes('Disallow: /invito'));
+  assert.ok(!readFileSync('landing/sitemap.xml', 'utf8').includes('invito'));
+  const hosting = JSON.parse(readFileSync('firebase.landing.json', 'utf8')).hosting.headers as { source: string; headers: { key: string; value: string }[] }[];
+  const invito = hosting.find((h) => h.source === '/invito');
+  assert.ok(invito, 'intestazioni mancanti per /invito');
+  assert.ok(invito!.headers.some((h) => h.key === 'Cache-Control' && h.value === 'no-store'));
+  assert.ok(invito!.headers.some((h) => h.key === 'Referrer-Policy' && h.value === 'no-referrer'));
+  const rules = readFileSync('firestore.rules', 'utf8');
+  assert.ok(rules.includes('match /{document=**} {\n      allow read, write: if false;'), 'serve il blocco di default');
+  assert.ok(!rules.includes('/invites'), 'gli inviti si toccano solo dal server');
+  const functions = readFileSync('functions/index.js', 'utf8');
+  assert.ok(functions.includes("exports.createMemberInvite = onCall") && functions.includes("exports.revokeMemberInvite = onCall"));
+  assert.ok(/createMemberInvite[\s\S]{0,200}requireAuth/.test(functions), 'creare un invito richiede l\'accesso');
+  assert.ok(functions.includes("db.collection('invites').where('uid', '==', targetUid)"), 'eliminando un account spariscono anche gli inviti');
+  assert.ok(readFileSync('landing/privacy.html', 'utf8').includes('Inviti ai familiari'), 'l\'informativa spiega gli inviti');
+});
+
+test('link ai familiari: la scheda mostra lo stato dell\'invito', () => {
+  const now = new Date('2026-10-12T10:00:00Z').getTime();
+  const base = persona('luca');
+  assert.equal(inviteLabel(base, now), null);
+  assert.match(inviteLabel({ ...base, inviteStatus: 'sent', inviteExpiresAt: now + 86_400_000 }, now)!, /^Link inviato, valido fino al /);
+  assert.equal(inviteLabel({ ...base, inviteStatus: 'sent', inviteExpiresAt: now - 1 }, now), 'Il link è scaduto');
+  assert.match(inviteLabel({ ...base, inviteStatus: 'answered', inviteAnsweredAt: now }, now)!, /^Ha risposto il /);
+  assert.equal(inviteLabel({ ...base, inviteStatus: 'revoked' }, now), 'Link annullato');
+});
+
+test('link ai familiari: le risposte unite alla scheda restano coerenti con le preferenze dell\'app', () => {
+  // la scheda dopo l'unione deve essere usabile dalle altre funzioni: liste, nessun doppione, nessun conflitto
+  const merged = invitesLib.mergeAnswers(
+    { likedMeals: ['meal-101'], dislikedMeals: [], allergies: [] },
+    { allergies: ['Arachidi'], dietaryRestrictions: ['vegan'], likedIngredients: [], dislikedIngredients: ['Melanzane'], likedMeals: [], dislikedMeals: ['meal-101'] },
+  ) as FamilyMember;
+  const member = persona('luca', merged);
+  assert.equal(member.likedMeals!.includes('meal-101'), false);
+  assert.deepEqual(member.dislikedMeals, ['meal-101']);
+  assert.equal(fitsMember(INITIAL_RECIPES.find((r) => r.id === 'meal-4')!, member), false, 'allergia e dieta vegana arrivate dal link vengono rispettate');
 });

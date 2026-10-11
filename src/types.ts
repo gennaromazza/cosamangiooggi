@@ -13,6 +13,10 @@ export interface FamilyMember {
   allergies?: string[];
   /** È la persona collegata all'account: il suo nome e quello dell'account restano uguali */
   isSelf?: boolean;
+  /** Invito per compilare da solo: lo scrive il server (il link, la scadenza, la risposta) */
+  inviteStatus?: 'sent' | 'answered' | 'revoked';
+  inviteExpiresAt?: number;
+  inviteAnsweredAt?: number;
 }
 
 export interface UserProfile {
