@@ -28,6 +28,7 @@ export interface UserProfile {
   createdAt?: string;
   aiInteractionsThisMonth?: number;
   aiUsage?: { month: string; flyerScans: number };
+  dishUsage?: { month: string; count: number };
   hadSubscription?: boolean;
   tempOTP?: string;
   tempOTPExpires?: string;

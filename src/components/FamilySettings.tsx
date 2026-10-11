@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { db, functions } from '../lib/firebase';
-import { limitsFor, planName } from '../lib/plans';
+import { limitsFor, planName, dishSuggestionsLeft, normalizePlan } from '../lib/plans';
 import { httpsCallable } from 'firebase/functions';
 import { Capacitor } from '@capacitor/core';
 import { Browser } from '@capacitor/browser';
@@ -747,6 +747,9 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
         <QuickDishModal
           initialTitle={mealSearch.trim()}
           offlineOnly={userId === 'demo-family-user' || userId.startsWith('local-')}
+          aiLeft={dishSuggestionsLeft(profile?.plan, profile?.dishUsage)}
+          isPro={normalizePlan(profile?.plan) === 'pro'}
+          onUpgrade={onNavigateToBusiness ? () => { setDishFor(null); onNavigateToBusiness(); } : undefined}
           onSave={(recipe) => saveQuickDish(dishFor, recipe)}
           onClose={() => setDishFor(null)}
         />

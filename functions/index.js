@@ -10,7 +10,9 @@ const REGION = 'europe-west1';
 // Tenere allineati a src/lib/plans.ts
 const TRIAL_DAYS = 7;
 const FLYER_SCANS_PER_MONTH = 30;
-const DISH_SUGGESTIONS_PER_MONTH = 20;
+// Tenere allineato a src/lib/plans.ts: 3 di prova per tutti, 50 con Chef IA
+const DISH_SUGGESTIONS_FREE = 3;
+const DISH_SUGGESTIONS_PRO = 50;
 const FIRESTORE_DB_ID = 'ai-studio-93a2a041-9b02-4ff7-b496-5f2ada58f953';
 
 const STRIPE_SECRET_KEY = defineSecret('STRIPE_SECRET_KEY');
@@ -322,15 +324,20 @@ async function reserveDishSuggestion(uid) {
   const month = new Date().toISOString().slice(0, 7);
   return db.runTransaction(async (tx) => {
     const snap = await tx.get(userRef(uid));
-    const usage = snap.exists ? snap.data().dishUsage : null;
+    const data = snap.exists ? snap.data() : {};
+    const cap = data.plan === 'pro' ? DISH_SUGGESTIONS_PRO : DISH_SUGGESTIONS_FREE;
+    const usage = data.dishUsage;
     const used = usage && usage.month === month ? usage.count || 0 : 0;
-    if (used >= DISH_SUGGESTIONS_PER_MONTH) {
+    if (used >= cap) {
       throw new HttpsError(
         'resource-exhausted',
-        `Hai usato tutti i ${DISH_SUGGESTIONS_PER_MONTH} riconoscimenti di questo mese: gli ingredienti puoi sempre scriverli a mano.`
+        cap === DISH_SUGGESTIONS_PRO
+          ? `Hai usato tutti i ${cap} riconoscimenti di questo mese.`
+          : `Hai usato i ${cap} riconoscimenti di prova di questo mese: con Chef IA ne hai ${DISH_SUGGESTIONS_PRO}.`
       );
     }
     tx.set(userRef(uid), { dishUsage: { month, count: used + 1 } }, { merge: true });
+    return cap - used - 1;
   });
 }
 
@@ -353,7 +360,7 @@ exports.suggestDish = onCall(
     const notes = String((request.data && request.data.notes) || '').trim().slice(0, 600);
     if (title.length < 2) throw new HttpsError('invalid-argument', 'Scrivi il nome del piatto.');
 
-    await reserveDishSuggestion(uid);
+    const remaining = await reserveDishSuggestion(uid);
     try {
       const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY.value() });
       const response = await ai.models.generateContent({
@@ -405,6 +412,7 @@ exports.suggestDish = onCall(
         difficulty: ['easy', 'medium', 'hard'].includes(out.difficulty) ? out.difficulty : 'easy',
         timeMin: Number.isFinite(out.timeMin) ? Math.min(Math.max(Math.round(out.timeMin), 5), 240) : 30,
         steps: (out.steps || []).filter((x) => typeof x === 'string' && x.trim()).slice(0, 8),
+        remaining,
       };
     } catch (err) {
       await refundDishSuggestion(uid).catch(() => {});

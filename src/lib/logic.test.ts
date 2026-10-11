@@ -16,7 +16,7 @@ import { hitsExclusion } from './dietFilters';
 import { extractVoiceArgument } from './voiceText';
 import { INITIAL_RECIPES } from '../data/recipes';
 import type { PantryItem, Recipe } from '../types';
-import { limitsFor, normalizePlan, planName, PRICES, yearlySavingPercent, PLAN_LIMITS } from './plans';
+import { dishSuggestionsLeft, limitsFor, normalizePlan, planName, PRICES, yearlySavingPercent, PLAN_LIMITS } from './plans';
 
 const item = (id: string, name: string, quantity: number, unit: string): PantryItem =>
   ({ id, name, quantity, unit, category: 'Altro' } as PantryItem);
@@ -229,4 +229,14 @@ test('piatto personale: legge quantità e unità scritte a parole', () => {
     list.map((i) => [i.name, i.amount, i.unit]),
     [['Pasta', 200, 'g'], ['Uova', 2, 'pz'], ['Olio', 1, 'cucchiai'], ['Guanciale', 100, 'g'], ['Pecorino', 100, 'g']],
   );
+});
+
+test('riconoscimenti IA dei piatti: 3 di prova, 50 con Chef IA, il contatore riparte ogni mese', () => {
+  const month = new Date().toISOString().slice(0, 7);
+  assert.equal(dishSuggestionsLeft('free'), 3);
+  assert.equal(dishSuggestionsLeft('smart'), 3);
+  assert.equal(dishSuggestionsLeft('pro'), 50);
+  assert.equal(dishSuggestionsLeft('free', { month, count: 2 }), 1);
+  assert.equal(dishSuggestionsLeft('free', { month, count: 9 }), 0);
+  assert.equal(dishSuggestionsLeft('pro', { month: '2020-01', count: 50 }), 50);
 });

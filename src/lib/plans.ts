@@ -16,14 +16,16 @@ export interface PlanLimits {
   exportList: boolean;
   vacationPlanner: boolean;
   flyerScansPerMonth: number;
+  /** Riconoscimenti IA degli ingredienti di un piatto di famiglia (al mese) */
+  dishSuggestionsPerMonth: number;
   voiceAssistant: boolean;
 }
 
 export const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
-  free: { maxMembers: 4, maxPantryItems: 20, exportList: false, vacationPlanner: false, flyerScansPerMonth: 0, voiceAssistant: false },
-  smart: { maxMembers: Infinity, maxPantryItems: Infinity, exportList: true, vacationPlanner: true, flyerScansPerMonth: 0, voiceAssistant: false },
-  // Tetto mensile sulle scansioni: ogni scansione ha un costo reale (Gemini). Tenere allineato a functions/index.js
-  pro: { maxMembers: Infinity, maxPantryItems: Infinity, exportList: true, vacationPlanner: true, flyerScansPerMonth: 30, voiceAssistant: true },
+  free: { maxMembers: 4, maxPantryItems: 20, exportList: false, vacationPlanner: false, flyerScansPerMonth: 0, dishSuggestionsPerMonth: 3, voiceAssistant: false },
+  smart: { maxMembers: Infinity, maxPantryItems: Infinity, exportList: true, vacationPlanner: true, flyerScansPerMonth: 0, dishSuggestionsPerMonth: 3, voiceAssistant: false },
+  // Tetti mensili: ogni richiesta all'IA ha un costo reale (Gemini). Tenere allineati a functions/index.js (3 di prova per tutti, 50 con Chef IA)
+  pro: { maxMembers: Infinity, maxPantryItems: Infinity, exportList: true, vacationPlanner: true, flyerScansPerMonth: 30, dishSuggestionsPerMonth: 50, voiceAssistant: true },
 };
 
 export const PLAN_NAMES: Record<PlanId, string> = { free: 'Gratis', smart: 'Famiglia', pro: 'Chef IA' };
@@ -53,4 +55,11 @@ export function formatPrice(value: number): string {
 export function yearlySavingPercent(plan: 'smart' | 'pro'): number {
   const yearlyIfMonthly = PRICES[plan].month * 12;
   return Math.round((1 - PRICES[plan].year / yearlyIfMonthly) * 100);
+}
+
+/** Quanti riconoscimenti IA restano questo mese (contatore scritto solo dal server). */
+export function dishSuggestionsLeft(plan: string | null | undefined, usage?: { month: string; count: number } | null): number {
+  const month = new Date().toISOString().slice(0, 7);
+  const used = usage && usage.month === month ? usage.count || 0 : 0;
+  return Math.max(0, limitsFor(plan).dishSuggestionsPerMonth - used);
 }

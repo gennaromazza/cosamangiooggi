@@ -9,6 +9,11 @@ interface Props {
   initialTitle?: string;
   /** Account senza accesso (demo/locale): niente riconoscimento con l'IA */
   offlineOnly?: boolean;
+  /** Riconoscimenti IA rimasti questo mese (null se non si sa) */
+  aiLeft?: number | null;
+  /** Se il piano è già Chef IA */
+  isPro?: boolean;
+  onUpgrade?: () => void;
   onSave: (recipe: Omit<Recipe, 'id'>) => Promise<void> | void;
   onClose: () => void;
 }
@@ -28,10 +33,12 @@ interface Suggestion {
   difficulty: Recipe['difficulty'];
   timeMin: number;
   steps: string[];
+  remaining?: number;
 }
 
 /** Aggiunta rapida di un piatto di famiglia: nome, ingredienti riconosciuti in automatico, controllo finale. */
-export default function QuickDishModal({ initialTitle = '', offlineOnly = false, onSave, onClose }: Props) {
+export default function QuickDishModal({ initialTitle = '', offlineOnly = false, aiLeft = null, isPro = false, onUpgrade, onSave, onClose }: Props) {
+  const [left, setLeft] = useState<number | null>(aiLeft);
   const [title, setTitle] = useState(initialTitle);
   const [notes, setNotes] = useState('');
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
@@ -52,18 +59,19 @@ export default function QuickDishModal({ initialTitle = '', offlineOnly = false,
     }
     setBusy(true);
     try {
-      if (!offlineOnly) {
+      if (!offlineOnly && left !== 0) {
         const result = await httpsCallable<{ title: string; notes: string }, Suggestion>(functions, 'suggestDish')({
           title: title.trim(),
           notes: notes.trim(),
         });
+        if (typeof result.data.remaining === 'number') setLeft(result.data.remaining);
         setIngredients(result.data.ingredients);
         setCategory(result.data.category);
         setExtra({ difficulty: result.data.difficulty, timeMin: result.data.timeMin, steps: result.data.steps });
         setMessage({ ok: true, text: 'Ho riconosciuto gli ingredienti: controlla che siano giusti e correggi se serve.' });
         return;
       }
-      throw new Error('offline');
+      throw Object.assign(new Error('Riconoscimenti IA finiti'), { code: left === 0 ? 'functions/resource-exhausted' : undefined });
     } catch (error: any) {
       // Senza IA (account senza accesso, tetto raggiunto, rete assente) si legge quello che hai scritto
       const parsed = parseIngredientText(notes);
@@ -73,7 +81,7 @@ export default function QuickDishModal({ initialTitle = '', offlineOnly = false,
           ok: true,
           text:
             error?.code === 'functions/resource-exhausted'
-              ? `${error.message} Ho letto gli ingredienti che hai scritto: controllali.`
+              ? `${left === 0 && !isPro ? 'Hai finito i riconoscimenti IA di prova di questo mese.' : error.message} Ho letto gli ingredienti che hai scritto: controllali.`
               : 'Ho letto gli ingredienti che hai scritto: controllali e correggi quantità e unità.',
         });
       } else {
@@ -167,6 +175,22 @@ export default function QuickDishModal({ initialTitle = '', offlineOnly = false,
           >
             <Sparkles className="w-5 h-5" /> {busy ? 'Riconosco gli ingredienti…' : ingredients.length > 0 ? 'Riconosci di nuovo' : 'Riconosci gli ingredienti'}
           </button>
+
+          {!offlineOnly && left !== null && (
+            <p className="text-sm text-slate-500 -mt-2 text-center">
+              {left > 0
+                ? `Riconoscimenti IA rimasti questo mese: ${left}${isPro ? '' : ' (prova)'}`
+                : 'Riconoscimenti IA finiti per questo mese: puoi scrivere gli ingredienti a mano.'}
+              {left === 0 && !isPro && onUpgrade && (
+                <>
+                  {' '}
+                  <button type="button" onClick={onUpgrade} className="font-bold text-indigo-700 underline underline-offset-2">
+                    Con Chef IA ne hai 50 al mese
+                  </button>
+                </>
+              )}
+            </p>
+          )}
 
           {message && (
             <p role="status" className={`rounded-xl px-4 py-3 text-sm font-semibold ${message.ok ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-900'}`}>
