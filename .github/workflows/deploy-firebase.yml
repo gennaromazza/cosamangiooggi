@@ -3,6 +3,10 @@ name: Deploy Firebase (sito, regole, funzioni)
 on:
   workflow_dispatch:
     inputs:
+      diagnose_stripe:
+        description: "Controlla la configurazione di Stripe (chiave, prezzi, portale, webhook) senza stampare segreti. Non pubblica niente"
+        type: boolean
+        default: false
       reset_test_billing:
         description: "Passaggio a Stripe reale: ripulisce i dati di abbonamento nati in prova (anteprima = non modifica niente). Non pubblica il sito"
         type: choice
@@ -22,6 +26,41 @@ env:
   PROJECT: gen-lang-client-0532460534
 
 jobs:
+  diagnose-stripe:
+    if: ${{ inputs.diagnose_stripe }}
+    runs-on: ubuntu-latest
+    env:
+      KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+      PRICE_SMART: ${{ vars.PRICE_SMART }}
+      PRICE_SMART_YEAR: ${{ vars.PRICE_SMART_YEAR }}
+      PRICE_PRO: ${{ vars.PRICE_PRO }}
+      PRICE_PRO_YEAR: ${{ vars.PRICE_PRO_YEAR }}
+      APP_URL: ${{ vars.APP_URL }}
+    steps:
+      - name: Riepilogo Stripe (nessun segreto stampato)
+        run: |
+          [ -n "$KEY" ] || { echo "::error::Manca il secret STRIPE_SECRET_KEY"; exit 1; }
+          api() { curl -s -u "$KEY:" "https://api.stripe.com/v1/$1"; }
+          MODE=TEST; case "$KEY" in sk_live_*|rk_live_*) MODE=LIVE;; esac
+          echo "== Chiave: modalità $MODE (tipo ${KEY:0:3}) =="
+          echo "== Account =="
+          api account | jq '{charges_enabled, details_submitted, country, disabled_reason: .requirements.disabled_reason, da_completare: (.requirements.currently_due // [] | length), error: .error.message}'
+          echo "== Prezzi (devono essere della stessa modalità della chiave) =="
+          for NAME in PRICE_SMART PRICE_SMART_YEAR PRICE_PRO PRICE_PRO_YEAR; do
+            ID="${!NAME}"
+            echo "$NAME → ${ID:0:12}…"
+            api "prices/$ID" | jq -c '{livemode, active, currency, unit_amount, intervallo: .recurring.interval, error: .error.message}'
+          done
+          echo "== Portale clienti =="
+          api "billing_portal/configurations?limit=5" | jq -c '{configurazioni: (.data | length), attive: [.data[] | select(.active) | {predefinita: .is_default, livemode}], error: .error.message}'
+          echo "== Webhook =="
+          api "webhook_endpoints?limit=10" | jq -c '[.data[] | {url, status, livemode, eventi: (.enabled_events | length)}]'
+          echo "== Prova di pagamento (la sessione si chiude subito, non addebita nulla) =="
+          R=$(curl -s -u "$KEY:" https://api.stripe.com/v1/checkout/sessions -d mode=subscription -d "line_items[0][price]=$PRICE_SMART" -d "line_items[0][quantity]=1" -d "success_url=$APP_URL/?checkout=success" -d "cancel_url=$APP_URL/?checkout=cancel" -d "subscription_data[trial_period_days]=7" -d locale=it)
+          echo "$R" | jq -c '{creata: (.id != null), modalita: .mode, livemode, errore: .error.message, codice: .error.code, parametro: .error.param}'
+          SID=$(echo "$R" | jq -r '.id // empty')
+          [ -z "$SID" ] || curl -s -u "$KEY:" -X POST "https://api.stripe.com/v1/checkout/sessions/$SID/expire" -o /dev/null
+
   reset-billing:
     if: ${{ inputs.reset_test_billing == 'anteprima' || inputs.reset_test_billing == 'applica' }}
     runs-on: ubuntu-latest
@@ -41,7 +80,7 @@ jobs:
           rm -f "$RUNNER_TEMP/sa.json"
 
   deploy:
-    if: ${{ !(inputs.reset_test_billing == 'anteprima' || inputs.reset_test_billing == 'applica') }}
+    if: ${{ !(inputs.reset_test_billing == 'anteprima' || inputs.reset_test_billing == 'applica' || inputs.diagnose_stripe) }}
     runs-on: ubuntu-latest
     env:
       FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
