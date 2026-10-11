@@ -2,6 +2,12 @@ name: Deploy Firebase (sito, regole, funzioni)
 
 on:
   workflow_dispatch:
+    inputs:
+      reset_test_billing:
+        description: "Passaggio a Stripe reale: ripulisce i dati di abbonamento nati in prova (anteprima = non modifica niente). Non pubblica il sito"
+        type: choice
+        options: ['no', 'anteprima', 'applica']
+        default: 'no'
   push:
     branches: [main]
     paths:
@@ -16,7 +22,26 @@ env:
   PROJECT: gen-lang-client-0532460534
 
 jobs:
+  reset-billing:
+    if: ${{ inputs.reset_test_billing == 'anteprima' || inputs.reset_test_billing == 'applica' }}
+    runs-on: ubuntu-latest
+    env:
+      FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --prefix functions
+      - name: Ripulisci i dati di abbonamento di prova
+        run: |
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"
+          export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json"
+          if [ "${{ inputs.reset_test_billing }}" = "applica" ]; then node scripts/reset-test-billing.cjs --apply; else node scripts/reset-test-billing.cjs; fi
+          rm -f "$RUNNER_TEMP/sa.json"
+
   deploy:
+    if: ${{ !(inputs.reset_test_billing == 'anteprima' || inputs.reset_test_billing == 'applica') }}
     runs-on: ubuntu-latest
     env:
       FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
