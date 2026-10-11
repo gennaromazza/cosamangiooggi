@@ -59,6 +59,8 @@ export default function App() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [loginError, setLoginError] = useState<string | null>(null);
+  // Motivo tecnico dell'ultimo errore di accesso: serve a capire cosa non va (es. impronta non registrata)
+  const [loginDetail, setLoginDetail] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [voiceSearchQuery, setVoiceSearchQuery] = useState('');
   const [voiceIsListening, setVoiceIsListening] = useState(false);
@@ -252,6 +254,7 @@ export default function App() {
   const handleLogin = async () => {
     setIsLoggingIn(true);
     setLoginError(null);
+    setLoginDetail(null);
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
     
@@ -282,6 +285,8 @@ export default function App() {
         message = "Errore interno di Firebase. Verifica la connessione.";
       }
       setLoginError(message);
+      const detail = [error?.code, error?.message].filter(Boolean).join(' · ');
+      setLoginDetail(detail ? detail.slice(0, 220) : null);
     } finally {
       setIsLoggingIn(false);
     }
@@ -484,7 +489,12 @@ export default function App() {
           {loginError && (
             <div role="alert" className="mb-4 p-4 bg-amber-50 text-amber-900 rounded-2xl border border-amber-200 flex items-start gap-2.5">
               <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-              <p className="text-sm leading-relaxed text-amber-900">{loginError}</p>
+              <div className="min-w-0">
+                <p className="text-sm leading-relaxed text-amber-900">{loginError}</p>
+                {loginDetail && (
+                  <p className="mt-1 text-xs text-amber-800/80 break-words">Dettaglio: {loginDetail}</p>
+                )}
+              </div>
             </div>
           )}
 
@@ -581,6 +591,7 @@ export default function App() {
             <span>OMS</span>
             <span>Pantry</span>
           </div>
+          <p className="mt-5 text-center text-xs text-slate-500">Versione dell’app: {__APP_VERSION__}</p>
         </div>
       </div>
     );

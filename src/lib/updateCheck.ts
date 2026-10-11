@@ -12,6 +12,9 @@ export interface UpdateInfo {
   /** Numero della build disponibile sul sito */
   build: number;
   date: string | null;
+  /** Versione leggibile e indirizzo del file da scaricare (con la versione nel nome) */
+  version: string | null;
+  apkUrl: string;
 }
 
 /** Vero se la build sul sito è più recente di quella installata. */
@@ -49,7 +52,13 @@ export async function checkForUpdate(force = false): Promise<UpdateInfo | null> 
     const build = Number(data.number);
     if (!isNewer(build, __BUILD_NUMBER__)) return null;
     if (Number(read(DISMISSED_KEY)) === build) return null;
-    return { build, date: typeof data.date === 'string' ? data.date : null };
+    const file = typeof data.apk === 'string' && /^[\w.-]+\.apk$/.test(data.apk) ? data.apk : null;
+    return {
+      build,
+      date: typeof data.date === 'string' ? data.date : null,
+      version: typeof data.version === 'string' ? data.version : null,
+      apkUrl: file ? `${SITE_URL}/download/${file}` : APK_URL,
+    };
   } catch {
     return null; // senza rete si riprova più tardi
   }

@@ -92,7 +92,7 @@
         <h1>Che cucino oggi? Il menù della settimana, pensato per la tua famiglia</h1>
         <p class="lead">Tu scegli cosa mangiare. A spesa e dispensa ci pensa l'app: crea il menù, prepara la lista della spesa e tiene conto di gusti, diete e allergie di ogni persona a tavola.</p>
         <div class="cta">
-          <a class="btn btn-primary" id="download" href="/download/che-cucino-oggi.apk" download>⬇ Scarica per Android</a>
+          <a class="btn btn-primary" id="download" href="__APK_PATH__" download>⬇ Scarica per Android</a>
           <a class="btn btn-ghost" href="__APP_URL__">Usa nel browser</a>
         </div>
         <p class="small" id="version">Ultima versione sempre disponibile qui. App per Android, gratis per cominciare.</p>
@@ -178,7 +178,7 @@
         <h2>Come installare l'app su Android</h2>
         <ol class="steps">
           <li>Tocca <strong>«Scarica per Android»</strong> da questo sito, usando il telefono.</li>
-          <li>Apri il file scaricato <strong>che-cucino-oggi.apk</strong> (lo trovi nelle notifiche o nella cartella Download).</li>
+          <li>Apri il file scaricato, che si chiama <strong>che-cucino-oggi</strong> seguito dal numero di versione (lo trovi nelle notifiche o nella cartella Download).</li>
           <li>Se Android lo chiede, consenti <strong>l'installazione da questa fonte</strong>: succede perché l'app non arriva dal Play Store.</li>
           <li>Tocca <strong>Installa</strong>, poi <strong>Apri</strong>, e accedi con Google o con la tua email.</li>
         </ol>
@@ -215,7 +215,7 @@
         if (!v || !v.date) return;
         var date = new Date(v.date).toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' });
         var size = v.sizeMB ? ' · ' + String(v.sizeMB).replace('.', ',') + ' MB' : '';
-        document.getElementById('version').textContent = 'Ultima versione del ' + date + size + '. App per Android, gratis per cominciare.';
+        document.getElementById('version').textContent = (v.version ? 'Versione ' + v.version + ' · ' : 'Ultima versione · ') + date + size + '. Dopo l\'installazione la trovi in «Il mio account».';
       })
       .catch(function () {});
   </script>

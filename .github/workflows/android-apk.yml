@@ -3,6 +3,10 @@ name: Build Android APK
 on:
   workflow_dispatch:
     inputs:
+      diagnose_google:
+        description: "Controlla la registrazione Firebase dell'accesso Google (stampa un riepilogo, senza segreti)"
+        type: boolean
+        default: false
       publish_site:
         description: 'Pubblica anche il sito ufficiale con questo APK (da main parte da solo)'
         type: boolean
@@ -15,6 +19,47 @@ env:
   PACKAGE: com.checucinooggi.mealplanner
 
 jobs:
+  diagnose-google:
+    if: inputs.diagnose_google
+    runs-on: ubuntu-latest
+    env:
+      FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Riepilogo accesso Google (nessun segreto stampato)
+        run: |
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"
+          export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json"
+          echo "== Impronte della chiave di firma nel repository =="
+          keytool -list -v -keystore android-signing/debug.keystore -storepass android 2>/dev/null | grep -E "SHA1|SHA256"
+          FB="npx --yes firebase-tools@14"
+          echo; echo "== App Android registrate =="
+          $FB apps:list ANDROID --project "$PROJECT" --json > "$RUNNER_TEMP/apps.json"
+          node -e 'const a=(JSON.parse(require("fs").readFileSync(process.argv[1])).result)||[]; a.forEach(x=>console.log(x.appId, x.packageName, x.displayName))' "$RUNNER_TEMP/apps.json"
+          APP_ID=$(node -e 'const a=(JSON.parse(require("fs").readFileSync(process.argv[1])).result)||[]; const x=a.find(y=>y.packageName===process.env.PACKAGE); console.log(x?x.appId:"")' "$RUNNER_TEMP/apps.json")
+          echo "App usata: $APP_ID"
+          echo; echo "== Impronte registrate su Firebase =="
+          $FB apps:android:sha:list "$APP_ID" --project "$PROJECT" || true
+          echo; echo "== Client OAuth nella configurazione scaricata =="
+          $FB apps:sdkconfig ANDROID "$APP_ID" --project "$PROJECT" --out "$RUNNER_TEMP/google-services.json" >/dev/null
+          node -e '
+            const j=JSON.parse(require("fs").readFileSync(process.argv[1]));
+            console.log("progetto:", j.project_info.project_id);
+            for (const c of j.client) {
+              console.log("app:", c.client_info.android_client_info.package_name);
+              (c.oauth_client||[]).forEach(o=>console.log(" client_type", o.client_type, o.android_info?("android "+o.android_info.package_name+" sha1:"+o.android_info.certificate_hash):""));
+              console.log(" oauth_client totali:", (c.oauth_client||[]).length);
+            }' "$RUNNER_TEMP/google-services.json"
+          echo; echo "== Provider Google in Firebase Authentication =="
+          sudo apt-get install -y -qq jq >/dev/null 2>&1 || true
+          gcloud auth activate-service-account --key-file="$RUNNER_TEMP/sa.json" -q >/dev/null 2>&1
+          TOKEN=$(gcloud auth print-access-token)
+          curl -s -H "Authorization: Bearer $TOKEN" -H "x-goog-user-project: $PROJECT" "https://identitytoolkit.googleapis.com/admin/v2/projects/$PROJECT/defaultSupportedIdpConfigs/google.com" | jq '{name, enabled, clientId, error: .error.message}'
+          rm -f "$RUNNER_TEMP/sa.json"
+
   apk:
     runs-on: ubuntu-latest
     env:
@@ -33,6 +78,9 @@ jobs:
           java-version: 21
 
       - run: npm ci
+      # Numero di versione (anno.mese.giorno.build): finisce nell'app, nel nome del file e sul sito
+      - name: Numero di versione
+        run: echo "APP_VERSION=$(date +%Y.%m.%d).${{ github.run_number }}" >> "$GITHUB_ENV"
       - run: npm run build
         env:
           BUILD_NUMBER: ${{ github.run_number }}
@@ -97,7 +145,7 @@ jobs:
       # Versione dell'app: cresce a ogni build, così Android la riconosce come aggiornamento
       - name: Versione dell'app
         run: |
-          sed -i "s/versionCode 1/versionCode ${{ github.run_number }}/; s/versionName \"1.0\"/versionName \"$(date +%Y.%m.%d).${{ github.run_number }}\"/" android/app/build.gradle
+          sed -i "s/versionCode 1/versionCode ${{ github.run_number }}/; s/versionName \"1.0\"/versionName \"$APP_VERSION\"/" android/app/build.gradle
           grep -n "versionCode\|versionName" android/app/build.gradle
       - run: npx cap sync android
 
@@ -105,10 +153,17 @@ jobs:
         working-directory: android
         run: ./gradlew assembleDebug
 
+      # Il file porta la versione nel nome: si capisce subito quale si sta scaricando
+      - name: Nome del file con la versione
+        run: |
+          mkdir -p apk-out
+          cp android/app/build/outputs/apk/debug/app-debug.apk "apk-out/che-cucino-oggi-$APP_VERSION.apk"
+          ls -l apk-out
+
       - uses: actions/upload-artifact@v4
         with:
-          name: che-cucino-oggi-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: che-cucino-oggi-${{ env.APP_VERSION }}
+          path: apk-out/che-cucino-oggi-${{ env.APP_VERSION }}.apk
 
       # Sito ufficiale (SEO e download): si aggiorna a ogni build da main, con l'APK appena costruito
       - name: Pubblica il sito ufficiale
@@ -116,7 +171,7 @@ jobs:
         env:
           SITE_URL: ${{ vars.SITE_URL }}
           APP_URL: ${{ vars.APP_URL }}
-          APK: android/app/build/outputs/apk/debug/app-debug.apk
+          APK: apk-out/che-cucino-oggi-${{ env.APP_VERSION }}.apk
           BUILD: ${{ github.sha }}
           BUILD_NUMBER: ${{ github.run_number }}
         run: |

@@ -9,6 +9,7 @@ export default defineConfig(() => {
     // Numero della build (in CI è il numero dell'esecuzione): l'app lo confronta con quello del sito per proporre l'aggiornamento
     define: {
       __BUILD_NUMBER__: JSON.stringify(Number(process.env.BUILD_NUMBER) || 0),
+      __APP_VERSION__: JSON.stringify(process.env.APP_VERSION || 'sviluppo'),
     },
     resolve: {
       alias: {
