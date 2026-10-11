@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react';
-import { db } from '../lib/firebase';
+import { db, functions } from '../lib/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { Capacitor } from '@capacitor/core';
+import { Browser } from '@capacitor/browser';
 import { collection, query, onSnapshot, addDoc, deleteDoc, doc, updateDoc, setDoc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firebaseUtils';
 import { FamilyMember, DietaryRestriction, UserProfile, Recipe } from '../types';
@@ -241,31 +244,31 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
     const newAutoRenew = !isCurrentlyActive;
     const newStatus = newAutoRenew ? 'active' : 'pending_renewal';
 
+    // Account reali: rinnovo e disdetta si gestiscono dal portale Stripe (aggiorna il piano via server)
+    if (!(userId === 'demo-family-user' || userId.startsWith('local-'))) {
+      try {
+        const result = await httpsCallable<unknown, { url: string }>(functions, 'createPortalSession')();
+        if (Capacitor.isNativePlatform()) {
+          await Browser.open({ url: result.data.url });
+        } else {
+          window.location.assign(result.data.url);
+        }
+      } catch (e: any) {
+        alert(e?.message || 'Impossibile aprire la gestione abbonamento. Riprova.');
+      }
+      return;
+    }
+
     const updatedProfile: UserProfile = {
       ...profile,
       autoRenew: newAutoRenew,
       subscriptionStatus: newStatus as 'active' | 'pending_renewal'
     };
-
     setProfile(updatedProfile);
     if (onProfileUpdate) {
       onProfileUpdate(updatedProfile);
     }
-
-    if (userId === 'demo-family-user' || userId.startsWith('local-')) {
-      localStorage.setItem(`profile_${userId}`, JSON.stringify(updatedProfile));
-      return;
-    }
-
-    const path = `users/${userId}`;
-    try {
-      await setDoc(doc(db, path), {
-        autoRenew: newAutoRenew,
-        subscriptionStatus: newStatus
-      }, { merge: true });
-    } catch (e) {
-      handleFirestoreError(e, OperationType.UPDATE, path);
-    }
+    localStorage.setItem(`profile_${userId}`, JSON.stringify(updatedProfile));
   };
 
   const updatePreferences = async (id: string, field: 'likedIngredients' | 'dislikedIngredients' | 'likedMeals' | 'dislikedMeals', value: string) => {
