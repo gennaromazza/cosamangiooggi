@@ -7,6 +7,9 @@ const Stripe = require('stripe');
 const { GoogleGenAI, Type } = require('@google/genai');
 
 const REGION = 'europe-west1';
+// Tenere allineati a src/lib/plans.ts
+const TRIAL_DAYS = 7;
+const FLYER_SCANS_PER_MONTH = 30;
 const FIRESTORE_DB_ID = 'ai-studio-93a2a041-9b02-4ff7-b496-5f2ada58f953';
 
 const STRIPE_SECRET_KEY = defineSecret('STRIPE_SECRET_KEY');
@@ -14,6 +17,8 @@ const STRIPE_WEBHOOK_SECRET = defineSecret('STRIPE_WEBHOOK_SECRET');
 const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
 const PRICE_SMART = defineString('PRICE_SMART');
 const PRICE_PRO = defineString('PRICE_PRO');
+const PRICE_SMART_YEAR = defineString('PRICE_SMART_YEAR');
+const PRICE_PRO_YEAR = defineString('PRICE_PRO_YEAR');
 const ADMIN_EMAILS = defineString('ADMIN_EMAILS', { default: '' });
 const APP_URL = defineString('APP_URL');
 
@@ -45,17 +50,30 @@ exports.createCheckoutSession = onCall(
   async (request) => {
     const uid = requireAuth(request);
     const plan = request.data && request.data.plan;
+    const interval = (request.data && request.data.interval) === 'year' ? 'year' : 'month';
     if (plan !== 'smart' && plan !== 'pro') throw new HttpsError('invalid-argument', 'Piano non valido.');
+
+    const prices = {
+      smart: { month: PRICE_SMART.value(), year: PRICE_SMART_YEAR.value() },
+      pro: { month: PRICE_PRO.value(), year: PRICE_PRO_YEAR.value() },
+    };
 
     const stripe = new Stripe(STRIPE_SECRET_KEY.value());
     const customer = await getOrCreateCustomer(stripe, uid, request.auth.token.email);
+    const userSnap = await userRef(uid).get();
+    // La prova gratuita spetta una sola volta per cliente
+    const alreadyHadSubscription = userSnap.exists && userSnap.data().hadSubscription === true;
+
     const base = APP_URL.value().replace(/\/$/, '');
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
       customer,
       client_reference_id: uid,
-      line_items: [{ price: plan === 'pro' ? PRICE_PRO.value() : PRICE_SMART.value(), quantity: 1 }],
-      subscription_data: { metadata: { uid, plan } },
+      line_items: [{ price: prices[plan][interval], quantity: 1 }],
+      subscription_data: {
+        metadata: { uid, plan },
+        ...(alreadyHadSubscription ? {} : { trial_period_days: TRIAL_DAYS }),
+      },
       allow_promotion_codes: true,
       locale: 'it',
       success_url: `${base}/?checkout=success`,
@@ -88,11 +106,15 @@ async function findUid(customerId, metadataUid) {
   return q.empty ? null : q.docs[0].id;
 }
 
+function planFromPriceId(priceId) {
+  if (priceId === PRICE_PRO.value() || priceId === PRICE_PRO_YEAR.value()) return 'pro';
+  if (priceId === PRICE_SMART.value() || priceId === PRICE_SMART_YEAR.value()) return 'smart';
+  return null;
+}
+
 function planFromSubscription(sub) {
   const priceId = sub.items && sub.items.data[0] && sub.items.data[0].price.id;
-  if (priceId === PRICE_PRO.value()) return 'pro';
-  if (priceId === PRICE_SMART.value()) return 'smart';
-  return null;
+  return planFromPriceId(priceId);
 }
 
 async function applySubscription(sub) {
@@ -108,6 +130,7 @@ async function applySubscription(sub) {
           autoRenew,
           subscriptionStatus: autoRenew ? 'active' : 'pending_renewal',
           stripeSubscriptionId: sub.id,
+          hadSubscription: true,
         }
       : { plan: 'free', autoRenew: false, subscriptionStatus: null, stripeSubscriptionId: null },
     { merge: true }
@@ -115,12 +138,14 @@ async function applySubscription(sub) {
 }
 
 async function recordInvoice(invoice) {
+  // Durante la prova gratuita la fattura è di 0 €: non è un pagamento da registrare
+  if (!invoice.amount_paid) return;
   const uid = await findUid(invoice.customer, null);
   if (!uid) return;
   const line = invoice.lines && invoice.lines.data[0];
   const priceId = line && line.pricing && line.pricing.price_details && line.pricing.price_details.price
     || line && line.price && line.price.id;
-  const plan = priceId === PRICE_PRO.value() ? 'pro' : 'smart';
+  const plan = planFromPriceId(priceId) || 'smart';
   await userRef(uid).set(
     {
       paymentHistory: FieldValue.arrayUnion({
@@ -195,43 +220,76 @@ exports.syncAdminClaim = onCall({ region: REGION }, async (request) => {
 // Analisi volantini con Gemini (la chiave resta sul server)
 // ---------------------------------------------------------------------------
 
+// Prenota una scansione del mese (transazione): il tetto protegge i costi di Gemini
+async function reserveFlyerScan(uid) {
+  const month = new Date().toISOString().slice(0, 7);
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(userRef(uid));
+    const data = snap.exists ? snap.data() : {};
+    if (data.plan !== 'pro') throw new HttpsError('permission-denied', 'Funzione riservata al piano Chef IA.');
+    const used = data.aiUsage && data.aiUsage.month === month ? data.aiUsage.flyerScans || 0 : 0;
+    if (used >= FLYER_SCANS_PER_MONTH) {
+      throw new HttpsError(
+        'resource-exhausted',
+        `Hai usato tutte le ${FLYER_SCANS_PER_MONTH} scansioni di questo mese. Si rinnovano il primo del mese prossimo.`
+      );
+    }
+    tx.set(userRef(uid), { aiUsage: { month, flyerScans: used + 1 } }, { merge: true });
+    return FLYER_SCANS_PER_MONTH - used - 1;
+  });
+}
+
+async function refundFlyerScan(uid) {
+  const month = new Date().toISOString().slice(0, 7);
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(userRef(uid));
+    const usage = snap.exists && snap.data().aiUsage;
+    if (usage && usage.month === month && usage.flyerScans > 0) {
+      tx.set(userRef(uid), { aiUsage: { month, flyerScans: usage.flyerScans - 1 } }, { merge: true });
+    }
+  });
+}
+
 exports.analyzeFlyer = onCall(
   { region: REGION, secrets: [GEMINI_API_KEY], memory: '512MiB', timeoutSeconds: 120 },
   async (request) => {
     const uid = requireAuth(request);
-    const snap = await userRef(uid).get();
-    if (!snap.exists || snap.data().plan !== 'pro') {
-      throw new HttpsError('permission-denied', 'Funzione riservata al piano Chef Pro.');
-    }
     const { data, mimeType } = request.data || {};
     if (typeof data !== 'string' || !['image/jpeg', 'image/png', 'image/webp', 'application/pdf'].includes(mimeType)) {
       throw new HttpsError('invalid-argument', 'File non valido.');
     }
 
-    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY.value() });
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: {
-        parts: [
-          { inlineData: { mimeType, data } },
-          {
-            text: "Analizza questo volantino delle offerte e identifica gli ingredienti alimentari SANI (carne, pesce, verdura, frutta, cereali, legumi, latticini base) che sono in offerta. \n\nREGOLE CRITICHE:\n1. ESCLUDI ASSOLUTAMENTE: alcolici (vino, birra, superalcolici), gelati, dolci industriali (merendine, biscotti farciti), snack fritti e bibite zuccherate.\n2. Includi solo ingredienti 'base' che possono essere usati come componenti di un pasto.\n3. Restituisci SOLO una lista di nomi di ingredienti in italiano, puliti e semplici (es. 'Pollo', 'Salmone', 'Zucchine', 'Bresaola', 'Tacchino', 'Carote', 'Salsiccia').",
-          },
-        ],
-      },
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: { ingredients: { type: Type.ARRAY, items: { type: Type.STRING } } },
-          required: ['ingredients'],
+    const remaining = await reserveFlyerScan(uid);
+    try {
+      const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY.value() });
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: {
+          parts: [
+            { inlineData: { mimeType, data } },
+            {
+              text: "Analizza questo volantino delle offerte e identifica gli ingredienti alimentari SANI (carne, pesce, verdura, frutta, cereali, legumi, latticini base) che sono in offerta. \n\nREGOLE CRITICHE:\n1. ESCLUDI ASSOLUTAMENTE: alcolici (vino, birra, superalcolici), gelati, dolci industriali (merendine, biscotti farciti), snack fritti e bibite zuccherate.\n2. Includi solo ingredienti 'base' che possono essere usati come componenti di un pasto.\n3. Restituisci SOLO una lista di nomi di ingredienti in italiano, puliti e semplici (es. 'Pollo', 'Salmone', 'Zucchine', 'Bresaola', 'Tacchino', 'Carote', 'Salsiccia').",
+            },
+          ],
         },
-      },
-    });
-    if (!response.text) throw new HttpsError('internal', 'Nessuna risposta dal modello.');
-    const ingredients = JSON.parse(response.text).ingredients.map(
-      (i) => i.charAt(0).toUpperCase() + i.slice(1).toLowerCase()
-    );
-    return { ingredients };
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: { ingredients: { type: Type.ARRAY, items: { type: Type.STRING } } },
+            required: ['ingredients'],
+          },
+        },
+      });
+      if (!response.text) throw new HttpsError('internal', 'Nessuna risposta dal modello.');
+      const ingredients = JSON.parse(response.text).ingredients.map(
+        (i) => i.charAt(0).toUpperCase() + i.slice(1).toLowerCase()
+      );
+      return { ingredients, remaining };
+    } catch (err) {
+      // La scansione non è andata a buon fine: non va addebitata sul tetto mensile
+      await refundFlyerScan(uid).catch(() => {});
+      throw err;
+    }
   }
 );

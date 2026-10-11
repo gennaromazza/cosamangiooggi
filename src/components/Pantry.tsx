@@ -6,6 +6,7 @@ import { PantryItem, Recipe, UserProfile } from '../types';
 import { INITIAL_RECIPES } from '../data/recipes';
 import { getRawIngredientNames, scaleIngredientAmount } from '../lib/utils';
 import { calculateNutrients } from '../lib/nutritionUtils';
+import { limitsFor } from '../lib/plans';
 import { consumeIngredientsFromPantry, checkIngredientMatch, isStaple, findPantryDuplicate } from '../lib/pantrySync';
 import { 
   Plus, 
@@ -162,8 +163,7 @@ export default function Pantry({ userId, profile, onNavigateToPlanner }: Props) 
       return;
     }
 
-    const isFree = !profile || !profile.plan || profile.plan === 'free';
-    if (isFree && items.length >= 15) {
+    if (items.length >= limitsFor(profile?.plan).maxPantryItems) {
       setShowLimitWarning(true);
       return;
     }
@@ -348,7 +348,7 @@ export default function Pantry({ userId, profile, onNavigateToPlanner }: Props) 
               <div className="mb-4 flex items-center justify-between text-xs text-slate-500 font-semibold bg-white border border-slate-150 px-3 py-1.5 rounded-xl shadow-2xs">
                 <span>Prodotti in dispensa:</span>
                 <span className="font-black text-slate-850">
-                  {items.length} {(!profile || !profile.plan || profile.plan === 'free') ? '/ 15 (Piano Base)' : '(Illimitati)'}
+                  {items.length} {Number.isFinite(limitsFor(profile?.plan).maxPantryItems) ? `/ ${limitsFor(profile?.plan).maxPantryItems} (Piano Gratuito)` : '(Illimitati)'}
                 </span>
               </div>
               
@@ -399,7 +399,7 @@ export default function Pantry({ userId, profile, onNavigateToPlanner }: Props) 
                     <span>Limite dispensa raggiunto</span>
                   </div>
                   <p className="text-[11px] leading-relaxed text-slate-600">
-                    Il piano gratuito consente di inserire fino a 15 ingredienti. Sblocca inserimenti illimitati con il piano Smart o Pro!
+                    Il piano gratuito consente fino a 20 prodotti. Con il piano Famiglia o Chef IA la dispensa è illimitata.
                   </p>
                 </div>
               )}

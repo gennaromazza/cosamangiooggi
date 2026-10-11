@@ -8,6 +8,7 @@ import { ShoppingCart, Download, CheckCircle2, Circle, CheckSquare, Plus, Trash2
 import { motion, AnimatePresence } from 'motion/react';
 import { getRawIngredientNames, scaleIngredientAmount } from '../lib/utils';
 import { checkIngredientMatch, isStaple, calculateMissingFromPantry, findPantryDuplicate } from '../lib/pantrySync';
+import { limitsFor } from '../lib/plans';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -277,7 +278,7 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
   // Segnare un articolo come acquistato lo sposta in dispensa (sommando la quantità se esiste già)
   const handlePurchaseItem = async (name: string, amount: number, unit: string, customDocId?: string) => {
     const isLocal = userId === 'demo-family-user' || userId.startsWith('local-');
-    const isFree = !profile || !profile.plan || profile.plan === 'free';
+    const pantryLimit = limitsFor(profile?.plan).maxPantryItems;
     const quantity = amount > 0 ? amount : 1;
     const finalUnit = unit || 'pz';
 
@@ -289,7 +290,7 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
         pantry = [];
       }
       const duplicate = findPantryDuplicate(pantry, name, finalUnit);
-      if (!duplicate && isFree && pantry.length >= 15) {
+      if (!duplicate && pantry.length >= pantryLimit) {
         // Limite del piano gratuito: avvisiamo senza perdere l'articolo dalla lista
         setShowLimitWarningModal(true);
         return;
@@ -310,7 +311,7 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
       const pantry = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as PantryItem));
       const duplicate = findPantryDuplicate(pantry, name, finalUnit);
 
-      if (!duplicate && isFree && pantry.length >= 15) {
+      if (!duplicate && pantry.length >= pantryLimit) {
         // Limite del piano gratuito: avvisiamo senza perdere l'articolo dalla lista
         setShowLimitWarningModal(true);
         return;
@@ -334,8 +335,7 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
   };
 
   const exportPDF = () => {
-    const isFree = !profile || !profile.plan || profile.plan === 'free';
-    if (isFree) {
+    if (!limitsFor(profile?.plan).exportList) {
       setShowPdfGate(true);
       return;
     }
@@ -358,8 +358,7 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
   };
 
   const handleShareWhatsApp = () => {
-    const isFree = !profile || !profile.plan || profile.plan === 'free';
-    if (isFree) {
+    if (!limitsFor(profile?.plan).exportList) {
       setShowPdfGate(true);
       return;
     }
@@ -427,7 +426,7 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
               >
                 <Download className="w-4 h-4" />
                 <span>Scarica PDF</span>
-                {(!profile || !profile.plan || profile.plan === 'free') && <Lock className="w-3 h-3 text-indigo-200 ml-0.5" />}
+                {!limitsFor(profile?.plan).exportList && <Lock className="w-3 h-3 text-indigo-200 ml-0.5" />}
               </button>
               <button 
                 onClick={handleShareWhatsApp}
@@ -435,7 +434,7 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
               >
                 <MessageCircle className="w-4 h-4" />
                 <span>WhatsApp</span>
-                {(!profile || !profile.plan || profile.plan === 'free') && <Lock className="w-3 h-3 text-emerald-200 ml-0.5" />}
+                {!limitsFor(profile?.plan).exportList && <Lock className="w-3 h-3 text-emerald-200 ml-0.5" />}
               </button>
             </>
           )}
@@ -753,9 +752,9 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
                 <AlertTriangle size={26} />
               </div>
               <div>
-                <h4 className="font-extrabold text-slate-900 text-sm">Limite Dispensa Piano Base Raggiunto</h4>
+                <h4 className="font-extrabold text-slate-900 text-sm">Dispensa piena (piano gratuito)</h4>
                 <p className="text-xs text-slate-600 mt-2 leading-relaxed">
-                  Il tuo piano gratuito consente un massimo reale di <strong>15 prodotti in dispensa</strong>. L'articolo è stato completato dalla spesa ma non inserito in dispensa.
+                  Il piano gratuito comprende fino a <strong>20 prodotti in dispensa</strong>. L'articolo resta nella lista: libera un po' di spazio in dispensa oppure passa a Famiglia, senza limiti.
                 </p>
               </div>
               <div className="flex gap-2 pt-2">
@@ -794,9 +793,9 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
                 <Sparkles size={26} />
               </div>
               <div>
-                <h4 className="font-extrabold text-slate-900 text-sm">Funzione Famiglia Smart & Pro</h4>
+                <h4 className="font-extrabold text-slate-900 text-sm">Funzione dei piani Famiglia e Chef IA</h4>
                 <p className="text-xs text-slate-600 mt-2 leading-relaxed">
-                  L'esportazione in PDF e la condivisione istantanea su WhatsApp sono funzionalità riservate ai piani <strong>Famiglia Smart</strong> e <strong>Chef IA & OCR</strong>.
+                  L'esportazione in PDF e la condivisione istantanea su WhatsApp sono funzionalità riservate ai piani <strong>Famiglia</strong> e <strong>Chef IA</strong>.
                 </p>
               </div>
               <div className="flex gap-2 pt-2">
@@ -813,7 +812,7 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
                   }}
                   className="w-2/3 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all active:scale-95"
                 >
-                  Attiva Piano Smart
+                  Scopri il piano Famiglia
                 </button>
               </div>
             </motion.div>

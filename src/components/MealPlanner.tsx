@@ -29,6 +29,11 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
   const [loading, setLoading] = useState(true);
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
   const [targetServings, setTargetServings] = useState(2);
+  // Le porzioni partono dalle persone a tavola (come la lista della spesa), finché non le cambi a mano
+  const [servingsTouched, setServingsTouched] = useState(false);
+  useEffect(() => {
+    if (!servingsTouched && familyMembers.length > 0) setTargetServings(familyMembers.length);
+  }, [familyMembers.length, servingsTouched]);
   const season = getCurrentSeason();
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncSuccess, setSyncSuccess] = useState(false);
@@ -1783,14 +1788,14 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
                     </h4>
                     <div className="flex items-center gap-3 bg-white border border-slate-200 rounded-lg p-1">
                       <button 
-                        onClick={() => setTargetServings(Math.max(1, targetServings - 1))}
+                        onClick={() => { setServingsTouched(true); setTargetServings(Math.max(1, targetServings - 1)); }}
                         className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-slate-100 text-indigo-600 font-bold"
                       >
                         -
                       </button>
                       <span className="w-8 text-center font-bold text-slate-700">{targetServings}</span>
                       <button 
-                        onClick={() => setTargetServings(targetServings + 1)}
+                        onClick={() => { setServingsTouched(true); setTargetServings(targetServings + 1); }}
                         className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-slate-100 text-indigo-600 font-bold"
                       >
                         +

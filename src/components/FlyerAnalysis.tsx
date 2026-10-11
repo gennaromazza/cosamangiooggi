@@ -15,6 +15,7 @@ interface Props {
 export default function FlyerAnalysis({ userId, profile }: Props) {
   const [file, setFile] = useState<File | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [scansLeft, setScansLeft] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [extractedOffers, setExtractedOffers] = useState<string[]>(profile?.currentOffers || []);
 
@@ -44,11 +45,12 @@ export default function FlyerAnalysis({ userId, profile }: Props) {
         const mimeType = file.type;
 
         // L'analisi avviene sul server: la chiave Gemini non è mai nell'app
-        const result = await httpsCallable<{ data: string; mimeType: string }, { ingredients: string[] }>(
+        const result = await httpsCallable<{ data: string; mimeType: string }, { ingredients: string[]; remaining: number }>(
           functions,
           'analyzeFlyer'
         )({ data: base64Data, mimeType });
         const ingredients = result.data.ingredients;
+        setScansLeft(result.data.remaining);
 
         setExtractedOffers(ingredients);
         await saveOffers(ingredients);
@@ -104,6 +106,12 @@ export default function FlyerAnalysis({ userId, profile }: Props) {
             </h3>
             <p className="text-sm text-slate-500">Trascina o seleziona una foto o un PDF del volantino della settimana.</p>
           </div>
+
+          {scansLeft !== null && (
+            <p className="text-xs font-semibold text-slate-500 text-center">
+              Scansioni rimaste questo mese: {scansLeft}
+            </p>
+          )}
 
           <div 
             className={`border-2 border-dashed rounded-2xl p-12 text-center transition-all ${
