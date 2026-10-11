@@ -42,7 +42,15 @@ const userRef = (uid) => db.collection('users').doc(uid);
 async function getOrCreateCustomer(stripe, uid, email) {
   const snap = await userRef(uid).get();
   const existing = snap.exists ? snap.data().stripeCustomerId : null;
-  if (existing) return existing;
+  if (existing) {
+    try {
+      const found = await stripe.customers.retrieve(existing);
+      if (!found.deleted) return existing;
+    } catch (err) {
+      if (!(err && err.code === 'resource_missing')) throw err;
+    }
+    // Cliente creato in modalità test (o cancellato su Stripe): non esiste più, se ne crea uno nuovo
+  }
   const customer = await stripe.customers.create({ email, metadata: { uid } });
   await userRef(uid).set({ stripeCustomerId: customer.id }, { merge: true });
   return customer.id;
@@ -98,11 +106,17 @@ exports.createPortalSession = onCall(
     if (!customer) throw new HttpsError('failed-precondition', 'Nessun abbonamento da gestire.');
     const stripe = new Stripe(STRIPE_SECRET_KEY.value());
     const native = !!(request.data && request.data.native);
-    const session = await stripe.billingPortal.sessions.create({
-      customer,
-      return_url: native ? `${APP_URL.value().replace(/\/$/, '')}/pagamento.html?esito=portale` : APP_URL.value(),
-    });
-    return { url: session.url };
+    try {
+      const session = await stripe.billingPortal.sessions.create({
+        customer,
+        return_url: native ? `${APP_URL.value().replace(/\/$/, '')}/pagamento.html?esito=portale` : APP_URL.value(),
+      });
+      return { url: session.url };
+    } catch (err) {
+      // Cliente di prova che in produzione non esiste: non c'è nessun abbonamento da gestire
+      if (err && err.code === 'resource_missing') throw new HttpsError('failed-precondition', 'Nessun abbonamento da gestire.');
+      throw err;
+    }
   }
 );
 
