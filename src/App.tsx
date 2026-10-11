@@ -20,12 +20,13 @@ import {
   MessageSquare,
   Wallet,
   Sun,
-  MoreHorizontal
+  MoreHorizontal,
+  Check
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Logo from './components/Logo';
 import UpgradeCard from './components/UpgradeCard';
-import { limitsFor, planName } from './lib/plans';
+import { limitsFor, planName, normalizePlan } from './lib/plans';
 import MealPlanner from './components/MealPlanner';
 import VacationPlanner from './components/VacationPlanner';
 import Pantry from './components/Pantry';
@@ -61,6 +62,18 @@ export default function App() {
   // Premium Gate Trigger State
   const [showMore, setShowMore] = useState(false);
   const [showPremiumGate, setShowPremiumGate] = useState<'voice' | 'offers' | null>(null);
+
+  // Ritorno da Stripe Checkout (?checkout=success): mostra la conferma e pulisce l'indirizzo
+  const [checkoutDone, setCheckoutDone] = useState(false);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const result = params.get('checkout');
+    if (!result) return;
+    if (result === 'success') setCheckoutDone(true);
+    params.delete('checkout');
+    const rest = params.toString();
+    window.history.replaceState({}, '', window.location.pathname + (rest ? `?${rest}` : '') + window.location.hash);
+  }, []);
 
   // Shopping List Visibility Constraints
   const [hasMealPlan, setHasMealPlan] = useState<boolean>(false);
@@ -936,6 +949,37 @@ export default function App() {
                   Sblocca Ora
                 </button>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {checkoutDone && user && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-950/50">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-3xl p-8 max-w-sm w-full border border-slate-200 text-center space-y-4"
+            >
+              <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mx-auto border border-emerald-100">
+                <Check size={30} />
+              </div>
+              <div>
+                <h4 className="font-semibold text-slate-900 text-2xl">Grazie, è tutto pronto!</h4>
+                <p className="text-sm text-slate-600 mt-2 leading-relaxed">
+                  {profile && normalizePlan(profile.plan) !== 'free'
+                    ? <>Ora hai il piano <strong>{planName(profile.plan)}</strong>. Puoi gestire o disdire l'abbonamento quando vuoi da Altro → Abbonamento.</>
+                    : <>Stiamo attivando il tuo piano: ci vogliono pochi secondi.</>}
+                </p>
+              </div>
+              <button
+                onClick={() => setCheckoutDone(false)}
+                className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-sm font-bold transition-all active:scale-95 cursor-pointer"
+              >
+                Ottimo, iniziamo
+              </button>
             </motion.div>
           </div>
         )}
