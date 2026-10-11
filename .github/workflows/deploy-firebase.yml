@@ -110,8 +110,8 @@ jobs:
             echo "PRICE_PRO_YEAR=${{ vars.PRICE_PRO_YEAR }}"
             echo "ADMIN_EMAILS=${{ vars.ADMIN_EMAILS }}"
             echo "APP_URL=${{ vars.APP_URL }}"
-            # Indirizzo del sito ufficiale (inviti ai familiari): se non c'è, le funzioni usano quello predefinito
-            if [ -n "${{ vars.SITE_URL }}" ]; then echo "SITE_URL=${{ vars.SITE_URL }}"; fi
+            # Indirizzo del sito ufficiale (inviti ai familiari): va scritto sempre, anche per quello predefinito
+            echo "SITE_URL=${{ vars.SITE_URL || 'https://che-cucino-oggi.web.app' }}"
           } > functions/.env
           for NAME in STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET GEMINI_API_KEY; do
             printf '%s' "${!NAME}" | npx --yes firebase-tools@14 functions:secrets:set "$NAME" --data-file - --force --project "$PROJECT"
