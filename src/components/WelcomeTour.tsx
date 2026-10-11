@@ -250,6 +250,13 @@ export default function WelcomeTour({ user, profile, onNavigate, onProfileUpdate
         console.error('Impossibile salvare lo stato della guida:', e);
       }
     }
+    if (target === 'planner') {
+      try {
+        sessionStorage.setItem('auto_generate_plan', '1');
+      } catch {
+        /* storage non disponibile */
+      }
+    }
     if (target) onNavigate(target);
   };
 

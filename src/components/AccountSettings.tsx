@@ -12,6 +12,7 @@ import { doc, updateDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { auth, db, functions } from '../lib/firebase';
 import { planName } from '../lib/plans';
+import { remindersAvailable, setSundayReminder, sundayReminderEnabled } from '../lib/reminders';
 import type { UserProfile } from '../types';
 
 interface AccountSettingsProps {
@@ -97,6 +98,8 @@ export default function AccountSettings({
   const [passwordNotice, setPasswordNotice] = useState<Notice>(null);
   const [savingPassword, setSavingPassword] = useState(false);
 
+  const [reminderOn, setReminderOn] = useState(sundayReminderEnabled);
+  const [reminderNotice, setReminderNotice] = useState<Notice>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteNotice, setDeleteNotice] = useState<Notice>(null);
 
@@ -175,6 +178,21 @@ export default function AccountSettings({
     } catch (error) {
       console.error('Invio email di reset non riuscito:', error);
       setPasswordNotice({ ok: false, text: 'Non è stato possibile inviare l’email. Riprova.' });
+    }
+  };
+
+  const toggleReminder = async () => {
+    setReminderNotice(null);
+    try {
+      const result = await setSundayReminder(!reminderOn);
+      if (result === 'denied') {
+        setReminderNotice({ ok: false, text: 'Per ricevere il promemoria consenti le notifiche dalle impostazioni del telefono.' });
+        return;
+      }
+      setReminderOn(result === 'on');
+    } catch (error) {
+      console.error('Promemoria non impostato:', error);
+      setReminderNotice({ ok: false, text: 'Non è stato possibile impostare il promemoria. Riprova.' });
     }
   };
 
@@ -307,6 +325,23 @@ export default function AccountSettings({
           <Wallet className="w-4 h-4" /> {paid ? 'Gestisci abbonamento' : 'Scopri i piani'}
         </button>
       </Card>
+
+      {remindersAvailable() && (
+        <Card title="Promemoria">
+          <p className="text-sm text-slate-600 leading-relaxed">
+            Ogni domenica alle 10:00 ti ricordiamo di preparare il menù della settimana.
+          </p>
+          <button
+            onClick={toggleReminder}
+            role="switch"
+            aria-checked={reminderOn}
+            className={reminderOn ? primaryButton : secondaryButton}
+          >
+            {reminderOn ? 'Promemoria attivo · tocca per spegnerlo' : 'Attiva il promemoria della domenica'}
+          </button>
+          <Message notice={reminderNotice} />
+        </Card>
+      )}
 
       <Card title="Esci">
         <button onClick={onLogout} className={secondaryButton}>

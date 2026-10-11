@@ -28,6 +28,12 @@ jobs:
       - run: npx cap add android
       # Icona e schermata di avvio dell'app Android dal nostro logo (assets/): se fallisce, la build si ferma
       - run: npx capacitor-assets generate --android
+      # Android 13+: serve il permesso per le notifiche (promemoria della domenica)
+      - name: Permesso notifiche nel manifest
+        run: |
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          grep -q POST_NOTIFICATIONS "$MANIFEST" || sed -i 's#</manifest>#    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n</manifest>#' "$MANIFEST"
+          grep POST_NOTIFICATIONS "$MANIFEST"
       - run: npx cap sync android
 
       - name: Build APK (debug, installabile senza store)

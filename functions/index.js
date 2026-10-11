@@ -65,6 +65,8 @@ exports.createCheckoutSession = onCall(
     const alreadyHadSubscription = userSnap.exists && userSnap.data().hadSubscription === true;
 
     const base = APP_URL.value().replace(/\/$/, '');
+    // Nell'app Android il pagamento si apre nel browser: al ritorno basta una pagina che dica di tornare all'app
+    const native = !!(request.data && request.data.native);
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
       customer,
@@ -76,8 +78,8 @@ exports.createCheckoutSession = onCall(
       },
       allow_promotion_codes: true,
       locale: 'it',
-      success_url: `${base}/?checkout=success`,
-      cancel_url: `${base}/?checkout=cancel`,
+      success_url: native ? `${base}/pagamento.html?esito=ok` : `${base}/?checkout=success`,
+      cancel_url: native ? `${base}/pagamento.html?esito=annullato` : `${base}/?checkout=cancel`,
     });
     return { url: session.url };
   }
@@ -92,9 +94,10 @@ exports.createPortalSession = onCall(
     const customer = snap.exists ? snap.data().stripeCustomerId : null;
     if (!customer) throw new HttpsError('failed-precondition', 'Nessun abbonamento da gestire.');
     const stripe = new Stripe(STRIPE_SECRET_KEY.value());
+    const native = !!(request.data && request.data.native);
     const session = await stripe.billingPortal.sessions.create({
       customer,
-      return_url: APP_URL.value(),
+      return_url: native ? `${APP_URL.value().replace(/\/$/, '')}/pagamento.html?esito=portale` : APP_URL.value(),
     });
     return { url: session.url };
   }

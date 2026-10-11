@@ -67,6 +67,15 @@ export default function App() {
 
   // Ritorno da Stripe Checkout (?checkout=success): mostra la conferma e pulisce l'indirizzo
   const [checkoutDone, setCheckoutDone] = useState(false);
+  // App Android: il pagamento avviene nel browser; quando il piano diventa a pagamento mostriamo la stessa conferma
+  useEffect(() => {
+    if (!profile || normalizePlan(profile.plan) === 'free') return;
+    let waiting: string | null = null;
+    try { waiting = localStorage.getItem('awaiting_checkout'); } catch { /* storage non disponibile */ }
+    if (!waiting) return;
+    try { localStorage.removeItem('awaiting_checkout'); } catch { /* storage non disponibile */ }
+    if (Date.now() - Number(waiting) < 60 * 60 * 1000) setCheckoutDone(true);
+  }, [profile?.plan]);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const result = params.get('checkout');

@@ -62,6 +62,7 @@ export default function BusinessModel({
   const [payingConversionRatePro, setPayingConversionRatePro] = useState<number>(3); // % of MAU subscribing to Pro (5.99)
   
   const [billingBusy, setBillingBusy] = useState<boolean>(false);
+  const [waitingPayment, setWaitingPayment] = useState<boolean>(false);
   const [billingInterval, setBillingInterval] = useState<BillingInterval>('year');
 
   // Active Plan Level For Current User
@@ -128,8 +129,14 @@ export default function BusinessModel({
     }
     setBillingBusy(true);
     try {
-      const result = await httpsCallable<unknown, { url: string }>(functions, fn)(data);
-      if (Capacitor.isNativePlatform()) {
+      const native = Capacitor.isNativePlatform();
+      const result = await httpsCallable<unknown, { url: string }>(functions, fn)({ ...data, native });
+      if (native) {
+        // L'app ricorda che sta aspettando un pagamento: al rientro mostra la conferma quando il piano cambia
+        if (fn === 'createCheckoutSession') {
+          try { localStorage.setItem('awaiting_checkout', String(Date.now())); } catch { /* storage non disponibile */ }
+          setWaitingPayment(true);
+        }
         await Browser.open({ url: result.data.url });
       } else {
         window.location.assign(result.data.url);
@@ -505,6 +512,12 @@ export default function BusinessModel({
             Diete e allergie sono sempre incluse, in ogni piano. Provi {TRIAL_DAYS} giorni gratis e disdici quando vuoi.
           </p>
         </div>
+
+        {waitingPayment && (
+          <p role="status" className="text-sm font-semibold text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-2xl px-4 py-3">
+            Finito il pagamento? Chiudi la pagina e torna qui: il piano si aggiorna da solo, in pochi secondi.
+          </p>
+        )}
 
         {/* Mensile / annuale */}
         <div className="inline-flex p-1 bg-slate-100 rounded-2xl" role="group" aria-label="Frequenza di pagamento">
