@@ -96,6 +96,24 @@ jobs:
           keytool -list -v -keystore ~/.android/debug.keystore -storepass android 2>/dev/null | grep -E "SHA1|SHA256" | tee "$RUNNER_TEMP/sha.txt"
           echo "SHA1=$(grep 'SHA1:' "$RUNNER_TEMP/sha.txt" | sed 's/.*SHA1: *//')" >> "$GITHUB_ENV"
           echo "SHA256=$(grep 'SHA256:' "$RUNNER_TEMP/sha.txt" | sed 's/.*SHA256: *//')" >> "$GITHUB_ENV"
+          # Gradle non usava sempre ~/.android/debug.keystore (l'APK usciva con un'altra firma): la indichiamo in modo esplicito
+          KS="$GITHUB_WORKSPACE/android-signing/debug.keystore"
+          awk -v ks="$KS" '
+            /^android \{/ && !done {
+              print
+              print "    signingConfigs {"
+              print "        debug {"
+              print "            storeFile file(\"" ks "\")"
+              print "            storePassword \"android\""
+              print "            keyAlias \"androiddebugkey\""
+              print "            keyPassword \"android\""
+              print "        }"
+              print "    }"
+              done=1; next
+            }
+            { print }' android/app/build.gradle > "$RUNNER_TEMP/app-build.gradle"
+          cp "$RUNNER_TEMP/app-build.gradle" android/app/build.gradle
+          grep -n -A8 "signingConfigs" android/app/build.gradle
 
       # Accesso con Google nell'app: registra l'app Android su Firebase (una volta sola, poi si riconosce) e scarica la configurazione
       - name: Configurazione Firebase per Android
@@ -160,11 +178,14 @@ jobs:
           APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
           echo "== Firma dell'APK =="
           "$APKSIGNER" verify --print-certs "$APK" | grep -E "SHA-1|SHA-256"
+          REAL=$("$APKSIGNER" verify --print-certs "$APK" | grep "SHA-1 digest" | head -1 | sed 's/.*: *//' | tr -d ':' | tr 'A-Z' 'a-z')
+          WANT=$(echo "$SHA1" | tr -d ':' | tr 'A-Z' 'a-z')
+          [ "$REAL" = "$WANT" ] || { echo "::error::L'APK è firmato con una chiave diversa da quella registrata su Firebase ($REAL invece di $WANT)"; exit 1; }
           echo "== Attese (chiave nel repository) =="
           echo "SHA-1:   $SHA1"
           echo "SHA-256: $SHA256"
           echo "== default_web_client_id usato dall'app =="
-          grep -rn "default_web_client_id\|google_app_id\|gcm_defaultSenderId" android/app/build/generated/res/google-services/debug/values/values.xml || echo "values.xml non trovato"
+          grep -rn "default_web_client_id\|google_app_id\|gcm_defaultSenderId" android/app/build/generated/res/processDebugGoogleServices/values/values.xml || echo "values.xml non trovato"
           echo "== Plugin Google di Gradle =="
           grep -n "google-services\|rgcfaIncludeGoogle" android/app/build.gradle android/build.gradle android/variables.gradle || true
           echo "== Package e versione =="
