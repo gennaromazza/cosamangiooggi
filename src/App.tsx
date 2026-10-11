@@ -448,7 +448,7 @@ export default function App() {
 
   if (authLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-slate-50">
+      <div className="flex items-center justify-center min-h-dvh bg-slate-50">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-600"></div>
       </div>
     );
@@ -456,7 +456,7 @@ export default function App() {
 
   if (!user) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+      <div className="min-h-dvh bg-slate-50 flex items-center justify-center p-4">
         <div className="max-w-md w-full bg-white rounded-3xl shadow-xl p-8 border border-slate-100">
           <div className="text-center">
             <div className="bg-indigo-600 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg rotate-3 overflow-hidden">
@@ -637,7 +637,7 @@ export default function App() {
   // Account Suspension Enforcement Screen
   if (profile?.isSuspended) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+      <div className="min-h-dvh bg-slate-50 flex items-center justify-center p-4">
         <div className="max-w-md w-full bg-white rounded-3xl shadow-2xl p-8 text-center border-t-4 border-t-red-600 border border-slate-100 space-y-6">
           <div className="w-16 h-16 bg-red-50 text-red-600 border border-red-150 rounded-2xl flex items-center justify-center mx-auto shadow-sm">
             <ShieldAlert className="w-8 h-8" />
@@ -666,19 +666,19 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
+    <div className="min-h-dvh bg-slate-50 flex flex-col overflow-x-clip">
       {/* Header */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
-        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="bg-indigo-600 p-2 rounded-lg">
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-30 pt-[env(safe-area-inset-top)]">
+        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="bg-indigo-600 p-2 rounded-lg shrink-0">
               <Utensils className="text-white w-6 h-6" />
             </div>
-            <h1 className="text-xl font-bold bg-gradient-to-r from-indigo-600 to-violet-600 bg-clip-text text-transparent">
+            <h1 className="text-lg sm:text-xl font-bold whitespace-nowrap bg-gradient-to-r from-indigo-600 to-violet-600 bg-clip-text text-transparent">
               Che cucino oggi?
             </h1>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-1 sm:gap-4 shrink-0">
             {/* Pulsante per l'Assistente Vocale (Con restrizione licenza Pro) */}
             <button
               onClick={() => {
@@ -744,7 +744,7 @@ export default function App() {
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 max-w-7xl mx-auto w-full p-4 pb-24 md:pb-8 md:pl-24">
+      <main className="flex-1 max-w-7xl mx-auto w-full min-w-0 p-4 pb-[calc(6rem+env(safe-area-inset-bottom))] md:pb-8 md:pl-24">
         <AnimatePresence mode="wait">
           <motion.div
             key={activeTab}
@@ -838,7 +838,7 @@ export default function App() {
       </main>
 
       {/* Bottom Navigation (Mobile) */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-4 pt-2.5 pb-1 flex items-center gap-2 overflow-x-auto z-40 md:hidden [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] snap-x snap-mandatory">
+      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-4 pt-2.5 pb-[max(0.25rem,env(safe-area-inset-bottom))] flex items-center gap-2 overflow-x-auto z-40 md:hidden [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] snap-x snap-mandatory">
         {tabs.map((tab) => (
           <button
             key={tab.id}

@@ -457,11 +457,11 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
               setNewMemberName(e.target.value);
               if (showLimitWarning) setShowLimitWarning(false);
             }}
-            className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            className="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
           />
           <button 
             onClick={addMember}
-            className="bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-indigo-700 transition-colors"
+            className="shrink-0 bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-indigo-700 transition-colors"
           >
             <Plus className="w-4 h-4" />
             Aggiungi
@@ -683,11 +683,11 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
             value={newAllergy}
             onChange={(e) => setNewAllergy(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && addAllergy()}
-            className="flex-1 bg-white border border-red-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+            className="flex-1 min-w-0 bg-white border border-red-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
           />
           <button 
             onClick={addAllergy}
-            className="bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-red-700 transition-colors"
+            className="shrink-0 bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-red-700 transition-colors"
           >
             Aggiungi
           </button>

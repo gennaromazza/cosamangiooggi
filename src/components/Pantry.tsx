@@ -337,7 +337,7 @@ export default function Pantry({ userId, profile, onNavigateToPlanner }: Props) 
                   <select
                     value={newItem.unit}
                     onChange={(e) => setNewItem({ ...newItem, unit: e.target.value })}
-                    className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="flex-1 min-w-0 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   >
                     <option value="pz">pz</option>
                     <option value="g">g</option>
@@ -401,32 +401,32 @@ export default function Pantry({ userId, profile, onNavigateToPlanner }: Props) 
                 return (
                   <>
                     {filteredPantryItems.map(item => (
-                      <div key={item.id} className="p-4 flex items-center justify-between hover:bg-slate-50/50 transition-colors">
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-500">
+                      <div key={item.id} className="p-3 sm:p-4 flex items-center justify-between gap-2 hover:bg-slate-50/50 transition-colors">
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
+                          <div className="w-9 h-9 shrink-0 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-500">
                             <Package className="w-4 h-4" />
                           </div>
-                          <div>
-                            <h4 className="font-semibold text-slate-800 text-sm">{item.name}</h4>
-                            <p className="text-[10px] text-slate-400 capitalize">{item.category}</p>
+                          <div className="min-w-0">
+                            <h4 className="font-semibold text-slate-800 text-sm truncate">{item.name}</h4>
+                            <p className="text-[10px] text-slate-400 capitalize truncate">{item.category}</p>
                           </div>
                         </div>
                         
-                        <div className="flex items-center gap-4">
-                          <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1 sm:gap-4 shrink-0">
+                          <div className="flex items-center gap-1 sm:gap-2">
                             <button 
                               onClick={() => updateQuantity(item.id, -1)}
-                              className="p-1 hover:bg-slate-200 rounded-md text-slate-400 hover:text-slate-600"
+                              className="p-1.5 hover:bg-slate-200 rounded-md text-slate-400 hover:text-slate-600"
                             >
                               <ChevronDown className="w-4 h-4" />
                             </button>
-                            <div className="w-16 text-center">
+                            <div className="w-14 sm:w-16 text-center">
                               <span className="font-bold text-slate-700 text-sm">{item.quantity}</span>
                               <span className="text-xs text-slate-400 ml-1">{item.unit}</span>
                             </div>
                             <button 
                               onClick={() => updateQuantity(item.id, 1)}
-                              className="p-1 hover:bg-slate-200 rounded-md text-slate-400 hover:text-slate-600"
+                              className="p-1.5 hover:bg-slate-200 rounded-md text-slate-400 hover:text-slate-600"
                             >
                               <ChevronUp className="w-4 h-4" />
                             </button>
