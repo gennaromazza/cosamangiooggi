@@ -218,7 +218,7 @@ export default function App() {
 
   // Handle activeTab redirection if Shopping List becomes unavailable
   useEffect(() => {
-    if (activeTab === 'shopping' && !(hasMealPlan && hasFamilyMember)) {
+    if (activeTab === 'shopping' && !hasMealPlan) {
       setActiveTab('planner');
     }
   }, [activeTab, hasMealPlan, hasFamilyMember]);
@@ -782,6 +782,7 @@ export default function App() {
                 onProfileUpdate={setProfile}
                 onNavigateToPantry={() => setActiveTab('pantry')}
                 onNavigateToPlanner={() => setActiveTab('planner')}
+                onNavigateToBusiness={() => setActiveTab('business')}
               />
             )}
             {activeTab === 'recipes' && (

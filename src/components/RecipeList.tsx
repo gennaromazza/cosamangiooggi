@@ -5,7 +5,7 @@ import { db } from '../lib/firebase';
 import { collection, addDoc, query, onSnapshot, deleteDoc, doc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firebaseUtils';
 import { calculateNutrients } from '../lib/nutritionUtils';
-import { Search, ChefHat, Clock, Gauge, X, UtensilsCrossed, Info, Plus, Trash2, Heart, Users, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Search, SlidersHorizontal, ChevronRight, ChefHat, Clock, Gauge, X, UtensilsCrossed, Info, Plus, Trash2, Heart, Users, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import RecipeForm from './RecipeForm';
 import { scaleIngredientAmount, getRawIngredientNames } from '../lib/utils';
@@ -33,6 +33,9 @@ export default function RecipeList({ userId, voiceSearchQuery, setVoiceSearchQue
   const [favorites, setFavorites] = useState<string[]>([]);
   const [pantryItems, setPantryItems] = useState<PantryItem[]>([]);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [showDietFilters, setShowDietFilters] = useState(false);
+  const PAGE_SIZE = 20;
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [familyCount, setFamilyCount] = useState(2);
   const [targetServings, setTargetServings] = useState(2);
 
@@ -234,82 +237,103 @@ export default function RecipeList({ userId, voiceSearchQuery, setVoiceSearchQue
     }
   };
 
+  const difficultyLabel: Record<string, string> = { easy: 'Facile', medium: 'Media', hard: 'Difficile' };
+  const categoryLabel = (c: string) =>
+    c === 'lunch' ? 'Primo' : c === 'dinner' ? 'Secondo' : c === 'dessert' ? 'Dolce' : c === 'side' ? 'Contorno' : c === 'fast' ? 'Veloce' : c;
+  const shownRecipes = filteredRecipes.slice(0, visibleCount);
+  const activeDietCount = dietaryFilter.length;
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800">Le Ricette</h2>
-          <p className="text-slate-500">Esplora piatti sani e aggiungi le tue creazioni.</p>
+    <div className="space-y-5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-3xl font-semibold text-slate-900">Le ricette</h2>
+          <p className="text-slate-600 mt-1">{filteredRecipes.length} piatti di stagione e le tue creazioni.</p>
         </div>
-        <button 
+        <button
           onClick={() => setShowAddForm(true)}
-          className="bg-indigo-600 text-white px-4 py-2 rounded-xl flex items-center gap-2 font-bold hover:bg-indigo-700 transition-all shadow-sm active:scale-95"
+          aria-label="Aggiungi una tua ricetta"
+          className="shrink-0 h-11 px-4 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm flex items-center gap-1.5 shadow-sm active:scale-95 transition-all"
         >
           <Plus className="w-5 h-5" />
-          Aggiungi Nuova Ricetta
+          Nuova
         </button>
       </div>
 
-      <div className="flex flex-col md:flex-row gap-4">
-        <div className="relative flex-1">
+      <div className="flex gap-2">
+        <div className="relative flex-1 min-w-0">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
           <input
             type="text"
-            placeholder="Cerca ricette o tag (es. vegan)..."
+            placeholder="Cerca una ricetta…"
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-white border border-slate-200 rounded-xl pl-10 pr-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
+            onChange={(e) => { setSearchTerm(e.target.value); setVisibleCount(PAGE_SIZE); }}
+            className="w-full bg-white border border-slate-200 rounded-2xl pl-10 pr-4 h-12 focus:outline-none focus:ring-2 focus:ring-indigo-500"
           />
         </div>
-        <div className="flex flex-wrap gap-4 items-center">
-          <div className="flex gap-2 overflow-x-auto pb-2 md:pb-0">
-            {[
-              { id: 'all', label: 'Tutte' },
-              { id: 'favorites', label: 'Preferiti ❤️' },
-              { id: 'primi', label: 'Primi Piatti' },
-              { id: 'secondi', label: 'Secondi Piatti' },
-              { id: 'dessert', label: 'Dolci' },
-              { id: 'side', label: 'Contorni' },
-              { id: 'fast', label: 'Veloci' }
-            ].map(filter => (
-              <button
-                key={filter.id}
-                onClick={() => setCategoryFilter(filter.id)}
-                className={`px-4 py-2 rounded-xl border text-sm font-medium whitespace-nowrap transition-all ${
-                  categoryFilter === filter.id
-                    ? 'bg-indigo-600 border-indigo-600 text-white shadow-md'
-                    : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
-                }`}
-              >
-                {filter.label}
-              </button>
-            ))}
-          </div>
+        <button
+          onClick={() => setShowDietFilters(v => !v)}
+          aria-label="Filtra per dieta"
+          aria-expanded={showDietFilters}
+          className={`relative shrink-0 h-12 w-12 rounded-2xl border flex items-center justify-center ${
+            showDietFilters || activeDietCount > 0 ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-600'
+          }`}
+        >
+          <SlidersHorizontal className="w-5 h-5" />
+          {activeDietCount > 0 && (
+            <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-indigo-600 text-white text-[11px] font-bold flex items-center justify-center">
+              {activeDietCount}
+            </span>
+          )}
+        </button>
+      </div>
 
-          <div className="h-6 w-[1px] bg-slate-200 hidden md:block" />
+      {/* Una sola riga di categorie; le diete si aprono solo su richiesta */}
+      <div className="flex gap-2 overflow-x-auto -mx-4 px-4 pb-1 [&::-webkit-scrollbar]:hidden">
+        {[
+          { id: 'all', label: 'Tutte' },
+          { id: 'favorites', label: 'Preferite' },
+          { id: 'primi', label: 'Primi' },
+          { id: 'secondi', label: 'Secondi' },
+          { id: 'dessert', label: 'Dolci' },
+          { id: 'side', label: 'Contorni' },
+          { id: 'fast', label: 'Veloci' },
+        ].map(filter => (
+          <button
+            key={filter.id}
+            onClick={() => { setCategoryFilter(filter.id); setVisibleCount(PAGE_SIZE); }}
+            className={`px-4 h-10 rounded-full border text-sm font-semibold whitespace-nowrap transition-all ${
+              categoryFilter === filter.id
+                ? 'bg-indigo-600 border-indigo-600 text-white'
+                : 'bg-white border-slate-200 text-slate-600'
+            }`}
+          >
+            {filter.label}
+          </button>
+        ))}
+      </div>
 
-          <div className="flex gap-2 overflow-x-auto pb-2 md:pb-0">
+      {showDietFilters && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-4">
+          <p className="text-sm font-semibold text-slate-700 mb-3">Mostra solo piatti…</p>
+          <div className="flex flex-wrap gap-2">
             {[
-              { id: 'gluten-free', label: 'Senza Glutine' },
-              { id: 'lactose-free', label: 'Senza Lattosio' },
-              { id: 'vegan', label: 'Vegan' },
-              { id: 'vegetarian', label: 'Vegetariano' }
+              { id: 'gluten-free', label: 'Senza glutine' },
+              { id: 'lactose-free', label: 'Senza lattosio' },
+              { id: 'vegan', label: 'Vegani' },
+              { id: 'vegetarian', label: 'Vegetariani' },
             ].map(diet => {
               const isActive = dietaryFilter.includes(diet.id);
               return (
                 <button
                   key={diet.id}
                   onClick={() => {
-                    if (isActive) {
-                      setDietaryFilter(dietaryFilter.filter(d => d !== diet.id));
-                    } else {
-                      setDietaryFilter([...dietaryFilter, diet.id]);
-                    }
+                    setVisibleCount(PAGE_SIZE);
+                    setDietaryFilter(isActive ? dietaryFilter.filter(d => d !== diet.id) : [...dietaryFilter, diet.id]);
                   }}
-                  className={`px-4 py-2 rounded-xl border text-sm font-medium whitespace-nowrap transition-all ${
-                    isActive
-                      ? 'bg-emerald-600 border-emerald-600 text-white shadow-md'
-                      : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+                  aria-pressed={isActive}
+                  className={`px-4 h-10 rounded-full border text-sm font-semibold ${
+                    isActive ? 'bg-emerald-600 border-emerald-600 text-white' : 'bg-white border-slate-200 text-slate-600'
                   }`}
                 >
                   {diet.label}
@@ -318,85 +342,56 @@ export default function RecipeList({ userId, voiceSearchQuery, setVoiceSearchQue
             })}
           </div>
         </div>
-      </div>
+      )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredRecipes.map(recipe => (
-          <div key={recipe.id} className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-md transition-all group relative">
-            {isCustom(recipe.id) && (
-              <div className="absolute top-3 left-3 z-10 bg-indigo-600 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-sm flex items-center gap-1">
-                <ChefHat size={10} />
-                Tua Ricetta
-              </div>
-            )}
-            <button 
-              onClick={(e) => toggleFavorite(e, recipe.id)}
-              className={`absolute top-3 z-10 p-2 rounded-full shadow-sm transition-all cursor-pointer ${
-                isCustom(recipe.id) ? 'right-12' : 'right-3'
-              } ${
-                favorites.includes(recipe.id)
-                  ? 'bg-rose-500 text-white hover:bg-rose-600 scale-105'
-                  : 'bg-white/90 text-slate-400 hover:text-rose-500 hover:bg-rose-50'
-              }`}
-              title={favorites.includes(recipe.id) ? "Rimuovi dai preferiti" : "Aggiungi ai preferiti"}
+      {/* Elenco compatto: titolo, tempo e difficoltà. Si apre con un tocco. */}
+      <div className="bg-white rounded-3xl border border-slate-200 divide-y divide-slate-100 overflow-hidden">
+        {shownRecipes.map(recipe => (
+          <div key={recipe.id} className="flex items-center gap-1 pr-2">
+            <button
+              onClick={() => setSelectedRecipe(recipe)}
+              className="flex-1 min-w-0 text-left px-4 py-4 flex items-center gap-3 active:bg-slate-50"
             >
-              <Heart className={`w-3.5 h-3.5 ${favorites.includes(recipe.id) ? 'fill-current' : ''}`} />
+              <span className="flex-1 min-w-0">
+                <span className="block font-semibold text-slate-900 leading-snug">{recipe.title}</span>
+                <span className="block text-sm text-slate-500 mt-0.5">
+                  {recipe.timeMin} min · {difficultyLabel[recipe.difficulty] || recipe.difficulty} · {categoryLabel(recipe.category)}
+                  {isCustom(recipe.id) && <span className="ml-2 text-indigo-600 font-semibold">Tua</span>}
+                </span>
+              </span>
+              <ChevronRight className="w-5 h-5 text-slate-300 shrink-0" />
+            </button>
+            <button
+              onClick={(e) => toggleFavorite(e, recipe.id)}
+              aria-label={favorites.includes(recipe.id) ? 'Rimuovi dai preferiti' : 'Aggiungi ai preferiti'}
+              aria-pressed={favorites.includes(recipe.id)}
+              className={`shrink-0 w-11 h-11 rounded-full flex items-center justify-center ${
+                favorites.includes(recipe.id) ? 'text-rose-500' : 'text-slate-300'
+              }`}
+            >
+              <Heart className={`w-5 h-5 ${favorites.includes(recipe.id) ? 'fill-current' : ''}`} />
             </button>
             {isCustom(recipe.id) && (
-              <button 
+              <button
                 onClick={(e) => handleDeleteRecipe(e, recipe.id)}
-                className="absolute top-3 right-3 z-10 bg-white/90 hover:bg-red-50 p-2 rounded-full text-slate-400 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100 shadow-sm cursor-pointer"
-                title="Elimina ricetta"
+                aria-label="Elimina ricetta"
+                className="shrink-0 w-11 h-11 rounded-full flex items-center justify-center text-slate-300 hover:text-red-500"
               >
-                <Trash2 className="w-3.5 h-3.5" />
+                <Trash2 className="w-5 h-5" />
               </button>
             )}
-            <div className="h-32 bg-slate-100 flex items-center justify-center group-hover:bg-indigo-50 transition-colors">
-              <ChefHat className="w-12 h-12 text-slate-300 group-hover:text-indigo-200 transition-colors" />
-            </div>
-            <div className="p-6">
-              <div className="flex flex-wrap gap-2 mb-3">
-                {recipe.tags.map(tag => (
-                  <span key={tag} className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
-                    {tag}
-                  </span>
-                ))}
-              </div>
-              <h3 className="text-lg font-bold text-slate-800 mb-4 group-hover:text-indigo-600 transition-colors line-clamp-1 pr-8">
-                {recipe.title}
-              </h3>
-              
-              <div className="flex items-center justify-between text-slate-500 text-sm mb-6">
-                <div className="flex items-center gap-1">
-                  <Clock className="w-4 h-4" />
-                  <span>{recipe.timeMin} min</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Gauge className="w-4 h-4" />
-                  <span className="capitalize">{recipe.difficulty}</span>
-                </div>
-              </div>
-
-              <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-400 uppercase">
-                  {recipe.category === 'lunch' ? 'Primo' : 
-                   recipe.category === 'dinner' ? 'Secondo' : 
-                   recipe.category === 'dessert' ? 'Dolce' : 
-                   recipe.category === 'side' ? 'Contorno' :
-                   recipe.category === 'fast' ? 'Veloce' :
-                   recipe.category}
-                </span>
-                <button 
-                  onClick={() => setSelectedRecipe(recipe)}
-                  className="text-indigo-600 text-sm font-bold hover:underline"
-                >
-                  Vedi Ricetta
-                </button>
-              </div>
-            </div>
           </div>
         ))}
       </div>
+
+      {filteredRecipes.length > visibleCount && (
+        <button
+          onClick={() => setVisibleCount(c => c + PAGE_SIZE)}
+          className="w-full h-12 rounded-2xl border border-slate-200 bg-white text-slate-700 font-semibold"
+        >
+          Mostra altre ({filteredRecipes.length - visibleCount})
+        </button>
+      )}
       
       {filteredRecipes.length === 0 && (
         <div className="text-center py-12 bg-white rounded-2xl border border-dashed border-slate-200">
