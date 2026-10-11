@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#fbf7f0">
+<title>Che cucino oggi?</title>
+<style>
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#fbf7f0;color:#2b1a12;font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+  main{max-width:360px;padding:32px 24px;text-align:center}
+  img{width:72px;height:72px;border-radius:18px}
+  h1{font-size:26px;margin:20px 0 8px}
+  p{color:#6b5a50;line-height:1.5;margin:0}
+</style>
+</head>
+<body>
+<main>
+  <img src="/icon-192.png" alt="">
+  <h1 id="title">Fatto!</h1>
+  <p id="text">Puoi tornare all'app «Che cucino oggi?».</p>
+</main>
+<script>
+  var esito = new URLSearchParams(location.search).get('esito');
+  var title = document.getElementById('title');
+  var text = document.getElementById('text');
+  if (esito === 'ok') {
+    title.textContent = 'Grazie, è tutto pronto!';
+    text.textContent = "Il pagamento è andato a buon fine. Chiudi questa pagina e torna all'app «Che cucino oggi?»: il tuo piano è già attivo.";
+  } else if (esito === 'annullato') {
+    title.textContent = 'Nessun addebito';
+    text.textContent = "Hai annullato il pagamento. Chiudi questa pagina e torna all'app quando vuoi.";
+  } else {
+    title.textContent = 'Tutto salvato';
+    text.textContent = "Chiudi questa pagina e torna all'app «Che cucino oggi?».";
+  }
+</script>
+</body>
+</html>

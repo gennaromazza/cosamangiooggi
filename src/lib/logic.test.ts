@@ -1,3 +1,4 @@
+import { getSupermarketDepartment } from './departments';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -96,4 +97,29 @@ test('piani: ogni piano a pagamento include le funzioni di quello inferiore', ()
   }
   assert.ok(PRICES.pro.month > PRICES.smart.month);
   assert.ok(yearlySavingPercent('smart') > 0 && yearlySavingPercent('pro') > 0);
+});
+
+
+test('reparti del supermercato: conservati prima dei freschi, parole intere', () => {
+  const cases: [string, string][] = [
+    ['Passata di pomodoro', 'dispensa'],
+    ['Pomodori', 'ortofrutta'],
+    ['Latte di cocco', 'dispensa'],
+    ['Latte', 'latticini'],
+    ['Tonno in scatola', 'dispensa'],
+    ['Tonno fresco', 'macelleria'],
+    ['Peperoni', 'ortofrutta'],
+    ['Pepe', 'dispensa'],
+    ['Pane grattugiato', 'dispensa'],
+    ['Pane', 'pane'],
+    ['Fettine di manzo', 'macelleria'],
+    ['Piselli surgelati', 'surgelati'],
+    ['Acqua frizzante', 'bevande'],
+    ['Melanzane', 'ortofrutta'],
+    ['Riso', 'dispensa'],
+    ['Detersivo', 'altro'],
+  ];
+  for (const [name, expected] of cases) {
+    assert.equal(getSupermarketDepartment(name), expected, name);
+  }
 });

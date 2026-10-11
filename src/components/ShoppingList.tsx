@@ -1,3 +1,4 @@
+import { getSupermarketDepartment } from '../lib/departments';
 import { useState, useEffect } from 'react';
 import { db } from '../lib/firebase';
 import { doc, getDoc, collection, getDocs, query, onSnapshot, addDoc, deleteDoc, updateDoc } from 'firebase/firestore';
@@ -22,33 +23,6 @@ const DEPARTMENTS = [
   { id: 'dispensa', name: 'Dispensa & Condimenti 🥫', color: 'bg-indigo-50/70 text-indigo-850 border-indigo-200/50', iconColor: 'text-indigo-500 bg-indigo-100/40' },
   { id: 'altro', name: 'Altro 📦', color: 'bg-slate-50/70 text-slate-800 border-slate-200/50', iconColor: 'text-slate-500 bg-slate-100/40' }
 ] as const;
-
-function getSupermarketDepartment(name: string): typeof DEPARTMENTS[number]['id'] {
-  const cleanName = name.toLowerCase();
-  
-  if (/(mela|mele|banana|banane|limon|aranci|cipoll|pomodor|insalat|zucchina|zucchine|carota|carote|patata|patate|aglio|spinaci|fung|basilico|prezzemolo|rucola|melanzan|zucca|peperon|broccol|cavolfior|lattuga|erbette|fragol|kiwi|avocado|pera|pere|pesca|albico|sedano|frutta|verdura|ananas|pesche)/.test(cleanName)) {
-    return 'ortofrutta';
-  }
-  if (/(pollo|tacchino|manzo|maiale|vitello|agnello|salsiccia|salsicce|pancetta|prosciutto|salame|bresaola|pesce|salmone|tonno|merluzzo|gamber|calamar|vongol|cozze|branzino|orata|sarde|alici|carne|macinato|petto|lonza|bistecca|hamburger|affettat|quaglia|coniglio|fesa|spezzatino)/.test(cleanName)) {
-    return 'macelleria';
-  }
-  if (/(latte|burro|formaggi|formaggio|parmigiano|grana|mozzarella|ricotta|panna|yogurt|uovo|uova|mascarpone|gorgonzola|pecorino|caprino|provola|stracchino|tofu|lievito fresco|margarina|philadelphia|fresco|caciotta|fontina|emmental|scamorza)/.test(cleanName)) {
-    return 'latticini';
-  }
-  if (/(focaccia|pizza|piadina|piadine|pancarrè|fette biscottate|panino|mollica|pane|piada|schiacciata|taralli|sfogliatina|bignè|torta|crostata)/.test(cleanName)) {
-    return 'pane';
-  }
-  if (/(gelato|surgelat|congelat|frozen|sottozero)/.test(cleanName)) {
-    return 'surgelati';
-  }
-  if (/(acqua|vino|birra|succo|succhi|bibita|bibite|coca cola|aranciata|gassosa|chinotto|spumante|sidro|limonata|aperitivo|aperol)/.test(cleanName)) {
-    return 'bevande';
-  }
-  if (/(olio|sale|pepe|zucchero|farina|riso|pasta|pane|cracker|grissini|biscotti|cereali|miele|marmellata|sugo|passata|pelati|dado|brodo|aceto|maionese|ketchup|senape|spezie|origano|rosmarino|salvia|timo|cannella|vaniglia|lievito|pinoli|noci|mandorle|nocciole|oliva|olive|capperi|acciughe|ceci|fagioli|lenticchie|cacao|cioccolato|caffè|tè|infus|salsa|scatola|barattolo|confettura|granella|pistacchi|zucchine in agrodolce|maizena|fecola|curcuma|curry)/.test(cleanName)) {
-    return 'dispensa';
-  }
-  return 'altro';
-}
 
 interface Props {
   userId: string;

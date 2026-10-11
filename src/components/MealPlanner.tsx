@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '../lib/firebase';
 import { collection, query, where, getDocs, setDoc, doc, onSnapshot } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firebaseUtils';
@@ -996,6 +996,30 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
   };
 
   const generateNow = () => generatePlan(true, familyMembers.length === 0);
+
+  // Dopo la guida iniziale il primo menù parte da solo: niente schermata vuota da interpretare
+  const generateRef = useRef(generateNow);
+  generateRef.current = generateNow;
+  useEffect(() => {
+    if (loading || currentPlan) return;
+    let wanted = false;
+    try {
+      wanted = sessionStorage.getItem('auto_generate_plan') === '1';
+    } catch {
+      /* storage non disponibile */
+    }
+    if (!wanted) return;
+    // Un attimo di margine perché arrivino persone e dispensa
+    const timer = setTimeout(() => {
+      try {
+        sessionStorage.removeItem('auto_generate_plan');
+      } catch {
+        /* storage non disponibile */
+      }
+      generateRef.current();
+    }, 900);
+    return () => clearTimeout(timer);
+  }, [loading, currentPlan]);
 
   return (
     <div className="space-y-5">
