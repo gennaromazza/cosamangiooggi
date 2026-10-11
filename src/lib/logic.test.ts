@@ -1,4 +1,5 @@
 import { getSupermarketDepartment } from './departments';
+import { inferDishInfo, parseIngredientText } from './dishInference';
 import { fitsMember, membersNeedingAlternative, pickAlternatives, planMeals } from './memberAlternatives';
 import type { FamilyMember, WeeklyPlan } from '../types';
 import { test } from 'node:test';
@@ -200,4 +201,32 @@ test('alternative: la spesa conta le porzioni di ognuno', () => {
   };
   const result = Object.fromEntries(planMeals(plan, 4).map((x) => [x.recipeId, x.people]));
   assert.deepEqual(result, { carne: 3, lenticchie: 1, zuppa: 8 });
+});
+
+
+test('piatto personale: riconosce dieta e tipo dagli ingredienti', () => {
+  const carbonara = inferDishInfo(parseIngredientText('200 g spaghetti, 2 uova, guanciale, pecorino'), 'Carbonara');
+  assert.equal(carbonara.contains.gluten, true);
+  assert.equal(carbonara.contains.dairy, true);
+  assert.equal(carbonara.contains.animal, true);
+  assert.ok(!carbonara.tags.includes('vegan'));
+  assert.ok(!carbonara.tags.includes('gluten-free'));
+  assert.equal(carbonara.proteinType, 'red-meat');
+
+  const lenticchie = inferDishInfo(parseIngredientText('lenticchie, carote, sedano, cipolla'), 'Zuppa di lenticchie');
+  assert.deepEqual(lenticchie.tags.sort(), ['gluten-free', 'lactose-free', 'vegan']);
+  assert.equal(lenticchie.proteinType, 'legumes');
+  assert.equal(lenticchie.hasVeg, true);
+
+  const salmone = inferDishInfo([{ name: 'Salmone' }, { name: 'Limone' }]);
+  assert.equal(salmone.proteinType, 'fish');
+  assert.ok(salmone.tags.includes('gluten-free') && salmone.tags.includes('lactose-free'));
+});
+
+test('piatto personale: legge quantità e unità scritte a parole', () => {
+  const list = parseIngredientText('200 g di pasta, 2 uova, 1 cucchiaio olio, guanciale e pecorino');
+  assert.deepEqual(
+    list.map((i) => [i.name, i.amount, i.unit]),
+    [['Pasta', 200, 'g'], ['Uova', 2, 'pz'], ['Olio', 1, 'cucchiai'], ['Guanciale', 100, 'g'], ['Pecorino', 100, 'g']],
+  );
 });

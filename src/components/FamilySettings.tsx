@@ -10,6 +10,7 @@ import { FamilyMember, DietaryRestriction, UserProfile, Recipe } from '../types'
 import { Plus, Trash2, ChevronDown, X, Search } from 'lucide-react';
 import { INITIAL_RECIPES } from '../data/recipes';
 import IngredientPicker from './IngredientPicker';
+import QuickDishModal from './QuickDishModal';
 import { hasPersonalRules } from '../lib/memberAlternatives';
 
 interface Props {
@@ -150,6 +151,7 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
 
   const [newAllergy, setNewAllergy] = useState('');
   const [mealSearch, setMealSearch] = useState('');
+  const [dishFor, setDishFor] = useState<string | null>(null);
 
   const addAllergy = async () => {
     if (!profile || !newAllergy.trim()) return;
@@ -271,6 +273,35 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
       onProfileUpdate(updatedProfile);
     }
     localStorage.setItem(`profile_${userId}`, JSON.stringify(updatedProfile));
+  };
+
+  // Salva un piatto personale tra le ricette e lo segna come gradito alla persona
+  const saveQuickDish = async (memberId: string, recipeData: Omit<Recipe, 'id'>) => {
+    const isLocal = userId === 'demo-family-user' || userId.startsWith('local-');
+    let newId: string;
+    if (isLocal) {
+      newId = 'custom-' + Date.now();
+      const updated = [...customRecipes, { ...recipeData, id: newId }];
+      setCustomRecipes(updated);
+      localStorage.setItem(`customRecipes_${userId}`, JSON.stringify(updated));
+    } else {
+      const path = `users/${userId}/customRecipes`;
+      try {
+        newId = (await addDoc(collection(db, path), recipeData)).id;
+      } catch (e) {
+        handleFirestoreError(e, OperationType.CREATE, path);
+        return;
+      }
+    }
+    const member = members.find(m => m.id === memberId);
+    if (member && !(member.likedMeals || []).includes(newId)) {
+      await patchMember(memberId, {
+        likedMeals: [...(member.likedMeals || []), newId],
+        dislikedMeals: (member.dislikedMeals || []).filter(id => id !== newId),
+      });
+    }
+    setMealSearch('');
+    setDishFor(null);
   };
 
   const mealResults = (() => {
@@ -559,6 +590,13 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
                               className="w-full pl-10 pr-3 h-12 bg-white border border-slate-200 rounded-2xl text-base focus:outline-none focus:ring-2 focus:ring-indigo-300"
                             />
                           </div>
+                          <button
+                            type="button"
+                            onClick={() => setDishFor(member.id)}
+                            className="w-full h-12 rounded-2xl border border-dashed border-indigo-300 bg-indigo-50/60 text-indigo-700 font-bold flex items-center justify-center gap-2"
+                          >
+                            <Plus className="w-5 h-5" /> Il suo piatto non c’è? Aggiungilo
+                          </button>
                           {([
                             { field: 'likedMeals', title: 'Piatti che ama', onClass: 'bg-emerald-600 border-emerald-600 text-white', blockedField: 'dislikedMeals' },
                             { field: 'dislikedMeals', title: 'Piatti da evitare', onClass: 'bg-slate-800 border-slate-800 text-white', blockedField: null },
@@ -705,6 +743,14 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
       >
         Rivedi la guida iniziale
       </button>
+      {dishFor && (
+        <QuickDishModal
+          initialTitle={mealSearch.trim()}
+          offlineOnly={userId === 'demo-family-user' || userId.startsWith('local-')}
+          onSave={(recipe) => saveQuickDish(dishFor, recipe)}
+          onClose={() => setDishFor(null)}
+        />
+      )}
     </div>
   );
 }

@@ -10,6 +10,7 @@ const REGION = 'europe-west1';
 // Tenere allineati a src/lib/plans.ts
 const TRIAL_DAYS = 7;
 const FLYER_SCANS_PER_MONTH = 30;
+const DISH_SUGGESTIONS_PER_MONTH = 20;
 const FIRESTORE_DB_ID = 'ai-studio-93a2a041-9b02-4ff7-b496-5f2ada58f953';
 
 const STRIPE_SECRET_KEY = defineSecret('STRIPE_SECRET_KEY');
@@ -315,6 +316,102 @@ async function refundFlyerScan(uid) {
     }
   });
 }
+
+// Riconoscimento degli ingredienti di un piatto di famiglia (tetto mensile: protegge i costi di Gemini)
+async function reserveDishSuggestion(uid) {
+  const month = new Date().toISOString().slice(0, 7);
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(userRef(uid));
+    const usage = snap.exists ? snap.data().dishUsage : null;
+    const used = usage && usage.month === month ? usage.count || 0 : 0;
+    if (used >= DISH_SUGGESTIONS_PER_MONTH) {
+      throw new HttpsError(
+        'resource-exhausted',
+        `Hai usato tutti i ${DISH_SUGGESTIONS_PER_MONTH} riconoscimenti di questo mese: gli ingredienti puoi sempre scriverli a mano.`
+      );
+    }
+    tx.set(userRef(uid), { dishUsage: { month, count: used + 1 } }, { merge: true });
+  });
+}
+
+async function refundDishSuggestion(uid) {
+  const month = new Date().toISOString().slice(0, 7);
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(userRef(uid));
+    const usage = snap.exists && snap.data().dishUsage;
+    if (usage && usage.month === month && usage.count > 0) {
+      tx.set(userRef(uid), { dishUsage: { month, count: usage.count - 1 } }, { merge: true });
+    }
+  });
+}
+
+exports.suggestDish = onCall(
+  { region: REGION, secrets: [GEMINI_API_KEY], timeoutSeconds: 60 },
+  async (request) => {
+    const uid = requireAuth(request);
+    const title = String((request.data && request.data.title) || '').trim().slice(0, 120);
+    const notes = String((request.data && request.data.notes) || '').trim().slice(0, 600);
+    if (title.length < 2) throw new HttpsError('invalid-argument', 'Scrivi il nome del piatto.');
+
+    await reserveDishSuggestion(uid);
+    try {
+      const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY.value() });
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: `Sei un cuoco italiano. Un utente vuole aggiungere questo piatto alla sua famiglia.\nNome del piatto: "${title}"\n${
+          notes ? `Cosa c'è dentro, scritto dall'utente: "${notes}"\n` : ''
+        }\nElenca gli ingredienti del piatto per 2 porzioni, in italiano, semplici e senza marche. Se l'utente ha indicato gli ingredienti, usa quelli e aggiungi solo ciò che manca per forza. Usa solo queste unità: g, ml, pz, cucchiai, cucchiaini, spicchi. Non includere acqua e sale. Indica anche la categoria (lunch = primo, dinner = secondo, fast = piatto unico, side = contorno, dessert = dolce), la difficoltà, il tempo in minuti e 3-5 passaggi brevi di preparazione.`,
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              ingredients: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    name: { type: Type.STRING },
+                    amount: { type: Type.NUMBER },
+                    unit: { type: Type.STRING },
+                  },
+                  required: ['name', 'amount', 'unit'],
+                },
+              },
+              category: { type: Type.STRING },
+              difficulty: { type: Type.STRING },
+              timeMin: { type: Type.NUMBER },
+              steps: { type: Type.ARRAY, items: { type: Type.STRING } },
+            },
+            required: ['ingredients', 'category', 'difficulty', 'timeMin', 'steps'],
+          },
+        },
+      });
+      if (!response.text) throw new HttpsError('internal', 'Nessuna risposta dal modello.');
+      const out = JSON.parse(response.text);
+      const units = ['g', 'ml', 'pz', 'cucchiai', 'cucchiaini', 'spicchi', 'kg', 'l'];
+      const ingredients = (out.ingredients || [])
+        .filter((i) => i && typeof i.name === 'string' && i.name.trim())
+        .slice(0, 25)
+        .map((i) => ({
+          name: i.name.trim().charAt(0).toUpperCase() + i.name.trim().slice(1).toLowerCase(),
+          amount: Number.isFinite(i.amount) && i.amount > 0 ? i.amount : 100,
+          unit: units.includes(i.unit) ? i.unit : 'g',
+        }));
+      if (ingredients.length === 0) throw new HttpsError('internal', 'Non sono riuscito a riconoscere gli ingredienti.');
+      return {
+        ingredients,
+        category: ['lunch', 'dinner', 'fast', 'side', 'dessert'].includes(out.category) ? out.category : 'lunch',
+        difficulty: ['easy', 'medium', 'hard'].includes(out.difficulty) ? out.difficulty : 'easy',
+        timeMin: Number.isFinite(out.timeMin) ? Math.min(Math.max(Math.round(out.timeMin), 5), 240) : 30,
+        steps: (out.steps || []).filter((x) => typeof x === 'string' && x.trim()).slice(0, 8),
+      };
+    } catch (err) {
+      await refundDishSuggestion(uid).catch(() => {});
+      throw err;
+    }
+  }
+);
 
 exports.analyzeFlyer = onCall(
   { region: REGION, secrets: [GEMINI_API_KEY], memory: '512MiB', timeoutSeconds: 120 },
