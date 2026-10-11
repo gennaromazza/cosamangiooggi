@@ -420,9 +420,9 @@ export default function App() {
             <div className="bg-indigo-600 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg rotate-3 overflow-hidden">
                <Utensils className="text-white w-8 h-8" />
             </div>
-            <h1 className="text-3xl font-extrabold text-slate-900 mb-2">Che cucino oggi?</h1>
+            <h1 className="text-4xl font-semibold text-slate-900 mb-2">Che cucino oggi?</h1>
             <p className="text-slate-500 mb-6 text-sm leading-relaxed">
-              0 stress Meal planner: menù stagionali, dispensa sotto controllo e benessere per tutta la famiglia.
+              Il menù della settimana, pensato per la tua famiglia. Tu scegli cosa mangiare, a spesa e dispensa pensiamo noi.
             </p>
           </div>
           
@@ -579,7 +579,7 @@ export default function App() {
             className="w-full mt-3 bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold py-3 px-6 rounded-xl hover:bg-emerald-100/70 transition-all shadow-xs flex items-center justify-center gap-2 text-sm active:scale-[0.98] cursor-pointer"
           >
             <Sparkles className="w-4 h-4 text-emerald-600" />
-            <span>Entra in Modalità Demo (Esplora l'App)</span>
+            <span>Prova subito, senza registrarti</span>
           </button>
 
           <div className="mt-8 pt-6 border-t border-slate-100 grid grid-cols-3 gap-4 text-[10px] uppercase font-bold text-slate-400 tracking-widest text-center">

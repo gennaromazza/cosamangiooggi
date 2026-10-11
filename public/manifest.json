@@ -4,8 +4,8 @@
   "description": "Pianifica menù settimanali, gestisci la dispensa e organizza la spesa senza stress.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#f8fafc",
-  "theme_color": "#4f46e5",
+  "background_color": "#fbf7f0",
+  "theme_color": "#c8440f",
   "orientation": "portrait",
   "categories": ["food", "lifestyle", "productivity"],
   "icons": [
