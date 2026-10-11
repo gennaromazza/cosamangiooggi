@@ -4,6 +4,8 @@ import { PAGES, renderGuideLinks } from './landing-pages';
 export interface LandingVars {
   siteUrl: string;
   appUrl: string;
+  /** Indirizzo del file da scaricare (con la versione nel nome); di base il link che punta sempre all'ultima */
+  apkPath?: string;
 }
 
 /** Sostituisce i segnaposto del sito (indirizzi e prezzi): i prezzi vengono sempre da src/lib/plans.ts. */
@@ -11,6 +13,7 @@ export function fillPlaceholders(text: string, vars: LandingVars): string {
   const map: Record<string, string> = {
     __SITE_URL__: vars.siteUrl.replace(/\/$/, ''),
     __APP_URL__: vars.appUrl.replace(/\/$/, ''),
+    __APK_PATH__: vars.apkPath || '/download/che-cucino-oggi.apk',
     __PRICE_SMART_MONTH__: formatPrice(PRICES.smart.month),
     __PRICE_SMART_YEAR__: formatPrice(PRICES.smart.year),
     __PRICE_PRO_MONTH__: formatPrice(PRICES.pro.month),

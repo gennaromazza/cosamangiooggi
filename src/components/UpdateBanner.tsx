@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { Browser } from '@capacitor/browser';
 import { Download, X } from 'lucide-react';
-import { APK_URL, checkForUpdate, dismissUpdate } from '../lib/updateCheck';
+import { checkForUpdate, dismissUpdate } from '../lib/updateCheck';
 import type { UpdateInfo } from '../lib/updateCheck';
 
 /** Nell'app Android: avvisa quando sul sito c'è una versione nuova e porta al download. */
@@ -25,8 +25,8 @@ export default function UpdateBanner() {
 
   const install = async () => {
     // Il file si scarica e Android propone di aggiornare l'app già installata (stessa firma: i dati restano)
-    if (Capacitor.isNativePlatform()) await Browser.open({ url: APK_URL });
-    else window.location.assign(APK_URL);
+    if (Capacitor.isNativePlatform()) await Browser.open({ url: update.apkUrl });
+    else window.location.assign(update.apkUrl);
   };
 
   return (
@@ -36,7 +36,9 @@ export default function UpdateBanner() {
     >
       <div className="flex-1 min-w-0">
         <p className="font-bold text-slate-900">C’è una versione nuova dell’app</p>
-        <p className="text-sm text-slate-600">Aggiorna per avere le ultime novità. I tuoi dati restano al loro posto.</p>
+        <p className="text-sm text-slate-600">
+          {update.version ? `Versione ${update.version}. ` : ''}I tuoi dati restano al loro posto.
+        </p>
       </div>
       <button
         onClick={install}

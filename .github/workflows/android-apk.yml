@@ -78,6 +78,9 @@ jobs:
           java-version: 21
 
       - run: npm ci
+      # Numero di versione (anno.mese.giorno.build): finisce nell'app, nel nome del file e sul sito
+      - name: Numero di versione
+        run: echo "APP_VERSION=$(date +%Y.%m.%d).${{ github.run_number }}" >> "$GITHUB_ENV"
       - run: npm run build
         env:
           BUILD_NUMBER: ${{ github.run_number }}
@@ -142,7 +145,7 @@ jobs:
       # Versione dell'app: cresce a ogni build, così Android la riconosce come aggiornamento
       - name: Versione dell'app
         run: |
-          sed -i "s/versionCode 1/versionCode ${{ github.run_number }}/; s/versionName \"1.0\"/versionName \"$(date +%Y.%m.%d).${{ github.run_number }}\"/" android/app/build.gradle
+          sed -i "s/versionCode 1/versionCode ${{ github.run_number }}/; s/versionName \"1.0\"/versionName \"$APP_VERSION\"/" android/app/build.gradle
           grep -n "versionCode\|versionName" android/app/build.gradle
       - run: npx cap sync android
 
@@ -150,10 +153,17 @@ jobs:
         working-directory: android
         run: ./gradlew assembleDebug
 
+      # Il file porta la versione nel nome: si capisce subito quale si sta scaricando
+      - name: Nome del file con la versione
+        run: |
+          mkdir -p apk-out
+          cp android/app/build/outputs/apk/debug/app-debug.apk "apk-out/che-cucino-oggi-$APP_VERSION.apk"
+          ls -l apk-out
+
       - uses: actions/upload-artifact@v4
         with:
-          name: che-cucino-oggi-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: che-cucino-oggi-${{ env.APP_VERSION }}
+          path: apk-out/che-cucino-oggi-${{ env.APP_VERSION }}.apk
 
       # Sito ufficiale (SEO e download): si aggiorna a ogni build da main, con l'APK appena costruito
       - name: Pubblica il sito ufficiale
@@ -161,7 +171,7 @@ jobs:
         env:
           SITE_URL: ${{ vars.SITE_URL }}
           APP_URL: ${{ vars.APP_URL }}
-          APK: android/app/build/outputs/apk/debug/app-debug.apk
+          APK: apk-out/che-cucino-oggi-${{ env.APP_VERSION }}.apk
           BUILD: ${{ github.sha }}
           BUILD_NUMBER: ${{ github.run_number }}
         run: |

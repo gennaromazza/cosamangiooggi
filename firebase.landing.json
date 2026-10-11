@@ -10,7 +10,7 @@
         "source": "/download/**",
         "headers": [
           { "key": "Content-Type", "value": "application/vnd.android.package-archive" },
-          { "key": "Content-Disposition", "value": "attachment; filename=\"che-cucino-oggi.apk\"" },
+          { "key": "Content-Disposition", "value": "attachment" },
           { "key": "Cache-Control", "value": "no-cache" },
           { "key": "X-Robots-Tag", "value": "noindex" }
         ]

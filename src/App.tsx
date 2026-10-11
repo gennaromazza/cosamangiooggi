@@ -591,6 +591,7 @@ export default function App() {
             <span>OMS</span>
             <span>Pantry</span>
           </div>
+          <p className="mt-5 text-center text-xs text-slate-500">Versione dell’app: {__APP_VERSION__}</p>
         </div>
       </div>
     );

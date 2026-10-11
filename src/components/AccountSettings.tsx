@@ -343,6 +343,10 @@ export default function AccountSettings({
         </Card>
       )}
 
+      <p className="text-center text-sm text-slate-500">
+        Versione dell’app: <strong className="text-slate-700">{__APP_VERSION__}</strong>
+      </p>
+
       <Card title="Esci">
         <button onClick={onLogout} className={secondaryButton}>
           <LogOut className="w-4 h-4" /> Esci dall’app
