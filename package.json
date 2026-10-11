@@ -11,7 +11,7 @@
     "lint": "tsc --noEmit",
     "cap:sync": "cap sync",
     "cap:open": "npx cap open android",
-    "test": "tsx --test src/lib/logic.test.ts && node --test functions/invites.test.js"
+    "test": "tsx --test src/lib/logic.test.ts && node --test functions/invites.test.js functions/config-checks.test.js"
   },
   "dependencies": {
     "@capacitor-firebase/authentication": "^8.5.2",

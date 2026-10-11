@@ -41,8 +41,11 @@ jobs:
         run: |
           [ -n "$KEY" ] || { echo "::error::Manca il secret STRIPE_SECRET_KEY"; exit 1; }
           api() { curl -s -u "$KEY:" "https://api.stripe.com/v1/$1"; }
-          MODE=TEST; case "$KEY" in sk_live_*|rk_live_*) MODE=LIVE;; esac
-          echo "== Chiave: modalità $MODE (tipo ${KEY:0:3}) =="
+          MODE=TEST; case "$KEY" in sk_live_*|rk_live_*|pk_live_*) MODE=LIVE;; esac
+          case "$KEY" in
+            sk_*|rk_*) echo "== Chiave: segreta, modalità $MODE ==" ;;
+            *) echo "::error::La chiave salvata inizia con ${KEY:0:3}: non è una chiave SEGRETA. Serve quella che inizia con sk_live_"; exit 1 ;;
+          esac
           echo "== Account =="
           api account | jq '{charges_enabled, details_submitted, country, disabled_reason: .requirements.disabled_reason, da_completare: (.requirements.currently_due // [] | length), error: .error.message}'
           echo "== Prezzi (devono essere della stessa modalità della chiave) =="
@@ -128,7 +131,23 @@ jobs:
       # Le funzioni (Stripe/Gemini) si attivano solo quando i relativi valori sono configurati
       - name: Decidi cosa pubblicare
         run: |
-          if [ -n "$STRIPE_SECRET_KEY" ] && [ -n "$STRIPE_WEBHOOK_SECRET" ] && [ -n "$GEMINI_API_KEY" ] \
+          # Errori di copia frequenti: la chiave pubblicabile (pk_) al posto di quella segreta (sk_), o il segreto sbagliato per il webhook.
+          # Con valori sbagliati le funzioni non si pubblicano (si pubblicano sito e regole) e il deploy finisce rosso con il motivo.
+          BAD=""
+          if [ -n "$STRIPE_SECRET_KEY" ]; then
+            case "$STRIPE_SECRET_KEY" in
+              sk_live_*|sk_test_*|rk_live_*|rk_test_*) ;;
+              *) echo "::error::STRIPE_SECRET_KEY non è una chiave segreta di Stripe (inizia con ${STRIPE_SECRET_KEY:0:3}...). Serve la «Chiave segreta» che inizia con sk_live_ (Stripe → Sviluppatori → Chiavi API), non la chiave «pubblicabile» (pk_)."; BAD=1;;
+            esac
+          fi
+          if [ -n "$STRIPE_WEBHOOK_SECRET" ]; then
+            case "$STRIPE_WEBHOOK_SECRET" in
+              whsec_*) ;;
+              *) echo "::error::STRIPE_WEBHOOK_SECRET non è un segreto di webhook (deve iniziare con whsec_)."; BAD=1;;
+            esac
+          fi
+          if [ -n "$BAD" ]; then echo "CONFIG_ERROR=1" >> "$GITHUB_ENV"; fi
+          if [ -z "$BAD" ] && [ -n "$STRIPE_SECRET_KEY" ] && [ -n "$STRIPE_WEBHOOK_SECRET" ] && [ -n "$GEMINI_API_KEY" ] \
              && [ -n "${{ vars.PRICE_SMART }}" ] && [ -n "${{ vars.PRICE_PRO }}" ] \
              && [ -n "${{ vars.PRICE_SMART_YEAR }}" ] && [ -n "${{ vars.PRICE_PRO_YEAR }}" ] && [ -n "${{ vars.APP_URL }}" ]; then
             echo "TARGETS=hosting,firestore,functions" >> "$GITHUB_ENV"
@@ -173,3 +192,10 @@ jobs:
           curl -s -o /dev/null -D "$RUNNER_TEMP/cors.txt" -X OPTIONS -H 'Origin: https://che-cucino-oggi.web.app' -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: content-type' "$BASE/getMemberInvite"
           grep -i 'access-control-allow-origin' "$RUNNER_TEMP/cors.txt" || { echo "::error::Mancano le intestazioni CORS: la pagina dell'invito non potrebbe collegarsi"; exit 1; }
           echo "Funzioni degli inviti raggiungibili e protette"
+
+      # Se un valore di Stripe era sbagliato, sito e regole sono stati pubblicati ma le funzioni no: il deploy resta rosso finché non si corregge
+      - name: Segnala la configurazione sbagliata
+        if: env.CONFIG_ERROR == '1'
+        run: |
+          echo "::error::Funzioni NON pubblicate: correggi i secret di Stripe (vedi gli errori sopra) e rilancia."
+          exit 1
