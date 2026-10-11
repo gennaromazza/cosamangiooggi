@@ -1,8 +1,11 @@
 // Passaggio da Stripe test a produzione: toglie dai profili i dati di abbonamento nati in modalità test
 // (cliente, abbonamento, piano a pagamento, prova già usata, ricevute). Non tocca i piani regalati senza Stripe.
 // Uso: GOOGLE_APPLICATION_CREDENTIALS=... node scripts/reset-test-billing.cjs [--apply]   (senza --apply è solo un'anteprima)
-const { initializeApp } = require('../functions/node_modules/firebase-admin/app');
-const { getFirestore, FieldValue } = require('../functions/node_modules/firebase-admin/firestore');
+const path = require('node:path');
+// firebase-admin è installato nella cartella delle funzioni
+const fromFunctions = require('node:module').createRequire(path.join(__dirname, '..', 'functions', 'package.json'));
+const { initializeApp } = fromFunctions('firebase-admin/app');
+const { getFirestore, FieldValue } = fromFunctions('firebase-admin/firestore');
 
 const FIRESTORE_DB_ID = 'ai-studio-93a2a041-9b02-4ff7-b496-5f2ada58f953';
 const apply = process.argv.includes('--apply');
