@@ -24,6 +24,13 @@ Tutto si imposta da GitHub → repository → **Settings → Secrets and variabl
 **Secrets**: `FIREBASE_SERVICE_ACCOUNT`, `STRIPE_SECRET_KEY` (`sk_...`), `STRIPE_WEBHOOK_SECRET` (`whsec_...`), `GEMINI_API_KEY` (nuova chiave!).
 **Variables**: `PRICE_SMART` (Famiglia mensile), `PRICE_SMART_YEAR` (Famiglia annuale), `PRICE_PRO` (Chef IA mensile), `PRICE_PRO_YEAR` (Chef IA annuale), `APP_URL` (es. `https://gen-lang-client-0532460534.web.app`), `ADMIN_EMAILS` (email admin separate da virgola).
 
+## 3b. Sito ufficiale (SEO e download dell'app)
+Il sito vive in `landing/` e si pubblica da solo, a ogni build da `main`, insieme all'APK appena costruito:
+indirizzo predefinito `https://che-cucino-oggi.web.app` (sito Firebase Hosting separato dall'app, configurato in `firebase.landing.json`).
+- Per usare un dominio proprio: aggiungilo in Firebase → Hosting → sito `che-cucino-oggi` → «Aggiungi dominio personalizzato», poi crea la **variabile** GitHub `SITE_URL` con l'indirizzo (es. `https://checucinooggi.it`): canonical, sitemap e dati strutturati lo useranno.
+- Per Google: aggiungi il sito in Search Console e invia `…/sitemap.xml`.
+- I prezzi del sito vengono sempre da `src/lib/plans.ts`.
+
 ## 4. Pubblicare
 Actions → **Deploy Firebase** → Run workflow. Poi **Build Android APK** → scarica l'artefatto `che-cucino-oggi-apk`.
 

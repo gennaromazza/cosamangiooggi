@@ -2,6 +2,11 @@ name: Build Android APK
 
 on:
   workflow_dispatch:
+    inputs:
+      publish_site:
+        description: 'Pubblica anche il sito ufficiale con questo APK (da main parte da solo)'
+        type: boolean
+        default: false
   push:
     branches: [main]
 
@@ -97,3 +102,22 @@ jobs:
         with:
           name: che-cucino-oggi-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
+
+      # Sito ufficiale (SEO e download): si aggiorna a ogni build da main, con l'APK appena costruito
+      - name: Pubblica il sito ufficiale
+        if: github.ref == 'refs/heads/main' || inputs.publish_site
+        env:
+          SITE_URL: ${{ vars.SITE_URL }}
+          APP_URL: ${{ vars.APP_URL }}
+          APK: android/app/build/outputs/apk/debug/app-debug.apk
+          BUILD: ${{ github.sha }}
+        run: |
+          export SITE_URL="${SITE_URL:-https://che-cucino-oggi.web.app}"
+          export APP_URL="${APP_URL:-https://$PROJECT.web.app}"
+          npx tsx scripts/build-landing.ts
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"
+          export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json"
+          SITE=$(node -p "require('./firebase.landing.json').hosting.site")
+          npx --yes firebase-tools@14 hosting:sites:create "$SITE" --project "$PROJECT" || echo "(il sito esiste già)"
+          npx --yes firebase-tools@14 deploy --only hosting --config firebase.landing.json --project "$PROJECT"
+          rm -f "$RUNNER_TEMP/sa.json"

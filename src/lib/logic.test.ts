@@ -16,6 +16,8 @@ import { hitsExclusion } from './dietFilters';
 import { extractVoiceArgument } from './voiceText';
 import { INITIAL_RECIPES } from '../data/recipes';
 import type { PantryItem, Recipe } from '../types';
+import { readFileSync } from 'node:fs';
+import { fillPlaceholders } from '../../scripts/landing';
 import { dishSuggestionsLeft, limitsFor, normalizePlan, planName, PRICES, yearlySavingPercent, PLAN_LIMITS } from './plans';
 
 const item = (id: string, name: string, quantity: number, unit: string): PantryItem =>
@@ -239,4 +241,21 @@ test('riconoscimenti IA dei piatti: 3 di prova, 50 con Chef IA, il contatore rip
   assert.equal(dishSuggestionsLeft('free', { month, count: 2 }), 1);
   assert.equal(dishSuggestionsLeft('free', { month, count: 9 }), 0);
   assert.equal(dishSuggestionsLeft('pro', { month: '2020-01', count: 50 }), 50);
+});
+
+
+test('sito ufficiale: prezzi dal codice, nessun segnaposto rimasto e SEO di base', () => {
+  const vars = { siteUrl: 'https://esempio.web.app/', appUrl: 'https://app.web.app' };
+  for (const file of ['index.html', 'privacy.html', 'robots.txt', 'sitemap.xml']) {
+    const filled = fillPlaceholders(readFileSync(`landing/${file}`, 'utf8'), vars);
+    assert.ok(!filled.includes('__'), `${file}: segnaposto non sostituito`);
+  }
+  const home = fillPlaceholders(readFileSync('landing/index.html', 'utf8'), vars);
+  for (const price of ['3,99 €', '29,99 €', '6,99 €', '49,99 €']) assert.ok(home.includes(price), price);
+  assert.ok(home.includes('<link rel="canonical" href="https://esempio.web.app/">'));
+  const title = /<title>([^<]+)<\/title>/.exec(home)?.[1] ?? '';
+  const description = /<meta name="description" content="([^"]+)"/.exec(home)?.[1] ?? '';
+  assert.ok(title.length > 20 && title.length <= 80, `titolo di ${title.length} caratteri`);
+  assert.ok(description.length >= 80 && description.length <= 170, `descrizione di ${description.length} caratteri`);
+  assert.equal((home.match(/<h1[ >]/g) || []).length, 1);
 });
