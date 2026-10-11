@@ -5,9 +5,15 @@ on:
   push:
     branches: [main]
 
+env:
+  PROJECT: gen-lang-client-0532460534
+  PACKAGE: com.checucinooggi.mealplanner
+
 jobs:
   apk:
     runs-on: ubuntu-latest
+    env:
+      FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
     steps:
       - uses: actions/checkout@v4
 
@@ -26,6 +32,53 @@ jobs:
 
       # La cartella android/ non è nel repository: la generiamo ad ogni build
       - run: npx cap add android
+
+      # Firma fissa: stessa impronta a ogni build (aggiornamenti senza disinstallare e accesso Google riconosciuto)
+      - name: Chiave di firma fissa
+        run: |
+          mkdir -p ~/.android
+          cp android-signing/debug.keystore ~/.android/debug.keystore
+          keytool -list -v -keystore ~/.android/debug.keystore -storepass android 2>/dev/null | grep -E "SHA1|SHA256" | tee "$RUNNER_TEMP/sha.txt"
+          echo "SHA1=$(grep 'SHA1:' "$RUNNER_TEMP/sha.txt" | sed 's/.*SHA1: *//')" >> "$GITHUB_ENV"
+          echo "SHA256=$(grep 'SHA256:' "$RUNNER_TEMP/sha.txt" | sed 's/.*SHA256: *//')" >> "$GITHUB_ENV"
+
+      # Accesso con Google nell'app: registra l'app Android su Firebase (una volta sola, poi si riconosce) e scarica la configurazione
+      - name: Configurazione Firebase per Android
+        run: |
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "::error::Manca il secret FIREBASE_SERVICE_ACCOUNT"; exit 1
+          fi
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"
+          export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json"
+          FB="npx --yes firebase-tools@14"
+          APP_ID=$($FB apps:list ANDROID --project "$PROJECT" --json | node -e '
+            let d=""; process.stdin.on("data",c=>d+=c).on("end",()=>{
+              const apps=(JSON.parse(d).result)||[];
+              const a=apps.find(x=>x.packageName===process.env.PACKAGE);
+              console.log(a?a.appId:"");
+            });')
+          if [ -z "$APP_ID" ]; then
+            echo "Registro l'app Android su Firebase"
+            $FB apps:create ANDROID "Che cucino oggi" --package-name "$PACKAGE" --project "$PROJECT"
+            APP_ID=$($FB apps:list ANDROID --project "$PROJECT" --json | node -e '
+              let d=""; process.stdin.on("data",c=>d+=c).on("end",()=>{
+                const a=((JSON.parse(d).result)||[]).find(x=>x.packageName===process.env.PACKAGE);
+                console.log(a?a.appId:"");
+              });')
+          fi
+          [ -n "$APP_ID" ] || { echo "::error::App Android non trovata su Firebase"; exit 1; }
+          echo "App Firebase: $APP_ID"
+          for H in "$SHA1" "$SHA256"; do
+            $FB apps:android:sha:create "$APP_ID" "$H" --project "$PROJECT" || echo "(impronta già presente)"
+          done
+          $FB apps:sdkconfig ANDROID "$APP_ID" --project "$PROJECT" --out android/app/google-services.json
+          grep -c '"client_type": 3' android/app/google-services.json || true
+          rm -f "$RUNNER_TEMP/sa.json"
+      # Include la finestra di accesso Google di Android nel plugin
+      - name: Abilita Google nel plugin di accesso
+        run: |
+          sed -i 's/^ext {/ext {\n    rgcfaIncludeGoogle = true/' android/variables.gradle
+          grep -n rgcfaIncludeGoogle android/variables.gradle
       # Icona e schermata di avvio dell'app Android dal nostro logo (assets/): se fallisce, la build si ferma
       - run: npx capacitor-assets generate --android
       # Android 13+: serve il permesso per le notifiche (promemoria della domenica)
