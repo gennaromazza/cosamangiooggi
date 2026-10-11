@@ -1165,13 +1165,13 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
           <div className="bg-slate-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
             <CalendarIcon className="text-slate-400 w-8 h-8" />
           </div>
-          <h3 className="text-lg font-medium text-slate-900">Nessun piano attivo</h3>
-          <p className="text-slate-500 mb-6">Inizia a generare il tuo primo menù settimanale stagionale.</p>
+          <h3 className="text-lg font-medium text-slate-900">La settimana è ancora da scrivere</h3>
+          <p className="text-slate-500 mb-6">Un tocco e il menù di stagione è pronto per tutta la famiglia.</p>
           <button 
             onClick={() => generatePlan(false)}
             className="text-indigo-600 font-semibold hover:underline cursor-pointer"
           >
-            Crea ora il tuo menù
+            Crea il menù della settimana
           </button>
         </div>
       ) : (() => {

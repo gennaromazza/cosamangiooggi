@@ -73,8 +73,8 @@ export default function WelcomeTour({ user, profile, onNavigateToFamily }: Welco
       badge: 'BENVENUTO',
       badgeColor: 'bg-amber-50 text-amber-800 border-amber-200',
       title: 'Benvenuto in Che Cucino Oggi?',
-      subtitle: 'La tua nuova routine da 0 stress per la cucina in famiglia',
-      description: 'Dimentica il caos serale del "cosa mangiamo stasera?". Pianifica menù settimanali bilanciati, risparmia tempo e tieni sotto controllo spesa e dispensa con l\'aiuto dell\'Intelligenza Artificiale.',
+      subtitle: 'Il menù di casa, senza il pensiero della sera',
+      description: 'Basta con il "cosa mangiamo stasera?". Costruisci in pochi tocchi un menù settimanale di stagione e equilibrato, con la spesa già pronta e la dispensa sempre sotto controllo.',
       highlights: [
         'Menù stagionali conformi alle linee guida OMS',
         'Lista della spesa automatizzata per reparti',

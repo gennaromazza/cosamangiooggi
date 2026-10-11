@@ -1,18 +1,139 @@
 @import "tailwindcss";
 
-html,
-body {
-  max-width: 100%;
-  overflow-x: clip;
-  -webkit-text-size-adjust: 100%;
-  -webkit-tap-highlight-color: transparent;
+/*
+ * Identità visiva "Che cucino oggi?"
+ * Una cucina italiana calda e rassicurante: terracotta, crema e oliva.
+ * I componenti usano le classi Tailwind già esistenti: qui ridefiniamo le scale
+ * di colore in modo che tutta l'app prenda l'identità in modo coerente.
+ *
+ *   indigo  → Terracotta  (colore primario: azioni, link, selezione)
+ *   violet  → Paprika     (profondità nei gradienti)
+ *   purple  → Melanzana   (piano Pro / funzioni premium)
+ *   slate   → Crema/Pietra calda (sfondi, bordi, testi)
+ *   emerald resta verde Basilico (successo, "ricetta pronta", salute)
+ */
+@theme {
+  --font-sans: "Nunito Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Fraunces Variable", ui-serif, Georgia, serif;
+
+  /* Terracotta */
+  --color-indigo-50: #fff4ed;
+  --color-indigo-100: #ffe6d5;
+  --color-indigo-200: #fecaa9;
+  --color-indigo-300: #fda574;
+  --color-indigo-400: #f67a3d;
+  --color-indigo-500: #e65a1b;
+  --color-indigo-600: #c8440f;
+  --color-indigo-700: #a8360b;
+  --color-indigo-800: #862d0e;
+  --color-indigo-900: #6c2710;
+  --color-indigo-950: #3a1106;
+
+  /* Arancio: stessa famiglia della terracotta, così gli avvisi non fanno a pugni col primario */
+  --color-orange-50: #fff4ed;
+  --color-orange-100: #ffe6d5;
+  --color-orange-200: #fecaa9;
+  --color-orange-300: #fda574;
+  --color-orange-400: #f67a3d;
+  --color-orange-500: #e65a1b;
+  --color-orange-600: #c8440f;
+  --color-orange-700: #a8360b;
+  --color-orange-800: #862d0e;
+  --color-orange-900: #6c2710;
+  --color-orange-950: #3a1106;
+
+  /* Paprika */
+  --color-violet-50: #fff1ee;
+  --color-violet-100: #ffe0d9;
+  --color-violet-200: #ffc2b4;
+  --color-violet-300: #ff9a85;
+  --color-violet-400: #f26a4d;
+  --color-violet-500: #d94a2b;
+  --color-violet-600: #b4300f;
+  --color-violet-700: #922710;
+  --color-violet-800: #772313;
+  --color-violet-900: #5f2012;
+  --color-violet-950: #340e07;
+
+  /* Melanzana (premium) */
+  --color-purple-50: #f8f0f6;
+  --color-purple-100: #f1dfec;
+  --color-purple-200: #e4bfd9;
+  --color-purple-300: #d097bd;
+  --color-purple-400: #b8689c;
+  --color-purple-500: #9a4579;
+  --color-purple-600: #7e3361;
+  --color-purple-700: #652a4e;
+  --color-purple-800: #4f2240;
+  --color-purple-900: #3b1a31;
+  --color-purple-950: #230e1c;
+
+  /* Crema / pietra calda */
+  --color-slate-50: #fbf7f0;
+  --color-slate-100: #f5efe4;
+  --color-slate-200: #e9e1d2;
+  --color-slate-300: #d6ccb8;
+  --color-slate-400: #a89f8d;
+  --color-slate-500: #7a7263;
+  --color-slate-600: #5a5346;
+  --color-slate-700: #433d33;
+  --color-slate-800: #2e2a23;
+  --color-slate-900: #1f1c17;
+  --color-slate-950: #12100c;
 }
 
-/* iOS Safari zooms into inputs with font-size < 16px; keep them legible on touch devices */
-@media (hover: none) and (pointer: coarse) {
-  input:not([type="checkbox"]):not([type="radio"]),
-  select,
-  textarea {
-    font-size: 16px;
+@layer base {
+  html,
+  body {
+    max-width: 100%;
+    overflow-x: clip;
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: var(--color-slate-50);
+    color: var(--color-slate-900);
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Titoli morbidi e caldi: il tono di una cucina di casa */
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+    font-optical-sizing: auto;
+  }
+
+  ::selection {
+    background-color: var(--color-indigo-200);
+    color: var(--color-indigo-950);
+  }
+
+  /* Focus ben visibile e coerente con il colore primario */
+  :focus-visible {
+    outline: 2px solid var(--color-indigo-500);
+    outline-offset: 2px;
+  }
+
+  /* iOS Safari ingrandisce i campi con font < 16px: su touch li teniamo leggibili */
+  @media (hover: none) and (pointer: coarse) {
+    input:not([type="checkbox"]):not([type="radio"]),
+    select,
+    textarea {
+      font-size: 16px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }

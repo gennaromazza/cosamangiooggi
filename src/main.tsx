@@ -1,6 +1,8 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
+import '@fontsource-variable/nunito';
+import '@fontsource-variable/fraunces';
 import './index.css';
 
 // Register PWA Service Worker

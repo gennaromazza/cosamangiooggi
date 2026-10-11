@@ -56,7 +56,7 @@ export default function PWAInstallPrompt() {
           <div>
             <h4 className="font-extrabold text-sm text-white">Usa l'App sul tuo Smartphone!</h4>
             <p className="text-xs text-indigo-100 mt-0.5 leading-snug">
-              Installa "Che cucino oggi?" sul tuo smartphone Android per un accesso rapido a 0 stress.
+              Installa "Che cucino oggi?" sul tuo smartphone Android per aprire il menù di oggi con un solo tocco.
             </p>
           </div>
         </div>
