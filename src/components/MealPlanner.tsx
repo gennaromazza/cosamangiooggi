@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import MemberAlternatives from './MemberAlternatives';
-import { pickAlternatives, planMeals } from '../lib/memberAlternatives';
+import { dislikeConsensus, pickAlternatives, planMeals } from '../lib/memberAlternatives';
+import { planTogetherSlot } from '../lib/together';
 import { db } from '../lib/firebase';
 import { collection, query, where, getDocs, setDoc, doc, onSnapshot } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firebaseUtils';
@@ -334,10 +335,11 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
     }
 
     // Gusti dei membri (piatti e ingredienti non graditi): preferenze, si possono rilassare se restano troppe poche ricette
-    const dislikedMealIds = new Set<string>(
-      familyMembers.flatMap(member => (member.dislikedMeals || []))
-    );
-    const softExclusions = familyMembers.flatMap(member => (member.dislikedIngredients || []));
+    // Un piatto o un ingrediente non gradito si toglie per tutti solo se lo evita almeno metà delle persone;
+    // se lo evita una minoranza resta nel menù e quella persona riceve un'alternativa.
+    const consensus = dislikeConsensus(familyMembers);
+    const dislikedMealIds = consensus.excludedMealIds;
+    const softExclusions = consensus.excludedIngredients;
 
     let filteredRecipesWithExclusions = availableRecipes;
     if (dislikedMealIds.size > 0 || softExclusions.length > 0) {
@@ -920,10 +922,12 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
     if (type === 'lunch') {
       dayPlan.lunchIds = [targetRecipeId];
       delete dayPlan.lunchAlt;
+      delete dayPlan.lunchTogether;
       if (Object.keys(newAlt).length > 0) dayPlan.lunchAlt = newAlt;
     } else {
       dayPlan.dinnerIds = [targetRecipeId];
       delete dayPlan.dinnerAlt;
+      delete dayPlan.dinnerTogether;
       if (Object.keys(newAlt).length > 0) dayPlan.dinnerAlt = newAlt;
     }
 
@@ -964,10 +968,9 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
       if (hitsExclusion(r, profile?.excludedIngredients || [])) return false;
 
       // Filter out based on family disliked items if present
-      const dislikedMeals = familyMembers.flatMap(member => member.dislikedMeals || []);
-      const dislikedIngredients = familyMembers.flatMap(member => member.dislikedIngredients || []);
-      if (dislikedMeals.includes(r.id)) return false;
-      if (hitsExclusion(r, dislikedIngredients)) return false;
+      const consensus = dislikeConsensus(familyMembers);
+      if (consensus.excludedMealIds.has(r.id)) return false;
+      if (hitsExclusion(r, consensus.excludedIngredients)) return false;
 
       return true;
     });
@@ -1062,6 +1065,80 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
     } finally {
       setIsRebuilding(false);
     }
+  };
+
+  // Pasto "tutti insieme": cerca un piatto che vada bene a ognuno, o il più vicino, e prepara l'alternativa per gli altri
+  const [togetherNotice, setTogetherNotice] = useState<string | null>(null);
+  const [togetherBusy, setTogetherBusy] = useState(false);
+  const makeTogether = async (day: string, slot: 'lunch' | 'dinner') => {
+    if (!currentPlan) return;
+    setTogetherNotice(null);
+    const used = new Set<string>();
+    (Object.values(currentPlan.days) as DayPlan[]).forEach(d => [...(d.lunchIds || []), ...(d.dinnerIds || [])].forEach(id => used.add(id)));
+    const result = planTogetherSlot({ pool: familyPool(), members: familyMembers, exclude: used });
+    if (!result) {
+      setTogetherNotice('Non trovo un piatto adatto a tutti: controlla le regole in Famiglia.');
+      return;
+    }
+    const dayPlan: DayPlan = { ...currentPlan.days[day] };
+    if (slot === 'lunch') {
+      dayPlan.lunchIds = result.ids;
+      delete dayPlan.lunchAlt;
+      if (Object.keys(result.alt).length > 0) dayPlan.lunchAlt = result.alt;
+      dayPlan.lunchTogether = result.info;
+    } else {
+      dayPlan.dinnerIds = result.ids;
+      delete dayPlan.dinnerAlt;
+      if (Object.keys(result.alt).length > 0) dayPlan.dinnerAlt = result.alt;
+      dayPlan.dinnerTogether = result.info;
+    }
+    setTogetherBusy(true);
+    try {
+      await savePlan({ ...currentPlan, days: { ...currentPlan.days, [day]: dayPlan } });
+    } finally {
+      setTogetherBusy(false);
+    }
+  };
+  const clearTogether = async (day: string, slot: 'lunch' | 'dinner') => {
+    if (!currentPlan) return;
+    const dayPlan: DayPlan = { ...currentPlan.days[day] };
+    if (slot === 'lunch') delete dayPlan.lunchTogether;
+    else delete dayPlan.dinnerTogether;
+    await savePlan({ ...currentPlan, days: { ...currentPlan.days, [day]: dayPlan } });
+  };
+  const togetherControl = (day: string, slot: 'lunch' | 'dinner', info?: DayPlan['lunchTogether']) => {
+    if (familyMembers.length < 2) return null;
+    if (!info) {
+      return (
+        <button
+          onClick={() => makeTogether(day, slot)}
+          disabled={togetherBusy || isGenerating}
+          className="mt-3 w-full h-11 rounded-2xl border border-dashed border-indigo-300 bg-indigo-50/60 text-indigo-700 text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-60"
+        >
+          <Users className="w-4 h-4" /> Mangiamo tutti insieme
+        </button>
+      );
+    }
+    const label =
+      info.mode === 'all' ? `Piatto per tutti: piace a tutti e ${info.total}`
+        : info.mode === 'neutral' ? `Piatto semplice: va bene a ${info.fits} su ${info.total}`
+          : `Va bene a ${info.fits} su ${info.total}`;
+    return (
+      <div className="mt-3 rounded-2xl bg-indigo-50 border border-indigo-100 p-3 space-y-2">
+        <p className="text-sm font-bold text-indigo-900 flex items-center gap-2">
+          <Users className="w-4 h-4 shrink-0" /> {label}
+        </p>
+        {info.fits < info.total && (
+          <p className="text-xs text-indigo-800/80">Per gli altri c’è un piatto alternativo, qui sotto.</p>
+        )}
+        <div className="flex gap-3 text-sm font-semibold">
+          <button onClick={() => makeTogether(day, slot)} disabled={togetherBusy} className="text-indigo-700 underline underline-offset-4 disabled:opacity-60">
+            Cercane un altro
+          </button>
+          <button onClick={() => clearTogether(day, slot)} className="text-slate-500 underline underline-offset-4">Togli</button>
+        </div>
+      </div>
+    );
   };
 
   const issueSummary = (() => {
@@ -1184,6 +1261,12 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
           <button onClick={generateNow} className="h-11 px-4 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold">
             Crealo di nuovo
           </button>
+        </div>
+      )}
+      {togetherNotice && (
+        <div role="status" className="rounded-2xl p-4 text-sm flex items-start justify-between gap-3 border bg-amber-50 border-amber-200 text-amber-900">
+          <span className="leading-relaxed">{togetherNotice}</span>
+          <button onClick={() => setTogetherNotice(null)} aria-label="Chiudi" className="shrink-0 font-bold">×</button>
         </div>
       )}
       {rebuildNotice && !showIssues && (
@@ -1469,6 +1552,7 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
                         <p className="text-sm font-medium text-slate-400">Nessun pranzo programmato</p>
                       </div>
                     )}
+                    {togetherControl(activeDay, 'lunch', plan?.lunchTogether)}
                     <MemberAlternatives recipes={lunchRecipes} members={familyMembers} alt={plan?.lunchAlt} allRecipes={recipes} onOpen={setSelectedRecipe} />
                   </div>
 
@@ -1564,6 +1648,7 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
                         <p className="text-sm font-medium text-slate-400">Nessuna cena programmata</p>
                       </div>
                     )}
+                    {togetherControl(activeDay, 'dinner', plan?.dinnerTogether)}
                     <MemberAlternatives recipes={dinnerRecipes} members={familyMembers} alt={plan?.dinnerAlt} allRecipes={recipes} onOpen={setSelectedRecipe} />
                   </div>
 

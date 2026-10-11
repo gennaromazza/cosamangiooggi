@@ -79,9 +79,20 @@ export interface Recipe {
   };
 }
 
+/** Pasto pensato per mangiare tutti insieme: come è stato trovato e a quanti piace */
+export interface TogetherInfo {
+  /** all: piace a tutti · neutral: piatto semplice per tutti · majority: piace alla maggioranza, alternativa per gli altri */
+  mode: 'all' | 'neutral' | 'majority';
+  /** Persone per cui il piatto va bene così com'è */
+  fits: number;
+  total: number;
+}
+
 export interface DayPlan {
   lunchIds: string[];
   dinnerIds: string[];
+  lunchTogether?: TogetherInfo;
+  dinnerTogether?: TogetherInfo;
   /** Alternative per chi ha una dieta o un'allergia personale: id persona → id ricetta */
   lunchAlt?: Record<string, string>;
   dinnerAlt?: Record<string, string>;

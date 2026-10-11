@@ -1,6 +1,8 @@
 import { getSupermarketDepartment } from './departments';
 import { inferDishInfo, parseIngredientText } from './dishInference';
-import { fitsMember, membersNeedingAlternative, pickAlternatives, planMeals } from './memberAlternatives';
+import { dislikeConsensus, dislikesDish, fitsMember, happyWith, membersNeedingAlternative, pickAlternatives, planMeals } from './memberAlternatives';
+import { FAMOUS_DISH_IDS, pickTastingDishes, suggestIngredients, verdictPatch } from './tasting';
+import { NEUTRAL_DISH_IDS, planTogetherSlot } from './together';
 import { hasAnyPreference, membersWithoutPreferences, pantryItemFor, PANTRY_STARTERS } from './onboarding';
 import { findPlanIssues, issuesKey, rebuildAffectedMeals } from './planCompatibility';
 import type { FamilyMember, WeeklyPlan } from '../types';
@@ -419,4 +421,171 @@ test('spesa: le alternative di chi non è più a tavola non contano nelle porzio
   assert.equal(soloAnna.veg2, undefined);
   assert.equal(soloAnna.veg1, 1);
   assert.equal(soloAnna.carne, 1);
+});
+
+
+// ---- Gusti, assaggi e pasti "tutti insieme" ----------------------------------------
+
+const piatto = (id: string, ings: string[], extra: Partial<Recipe> = {}): Recipe =>
+  recipe(id, [], { ingredients: ings.map((name) => ({ name, amount: 100, unit: 'g' })), ...extra });
+
+test('gusti: un piatto o ingrediente non gradito si toglie per tutti solo se lo evita metà delle persone', () => {
+  const quattro = [
+    persona('a', { dislikedMeals: ['x'], dislikedIngredients: ['Melanzane'] }),
+    persona('b'),
+    persona('c'),
+    persona('d'),
+  ];
+  const uno = dislikeConsensus(quattro);
+  assert.equal(uno.excludedMealIds.size, 0, 'uno su quattro: resta nel menù');
+  assert.deepEqual(uno.excludedIngredients, []);
+
+  const due = dislikeConsensus([persona('a', { dislikedMeals: ['x'], dislikedIngredients: ['Melanzane'] }), persona('b', { dislikedMeals: ['x'], dislikedIngredients: ['melanzane'] }), persona('c'), persona('d')]);
+  assert.deepEqual([...due.excludedMealIds], ['x'], 'metà delle persone: si toglie');
+  assert.equal(due.excludedIngredients.length, 1, 'maiuscole e minuscole contano come uno');
+
+  // persona sola o in due: come prima, basta che lo eviti uno
+  assert.deepEqual([...dislikeConsensus([persona('a', { dislikedMeals: ['x'] })]).excludedMealIds], ['x']);
+  assert.deepEqual([...dislikeConsensus([persona('a', { dislikedMeals: ['x'] }), persona('b')]).excludedMealIds], ['x']);
+  assert.equal(dislikeConsensus([]).excludedMealIds.size, 0);
+});
+
+test('gusti: chi non gradisce un piatto ha un\'alternativa, ma solo per gli ingredienti principali', () => {
+  const melanzane = piatto('parmigiana', ['Melanzane', 'Pomodoro', 'Mozzarella']);
+  const soffritto = piatto('pasta', ['Spaghetti', 'Pomodoro', 'Basilico', 'Cipolla']);
+  const luca = persona('luca', { dislikedIngredients: ['Melanzane', 'Cipolla'] });
+  const anna = persona('anna');
+  assert.equal(dislikesDish(melanzane, luca), true);
+  assert.equal(dislikesDish(soffritto, luca), false, 'la cipolla è solo il soffritto: nessuna alternativa');
+  assert.equal(happyWith(melanzane, anna), true);
+  assert.deepEqual(membersNeedingAlternative([melanzane], [luca, anna]).map((m) => m.id), ['luca']);
+  assert.deepEqual(membersNeedingAlternative([soffritto], [luca, anna]), []);
+  const alt = pickAlternatives({ mains: [melanzane], members: [luca, anna], pool: [melanzane, soffritto, piatto('pesce', ['Branzino'])], random: () => 0 });
+  assert.equal(alt.luca, 'pesce', 'tra le alternative si evita ciò che non gradisce, anche il soffritto (la pasta ha la cipolla)');
+  const piattoNonGradito = persona('gino', { dislikedMeals: ['pasta'] });
+  assert.equal(dislikesDish(soffritto, piattoNonGradito), true);
+});
+
+test('assaggi: i piatti proposti esistono, sono unici e ci sono piatti semplici per tutti', () => {
+  const ids = new Set(INITIAL_RECIPES.map((r) => r.id));
+  assert.equal(new Set(FAMOUS_DISH_IDS).size, FAMOUS_DISH_IDS.length);
+  for (const id of FAMOUS_DISH_IDS) assert.ok(ids.has(id), `piatto conosciuto mancante: ${id}`);
+  assert.equal(new Set(NEUTRAL_DISH_IDS).size, NEUTRAL_DISH_IDS.length);
+  for (const id of NEUTRAL_DISH_IDS) assert.ok(ids.has(id), `piatto semplice mancante: ${id}`);
+});
+
+test('assaggi: solo piatti che la persona può mangiare, non già valutati, alternando i tipi', () => {
+  const vegana = persona('giulia', { dietaryRestrictions: ['vegan'], likedMeals: ['meal-5'] });
+  const proposti = pickTastingDishes({ recipes: INITIAL_RECIPES, member: vegana, count: 8, random: () => 0 });
+  assert.ok(proposti.length > 0 && proposti.length <= 8);
+  for (const r of proposti) {
+    assert.equal(fitsMember(r, vegana), true, `${r.title} non è adatto a una persona vegana`);
+    assert.notEqual(r.id, 'meal-5', 'già valutato');
+  }
+  assert.equal(new Set(proposti.map((r) => r.id)).size, proposti.length);
+
+  const onnivoro = persona('marco');
+  const misti = pickTastingDishes({ recipes: INITIAL_RECIPES, member: onnivoro, count: 12, random: () => 0 });
+  assert.equal(misti.length, 12);
+  assert.ok(new Set(misti.map((r) => r.proteinType)).size >= 4, 'servono tipi diversi di piatto');
+  const allergico = persona('sara', { allergies: ['Pesce'] });
+  for (const r of pickTastingDishes({ recipes: INITIAL_RECIPES, member: allergico, random: () => 0 })) assert.equal(fitsMember(r, allergico), true);
+});
+
+test('assaggi: la risposta è esclusiva (piace o non piace) e "salta" non cambia nulla', () => {
+  const m = persona('luca', { likedMeals: ['a'], dislikedMeals: ['b'] });
+  assert.deepEqual(verdictPatch(m, 'b', 'like'), { likedMeals: ['a', 'b'], dislikedMeals: [] });
+  assert.deepEqual(verdictPatch(m, 'a', 'dislike'), { dislikedMeals: ['b', 'a'], likedMeals: [] });
+  assert.deepEqual(verdictPatch(m, 'a', 'like'), { likedMeals: ['a'], dislikedMeals: ['b'] });
+  assert.deepEqual(verdictPatch(m, 'z', 'skip'), {});
+});
+
+test('assaggi: dopo tre piatti non graditi con lo stesso ingrediente si propone di evitarlo', () => {
+  const ricette = [
+    piatto('p1', ['Melanzane', 'Pasta']),
+    piatto('p2', ['Melanzane', 'Riso']),
+    piatto('p3', ['Melanzane', 'Patate']),
+    piatto('p4', ['Pollo', 'Patate']),
+    piatto('p5', ['Pollo', 'Riso']),
+    piatto('p6', ['Pollo', 'Pasta']),
+  ];
+  const scarta = persona('luca', { dislikedMeals: ['p1', 'p2', 'p3'] });
+  const s = suggestIngredients({ member: scarta, recipes: ricette });
+  assert.deepEqual(s.map((x) => [x.ingredient, x.kind]), [['Melanzane', 'dislike']]);
+  assert.equal(s[0].dishes.length, 3);
+  // due soli piatti non bastano
+  assert.deepEqual(suggestIngredients({ member: persona('l', { dislikedMeals: ['p1', 'p2'] }), recipes: ricette }), []);
+  // se ha scelto un piatto con quell\'ingrediente, niente proposta
+  assert.deepEqual(suggestIngredients({ member: persona('l', { dislikedMeals: ['p1', 'p2', 'p3'], likedMeals: ['p1x'] }), recipes: [...ricette, piatto('p1x', ['Melanzane'])] }), []);
+  // già indicato: nessuna proposta ripetuta
+  assert.deepEqual(suggestIngredients({ member: persona('l', { dislikedMeals: ['p1', 'p2', 'p3'], dislikedIngredients: ['melanzane'] }), recipes: ricette }), []);
+  // ingredienti amati
+  const ama = persona('anna', { likedMeals: ['p4', 'p5', 'p6'] });
+  assert.deepEqual(suggestIngredients({ member: ama, recipes: ricette }).map((x) => [x.ingredient, x.kind]), [['Pollo', 'like']]);
+});
+
+test('tutti insieme: se c\'è un piatto che va bene a ognuno si sceglie quello, il più amato', () => {
+  const luca = persona('luca', { dislikedIngredients: ['Melanzane'], likedMeals: ['lasagne'] });
+  const anna = persona('anna', { dietaryRestrictions: ['vegan'], likedMeals: ['lasagne'] });
+  const adatto = recipe('lasagne', ['vegan'], { ingredients: [{ name: 'Pasta', amount: 1, unit: 'g' }] });
+  const altro = recipe('zuppa', ['vegan'], { ingredients: [{ name: 'Ceci', amount: 1, unit: 'g' }] });
+  const carne = recipe('carne', []);
+  const r = planTogetherSlot({ pool: [carne, adatto, altro], members: [luca, anna], random: () => 0 });
+  assert.ok(r);
+  assert.deepEqual(r!.ids, ['lasagne']);
+  assert.deepEqual(r!.alt, {});
+  assert.deepEqual(r!.info, { mode: 'all', fits: 2, total: 2 });
+});
+
+test('tutti insieme: senza un piatto per tutti sceglie un piatto semplice e prepara l\'alternativa', () => {
+  const anna = persona('anna', { dislikedMeals: ['meal-19'] });
+  const luca = persona('luca', { dislikedMeals: ['strano'] });
+  const sara = persona('sara', { dislikedMeals: ['meal-19'] });
+  const gino = persona('gino', { dislikedMeals: ['meal-115'] });
+  // nessun piatto piace a tutti e quattro: i piatti semplici sono meal-19 e meal-115
+  const sugo = recipe('meal-19', []);
+  const pizza = recipe('meal-115', []);
+  const strano = recipe('strano', []);
+  const r = planTogetherSlot({ pool: [sugo, pizza, strano], members: [anna, luca, sara, gino], random: () => 0 });
+  assert.ok(r);
+  assert.equal(r!.info.mode, 'neutral');
+  assert.equal(r!.ids[0], 'meal-115', 'la pizza dispiace a uno solo, il sugo a due');
+  assert.equal(r!.info.fits, 3);
+  assert.deepEqual(Object.keys(r!.alt), ['gino'], 'solo chi non lo gradisce ha un\'alternativa');
+});
+
+test('tutti insieme: la dieta e le allergie contano più dei gusti', () => {
+  const celiaco = persona('c', { dietaryRestrictions: ['gluten-free'] });
+  const altri = [persona('a', { likedMeals: ['pizza-x'] }), persona('b', { likedMeals: ['pizza-x'] })];
+  const pizza = recipe('pizza-x', []);
+  const risotto = recipe('risotto', ['gluten-free']);
+  const r = planTogetherSlot({ pool: [pizza, risotto], members: [celiaco, ...altri], random: () => 0 });
+  assert.ok(r);
+  assert.deepEqual(r!.ids, ['risotto']);
+  assert.deepEqual(r!.alt, {});
+  assert.equal(r!.info.mode, 'all');
+  assert.equal(r!.info.total, 3);
+});
+
+test('tutti insieme: niente persone o niente piatti vuol dire nessun risultato; i piatti già nel menù si evitano', () => {
+  assert.equal(planTogetherSlot({ pool: [recipe('a', [])], members: [] }), null);
+  assert.equal(planTogetherSlot({ pool: [], members: [persona('x')] }), null);
+  const a = recipe('a', []);
+  const b = recipe('b', []);
+  const r = planTogetherSlot({ pool: [a, b], members: [persona('x'), persona('y')], exclude: new Set(['a']), random: () => 0 });
+  assert.deepEqual(r!.ids, ['b']);
+  assert.equal(planTogetherSlot({ pool: [a], members: [persona('x')], exclude: new Set(['a']) }), null);
+});
+
+test('ricostruzione: un pasto cambiato non resta segnato come "tutti insieme"', () => {
+  const celiaci = { dietaryRestrictions: ['gluten-free' as const], excludedIngredients: [] };
+  const plan: WeeklyPlan = {
+    id: 'current',
+    startDate: '2026-01-01',
+    days: { Monday: { lunchIds: ['carne'], dinnerIds: ['pesce'], lunchTogether: { mode: 'all', fits: 2, total: 2 }, dinnerTogether: { mode: 'all', fits: 2, total: 2 } } },
+  };
+  const issues = findPlanIssues({ plan, recipes: tutte, rules: celiaci, members: [] });
+  const out = rebuildAffectedMeals({ plan, issues, recipes: tutte, pool: tutte.filter((r) => (r.tags || []).includes('gluten-free')), members: [], random: () => 0 });
+  assert.equal(out.plan.days.Monday.lunchTogether, undefined);
+  assert.deepEqual(out.plan.days.Monday.dinnerTogether, { mode: 'all', fits: 2, total: 2 }, 'il pasto non toccato resta com\'era');
 });

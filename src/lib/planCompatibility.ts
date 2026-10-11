@@ -123,6 +123,9 @@ export function rebuildAffectedMeals(args: {
     const alt = pickAlternatives({ mains, members, pool, random });
     delete dayPlan[altKey];
     if (Object.keys(alt).length > 0) dayPlan[altKey] = alt;
+    // Il pasto è cambiato: non è più quello pensato per mangiare tutti insieme
+    if (slot === 'lunch') delete dayPlan.lunchTogether;
+    else delete dayPlan.dinnerTogether;
   }
 
   // Alternative di persone che non ci sono più: via, anche nei pasti non toccati

@@ -458,7 +458,7 @@ export default function WelcomeTour({ user, profile, onNavigate, onProfileUpdate
       <h2 className="text-3xl font-semibold text-slate-900 mb-2">Cosa mangia {currentMember.name}?</h2>
       <p className="text-slate-600 leading-relaxed mb-5">
         Indica cosa non mangia, cosa ama e i suoi piatti. In «Dieta e allergie» trovi anche <strong>allergie e intolleranze</strong>:
-        valgono solo per {currentMember.name}, e il menù le rispetta con un piatto alternativo. Puoi saltare e completare dopo.
+        valgono solo per {currentMember.name}, e il menù le rispetta con un piatto alternativo. In «Assaggi» basta un tocco per piatto: è il modo più veloce. Puoi saltare e completare dopo.
       </p>
       <FamilySettings
         userId={user.uid}

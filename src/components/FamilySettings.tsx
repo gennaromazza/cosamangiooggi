@@ -11,6 +11,7 @@ import { Plus, Trash2, ChevronDown, X, Search, Pencil } from 'lucide-react';
 import { INITIAL_RECIPES } from '../data/recipes';
 import IngredientPicker from './IngredientPicker';
 import QuickDishModal from './QuickDishModal';
+import TastingGame from './TastingGame';
 import { hasPersonalRules } from '../lib/memberAlternatives';
 import { applyAccountName } from '../lib/selfMember';
 
@@ -41,7 +42,7 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
   const [openMemberId, setOpenMemberId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
-  const [memberTab, setMemberTab] = useState<'like' | 'dislike' | 'meals' | 'diet'>('dislike');
+  const [memberTab, setMemberTab] = useState<'like' | 'dislike' | 'meals' | 'diet' | 'tasting'>('dislike');
 
   const allRecipes = [...INITIAL_RECIPES, ...customRecipes];
 
@@ -428,18 +429,19 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
   // Le schede di una persona (Non mangia / Ama / Piatti / Dieta): usate qui e nella guida iniziale
   const renderMemberPanel = (member: FamilyMember) => (
                     <div className="px-4 pb-5 space-y-4 bg-slate-50/60">
-                      <div className="flex bg-slate-100 p-1 rounded-2xl" role="group" aria-label="Gusti di questa persona">
+                      <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-2xl" role="group" aria-label="Gusti di questa persona">
                         {([
                           ['dislike', 'Non mangia'],
                           ['like', 'Ama'],
                           ['meals', 'Piatti'],
                           ['diet', 'Dieta e allergie'],
+                          ['tasting', 'Assaggi'],
                         ] as const).map(([id, label]) => (
                           <button
                             key={id}
                             onClick={() => setMemberTab(id)}
                             aria-pressed={memberTab === id}
-                            className={`flex-1 h-10 rounded-xl text-sm font-semibold ${
+                            className={`h-10 rounded-xl text-sm font-semibold ${
                               memberTab === id ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'
                             }`}
                           >
@@ -447,6 +449,14 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
                           </button>
                         ))}
                       </div>
+
+                      {memberTab === 'tasting' && (
+                        <TastingGame
+                          member={member}
+                          recipes={allRecipes}
+                          onChange={(patch) => patchMember(member.id, patch)}
+                        />
+                      )}
 
                       {memberTab === 'dislike' && (
                         <div className="space-y-3">
