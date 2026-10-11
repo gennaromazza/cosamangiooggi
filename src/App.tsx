@@ -21,7 +21,8 @@ import {
   Wallet,
   Sun,
   MoreHorizontal,
-  Check
+  Check,
+  UserCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Logo from './components/Logo';
@@ -39,6 +40,7 @@ import VoiceAssistant from './components/VoiceAssistant';
 import BusinessModel from './components/BusinessModel';
 import AdminDashboard from './components/AdminDashboard';
 import WelcomeTour from './components/WelcomeTour';
+import AccountSettings from './components/AccountSettings';
 import PWAInstallPrompt from './components/PWAInstallPrompt';
 import { auth, db, functions } from './lib/firebase';
 import { httpsCallable } from 'firebase/functions';
@@ -47,7 +49,7 @@ import { doc, onSnapshot, collection } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from './lib/firebaseUtils';
 import { UserProfile } from './types';
 
-type Tab = 'planner' | 'vacation' | 'pantry' | 'shopping' | 'family' | 'recipes' | 'guide' | 'offers' | 'business' | 'admin';
+type Tab = 'planner' | 'vacation' | 'pantry' | 'shopping' | 'family' | 'recipes' | 'guide' | 'offers' | 'business' | 'account' | 'admin';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('planner');
@@ -412,6 +414,7 @@ export default function App() {
       { id: 'offers', label: 'Offerte', icon: Sparkles },
       { id: 'vacation', label: 'Vacanze', icon: Sun },
       { id: 'guide', label: 'Guida', icon: Info },
+      { id: 'account', label: 'Il mio account', icon: UserCircle },
     ];
     if (userIsAdmin) {
       list.push({ id: 'business', label: 'Business', icon: TrendingUp });
@@ -431,6 +434,7 @@ export default function App() {
     vacation: 'Menù e spesa anche fuori casa',
     guide: 'Come funziona e cosa mangiare',
     business: 'Piani e abbonamento',
+    account: 'Nome, password ed elimina account',
     admin: 'Gestione utenti',
   };
   const moreActive = moreTabs.some(t => t.id === activeTab);
@@ -701,7 +705,13 @@ export default function App() {
             </button>
 
             <div className="flex items-center gap-2">
-              <span className="text-sm text-slate-400 hidden md:inline">Benvenuto, {user.displayName?.split(' ')[0]}</span>
+              <button
+                onClick={() => setActiveTab('account')}
+                className="text-sm text-slate-500 hover:text-indigo-700 hidden md:inline cursor-pointer"
+                title="Il mio account"
+              >
+                Benvenuto, {user.displayName?.split(' ')[0]}
+              </button>
               {profile?.plan && profile.plan !== 'free' && (
                 <span className={`hidden sm:inline-flex items-center gap-1 text-[9px] font-black uppercase px-2 py-0.5 rounded-full border ${
                   profile.autoRenew !== false && profile.subscriptionStatus !== 'pending_renewal'
@@ -814,6 +824,16 @@ export default function App() {
                 onProfileUpdate={setProfile}
                 hasMealPlan={hasMealPlan}
                 hasFamilyMember={hasFamilyMember}
+              />
+            )}
+            {activeTab === 'account' && (
+              <AccountSettings
+                user={user}
+                profile={profile}
+                onProfileUpdate={setProfile}
+                onOpenSubscription={() => setActiveTab('business')}
+                onLogout={handleLogout}
+                isAdmin={userIsAdmin}
               />
             )}
             {activeTab === 'admin' && userIsAdmin && <AdminDashboard />}
