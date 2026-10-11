@@ -1,4 +1,7 @@
 import { getSupermarketDepartment } from './departments';
+import { inferDishInfo, parseIngredientText } from './dishInference';
+import { fitsMember, membersNeedingAlternative, pickAlternatives, planMeals } from './memberAlternatives';
+import type { FamilyMember, WeeklyPlan } from '../types';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -13,7 +16,11 @@ import { hitsExclusion } from './dietFilters';
 import { extractVoiceArgument } from './voiceText';
 import { INITIAL_RECIPES } from '../data/recipes';
 import type { PantryItem, Recipe } from '../types';
-import { limitsFor, normalizePlan, planName, PRICES, yearlySavingPercent, PLAN_LIMITS } from './plans';
+import { readFileSync } from 'node:fs';
+import { isNewer } from './updateCheck';
+import { fillPlaceholders } from '../../scripts/landing';
+import { PAGES, pageText, renderPage } from '../../scripts/landing-pages';
+import { dishSuggestionsLeft, limitsFor, normalizePlan, planName, PRICES, yearlySavingPercent, PLAN_LIMITS } from './plans';
 
 const item = (id: string, name: string, quantity: number, unit: string): PantryItem =>
   ({ id, name, quantity, unit, category: 'Altro' } as PantryItem);
@@ -122,4 +129,170 @@ test('reparti del supermercato: conservati prima dei freschi, parole intere', ()
   for (const [name, expected] of cases) {
     assert.equal(getSupermarketDepartment(name), expected, name);
   }
+});
+
+
+// ---- Alternative per persona -------------------------------------------------
+
+const recipe = (id: string, tags: string[], extra: Partial<Recipe> = {}): Recipe =>
+  ({
+    id,
+    title: id,
+    ingredients: [{ name: 'Acqua', amount: 1, unit: 'l' }],
+    instructions: [],
+    tags,
+    season: 'all',
+    isWHOCompliant: true,
+    category: 'lunch',
+    difficulty: 'easy',
+    timeMin: 20,
+    servings: 2,
+    hasCarbs: true,
+    hasProtein: true,
+    hasVeg: true,
+    ...extra,
+  }) as Recipe;
+
+const person = (id: string, extra: Partial<FamilyMember> = {}): FamilyMember => ({
+  id,
+  name: id,
+  likedIngredients: [],
+  dislikedIngredients: [],
+  ...extra,
+});
+
+test('alternative: serve solo a chi ha regole proprie e il piatto non va bene', () => {
+  const carne = recipe('carne', []);
+  const lenticchie = recipe('lenticchie', ['vegan']);
+  const vegana = person('giulia', { dietaryRestrictions: ['vegan'] });
+  const libero = person('marco');
+  assert.deepEqual(membersNeedingAlternative([carne], [vegana, libero]).map((m) => m.id), ['giulia']);
+  assert.deepEqual(membersNeedingAlternative([lenticchie], [vegana, libero]), []);
+  assert.equal(fitsMember(lenticchie, vegana), true);
+  assert.equal(fitsMember(carne, vegana), false);
+});
+
+test('alternative: allergie personali e contorni ignorati', () => {
+  const pasta = recipe('pasta', [], { ingredients: [{ name: 'Gamberi', amount: 100, unit: 'g' }] });
+  const contorno = recipe('pane', [], { category: 'side' });
+  const allergica = person('anna', { allergies: ['Gamberi'] });
+  assert.equal(membersNeedingAlternative([pasta], [allergica]).length, 1);
+  assert.equal(membersNeedingAlternative([contorno], [allergica]).length, 0);
+});
+
+test('alternative: scelta valida, senza ripetizioni e senza inventare', () => {
+  const carne = recipe('carne', []);
+  const a = recipe('a', ['vegan']);
+  const b = recipe('b', ['vegan']);
+  const vegana = person('giulia', { dietaryRestrictions: ['vegan'] });
+  const used = new Map<string, Set<string>>();
+  const first = pickAlternatives({ mains: [carne], members: [vegana], pool: [carne, a, b], used, random: () => 0 });
+  const second = pickAlternatives({ mains: [carne], members: [vegana], pool: [carne, a, b], used, random: () => 0 });
+  assert.ok(['a', 'b'].includes(first.giulia));
+  assert.notEqual(first.giulia, second.giulia);
+  // nessun piatto adatto: nessuna alternativa
+  assert.deepEqual(pickAlternatives({ mains: [carne], members: [vegana], pool: [carne] }), {});
+});
+
+test('alternative: la spesa conta le porzioni di ognuno', () => {
+  const plan: WeeklyPlan = {
+    id: 'current',
+    startDate: '2026-01-01',
+    days: {
+      Lunedì: { lunchIds: ['carne'], dinnerIds: ['zuppa'], lunchAlt: { giulia: 'lenticchie' } },
+      Martedì: { lunchIds: ['zuppa'], dinnerIds: [] },
+    },
+  };
+  const result = Object.fromEntries(planMeals(plan, 4).map((x) => [x.recipeId, x.people]));
+  assert.deepEqual(result, { carne: 3, lenticchie: 1, zuppa: 8 });
+});
+
+
+test('piatto personale: riconosce dieta e tipo dagli ingredienti', () => {
+  const carbonara = inferDishInfo(parseIngredientText('200 g spaghetti, 2 uova, guanciale, pecorino'), 'Carbonara');
+  assert.equal(carbonara.contains.gluten, true);
+  assert.equal(carbonara.contains.dairy, true);
+  assert.equal(carbonara.contains.animal, true);
+  assert.ok(!carbonara.tags.includes('vegan'));
+  assert.ok(!carbonara.tags.includes('gluten-free'));
+  assert.equal(carbonara.proteinType, 'red-meat');
+
+  const lenticchie = inferDishInfo(parseIngredientText('lenticchie, carote, sedano, cipolla'), 'Zuppa di lenticchie');
+  assert.deepEqual(lenticchie.tags.sort(), ['gluten-free', 'lactose-free', 'vegan']);
+  assert.equal(lenticchie.proteinType, 'legumes');
+  assert.equal(lenticchie.hasVeg, true);
+
+  const salmone = inferDishInfo([{ name: 'Salmone' }, { name: 'Limone' }]);
+  assert.equal(salmone.proteinType, 'fish');
+  assert.ok(salmone.tags.includes('gluten-free') && salmone.tags.includes('lactose-free'));
+});
+
+test('piatto personale: legge quantità e unità scritte a parole', () => {
+  const list = parseIngredientText('200 g di pasta, 2 uova, 1 cucchiaio olio, guanciale e pecorino');
+  assert.deepEqual(
+    list.map((i) => [i.name, i.amount, i.unit]),
+    [['Pasta', 200, 'g'], ['Uova', 2, 'pz'], ['Olio', 1, 'cucchiai'], ['Guanciale', 100, 'g'], ['Pecorino', 100, 'g']],
+  );
+});
+
+test('riconoscimenti IA dei piatti: 3 di prova, 50 con Chef IA, il contatore riparte ogni mese', () => {
+  const month = new Date().toISOString().slice(0, 7);
+  assert.equal(dishSuggestionsLeft('free'), 3);
+  assert.equal(dishSuggestionsLeft('smart'), 3);
+  assert.equal(dishSuggestionsLeft('pro'), 50);
+  assert.equal(dishSuggestionsLeft('free', { month, count: 2 }), 1);
+  assert.equal(dishSuggestionsLeft('free', { month, count: 9 }), 0);
+  assert.equal(dishSuggestionsLeft('pro', { month: '2020-01', count: 50 }), 50);
+});
+
+
+test('sito ufficiale: prezzi dal codice, nessun segnaposto rimasto e SEO di base', () => {
+  const vars = { siteUrl: 'https://esempio.web.app/', appUrl: 'https://app.web.app' };
+  for (const file of ['index.html', 'privacy.html', 'robots.txt', 'sitemap.xml']) {
+    const filled = fillPlaceholders(readFileSync(`landing/${file}`, 'utf8'), vars);
+    assert.ok(!filled.includes('__'), `${file}: segnaposto non sostituito`);
+  }
+  const home = fillPlaceholders(readFileSync('landing/index.html', 'utf8'), vars);
+  for (const price of ['3,99 €', '29,99 €', '6,99 €', '49,99 €']) assert.ok(home.includes(price), price);
+  assert.ok(home.includes('<link rel="canonical" href="https://esempio.web.app/">'));
+  const title = /<title>([^<]+)<\/title>/.exec(home)?.[1] ?? '';
+  const description = /<meta name="description" content="([^"]+)"/.exec(home)?.[1] ?? '';
+  assert.ok(title.length > 20 && title.length <= 80, `titolo di ${title.length} caratteri`);
+  assert.ok(description.length >= 80 && description.length <= 170, `descrizione di ${description.length} caratteri`);
+  assert.equal((home.match(/<h1[ >]/g) || []).length, 1);
+});
+
+
+test('aggiornamenti: si propone solo una build più recente di quella installata', () => {
+  assert.equal(isNewer(19, 18), true);
+  assert.equal(isNewer(18, 18), false);
+  assert.equal(isNewer(17, 18), false);
+  assert.equal(isNewer(0, 18), false);
+  assert.equal(isNewer(Number.NaN, 18), false);
+});
+
+
+test('pagine guida: contenuti veri, titoli unici e link interni validi', () => {
+  const slugs = new Set(PAGES.map((p) => p.slug));
+  assert.equal(slugs.size, PAGES.length, 'indirizzi duplicati');
+  assert.equal(new Set(PAGES.map((p) => p.title)).size, PAGES.length, 'titoli duplicati');
+  assert.equal(new Set(PAGES.map((p) => p.description)).size, PAGES.length, 'descrizioni duplicate');
+  for (const page of PAGES) {
+    const words = pageText(page).split(' ').length;
+    assert.ok(words >= 380, `${page.slug}: solo ${words} parole (contenuto troppo scarno)`);
+    assert.ok(page.title.length >= 30 && page.title.length <= 75, `${page.slug}: titolo di ${page.title.length} caratteri`);
+    assert.ok(page.description.length >= 100 && page.description.length <= 170, `${page.slug}: descrizione di ${page.description.length} caratteri`);
+    assert.ok(page.faq.length >= 3, `${page.slug}: poche domande frequenti`);
+    for (const r of page.related) assert.ok(slugs.has(r), `${page.slug}: guida correlata inesistente ${r}`);
+    const html = renderPage(page, 'https://esempio.web.app', 'https://app.web.app');
+    assert.equal((html.match(/<h1[ >]/g) || []).length, 1, `${page.slug}: serve un solo h1`);
+    assert.ok(html.includes(`<link rel="canonical" href="https://esempio.web.app/${page.slug}">`));
+    for (const m of html.matchAll(/href="\/([a-z0-9-]+)["#]/g)) {
+      if (!['privacy', 'icon-192.png'].includes(m[1])) assert.ok(slugs.has(m[1]), `${page.slug}: link interno rotto /${m[1]}`);
+    }
+    if (page.shot) assert.ok(readFileSync(`landing/img/${page.shot.file}.webp`).length > 1000, `${page.slug}: screenshot mancante`);
+    if (page.health) assert.ok(html.includes('non sostituisce il parere del medico'), `${page.slug}: manca l'avviso di prudenza`);
+  }
+  const sitemap = fillPlaceholders(readFileSync('landing/sitemap.xml', 'utf8'), { siteUrl: 'https://esempio.web.app', appUrl: 'https://app.web.app' });
+  for (const slug of slugs) assert.ok(sitemap.includes(`https://esempio.web.app/${slug}</loc>`), `sitemap senza ${slug}`);
 });

@@ -1,4 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
+import MemberAlternatives from './MemberAlternatives';
+import { pickAlternatives, planMeals } from '../lib/memberAlternatives';
 import { db } from '../lib/firebase';
 import { collection, query, where, getDocs, setDoc, doc, onSnapshot } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firebaseUtils';
@@ -86,28 +88,17 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
 
     const rawRequirements: { name: string; amount: number; unit: string }[] = [];
     
-    Object.values(currentPlan.days).forEach(dayRaw => {
-      const day = dayRaw as DayPlan;
-      const allRecipeIds = [...(day.lunchIds || []), ...(day.dinnerIds || [])];
-      allRecipeIds.forEach(recipeId => {
-        const recipe = recipes.find(r => r.id === recipeId);
-        if (recipe) {
-          const originalServings = recipe.servings || 2;
-          const ratio = targetServings / originalServings;
-
-          recipe.ingredients.forEach(ing => {
-            if (isStaple(ing.name)) return;
-            const rawNames = getRawIngredientNames(ing.name);
-            rawNames.forEach(name => {
-              if (isStaple(name)) return;
-              rawRequirements.push({
-                name,
-                amount: ing.amount * ratio,
-                unit: ing.unit
-              });
-            });
-          });
-        }
+    // Chi ha un'alternativa mangia quella: si compra per le porzioni reali di ogni piatto
+    planMeals(currentPlan, targetServings).forEach(({ recipeId, people }) => {
+      const recipe = recipes.find(r => r.id === recipeId);
+      if (!recipe) return;
+      const ratio = people / (recipe.servings || 2);
+      recipe.ingredients.forEach(ing => {
+        if (isStaple(ing.name)) return;
+        getRawIngredientNames(ing.name).forEach(name => {
+          if (isStaple(name)) return;
+          rawRequirements.push({ name, amount: ing.amount * ratio, unit: ing.unit });
+        });
       });
     });
 
@@ -788,6 +779,10 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
 
     let prevDayIngredients = new Set<string>();
     let remainingPoolIndex = 0;
+    // Alternative già date a ciascuno nella settimana (per non ripeterle)
+    const usedAlternatives = new Map<string, Set<string>>();
+    const findRecipes = (ids: string[]) =>
+      ids.map(id => recipes.find(r => r.id === id)).filter((r): r is Recipe => !!r);
 
     DAYS.forEach((day, index) => {
       // Current day ingredients to track and avoid for the NEXT day
@@ -842,9 +837,14 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
       }
       const dinnerIds = completeMeal(dinnerMain, new Set([...prevDayIngredients, ...currentDayIngredients]));
 
+      // Chi ha una dieta o un'allergia personale riceve un piatto alternativo quando quello di tutti non va bene
+      const lunchAlt = pickAlternatives({ mains: findRecipes(lunchIds), members: familyMembers, pool: availableRecipes, used: usedAlternatives });
+      const dinnerAlt = pickAlternatives({ mains: findRecipes(dinnerIds), members: familyMembers, pool: availableRecipes, used: usedAlternatives });
       newPlan.days[day] = {
         lunchIds,
-        dinnerIds
+        dinnerIds,
+        ...(Object.keys(lunchAlt).length > 0 ? { lunchAlt } : {}),
+        ...(Object.keys(dinnerAlt).length > 0 ? { dinnerAlt } : {}),
       };
 
       // Set for next iteration
@@ -904,10 +904,23 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
     const newPlan = { ...currentPlan };
     const dayPlan = { ...newPlan.days[day] };
 
+    // Con il piatto nuovo cambiano anche le alternative per chi ha esigenze personali
+    const newMain = recipes.find(r => r.id === targetRecipeId);
+    const altPool = recipes.filter(r =>
+      (r.season === season || r.season === 'all' || favorites.includes(r.id)) &&
+      satisfiesDiet(r, profile?.dietaryRestrictions || []) &&
+      !hitsExclusion(r, profile?.excludedIngredients || [])
+    );
+    const newAlt = pickAlternatives({ mains: newMain ? [newMain] : [], members: familyMembers, pool: altPool });
+
     if (type === 'lunch') {
       dayPlan.lunchIds = [targetRecipeId];
+      delete dayPlan.lunchAlt;
+      if (Object.keys(newAlt).length > 0) dayPlan.lunchAlt = newAlt;
     } else {
       dayPlan.dinnerIds = [targetRecipeId];
+      delete dayPlan.dinnerAlt;
+      if (Object.keys(newAlt).length > 0) dayPlan.dinnerAlt = newAlt;
     }
 
     newPlan.days[day] = dayPlan;
@@ -1341,6 +1354,7 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
                         <p className="text-sm font-medium text-slate-400">Nessun pranzo programmato</p>
                       </div>
                     )}
+                    <MemberAlternatives recipes={lunchRecipes} members={familyMembers} alt={plan?.lunchAlt} allRecipes={recipes} onOpen={setSelectedRecipe} />
                   </div>
 
                 </div>
@@ -1435,6 +1449,7 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
                         <p className="text-sm font-medium text-slate-400">Nessuna cena programmata</p>
                       </div>
                     )}
+                    <MemberAlternatives recipes={dinnerRecipes} members={familyMembers} alt={plan?.dinnerAlt} allRecipes={recipes} onOpen={setSelectedRecipe} />
                   </div>
 
                 </div>

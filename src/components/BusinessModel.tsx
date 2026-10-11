@@ -586,7 +586,7 @@ export default function BusinessModel({
               id: 'pro' as const,
               badge: 'Intelligenza artificiale',
               desc: 'Per chi vuole farsi aiutare: scansiona le offerte e comanda l\'app con la voce.',
-              features: ['Tutto del piano Famiglia', `Scansione volantini (fino a ${PLAN_LIMITS.pro.flyerScansPerMonth} al mese)`, 'Assistente vocale'],
+              features: ['Tutto del piano Famiglia', `Scansione volantini (fino a ${PLAN_LIMITS.pro.flyerScansPerMonth} al mese)`, `Riconosce gli ingredienti dei vostri piatti (fino a ${PLAN_LIMITS.pro.dishSuggestionsPerMonth} al mese)`, 'Assistente vocale'],
               dark: true,
             },
           ]).map((plan) => {

@@ -25,7 +25,7 @@ service cloud.firestore {
     function protectedFields() {
       return ['plan', 'isAdmin', 'isSuspended', 'subscriptionStatus', 'autoRenew',
               'paymentHistory', 'stripeCustomerId', 'stripeSubscriptionId',
-              'aiInteractionsThisMonth', 'aiUsage', 'hadSubscription', 'tempOTP', 'tempOTPExpires', 'tempOTPGeneratedAt',
+              'aiInteractionsThisMonth', 'aiUsage', 'dishUsage', 'hadSubscription', 'tempOTP', 'tempOTPExpires', 'tempOTPGeneratedAt',
               'tempPassword', 'tempPasswordGeneratedAt'];
     }
 

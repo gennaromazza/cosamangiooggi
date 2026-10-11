@@ -25,6 +25,7 @@ import {
   UserCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { Capacitor } from '@capacitor/core';
 import Logo from './components/Logo';
 import UpgradeCard from './components/UpgradeCard';
 import { limitsFor, planName, normalizePlan } from './lib/plans';
@@ -41,10 +42,11 @@ import BusinessModel from './components/BusinessModel';
 import AdminDashboard from './components/AdminDashboard';
 import WelcomeTour from './components/WelcomeTour';
 import AccountSettings from './components/AccountSettings';
+import UpdateBanner from './components/UpdateBanner';
 import PWAInstallPrompt from './components/PWAInstallPrompt';
 import { auth, db, functions } from './lib/firebase';
 import { httpsCallable } from 'firebase/functions';
-import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
+import { onAuthStateChanged, signInWithPopup, signInWithCredential, GoogleAuthProvider, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import { doc, onSnapshot, collection } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from './lib/firebaseUtils';
 import { UserProfile } from './types';
@@ -256,11 +258,23 @@ export default function App() {
     try {
       const { setPersistence, browserLocalPersistence } = await import('firebase/auth');
       await setPersistence(auth, browserLocalPersistence);
-      await signInWithPopup(auth, provider);
+      if (Capacitor.isNativePlatform()) {
+        // Nell'app il popup del browser non funziona: si usa la finestra di accesso Google di Android
+        const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');
+        const result = await FirebaseAuthentication.signInWithGoogle({ skipNativeAuth: true });
+        const idToken = result.credential?.idToken;
+        if (!idToken) throw new Error('google-token-mancante');
+        await signInWithCredential(auth, GoogleAuthProvider.credential(idToken));
+      } else {
+        await signInWithPopup(auth, provider);
+      }
     } catch (error: any) {
       console.error("Login error:", error);
       let message = "Errore durante l'accesso. Riprova.";
-      if (error.code === 'auth/popup-blocked') {
+      const text = String(error?.message || error?.code || '').toLowerCase();
+      if (text.includes('cancel') || text.includes('12501') || text.includes('dismiss')) {
+        message = "Accesso annullato.";
+      } else if (error.code === 'auth/popup-blocked') {
         message = "Il popup di accesso è stato bloccato. Abilita i popup per questo sito.";
       } else if (error.code === 'auth/cancelled-popup-request') {
         message = "Accesso annullato.";
@@ -314,43 +328,12 @@ export default function App() {
       } else if (error.code === 'auth/invalid-email') {
         message = "Indirizzo email non valido.";
       } else if (error.code === 'auth/operation-not-allowed' || error.code === 'auth/admin-restricted-operation') {
-        message = "[ABILITAZIONE FIREBASE RICHIESTA] Su Firebase è attivo di default solo Google. Per registrarti con la tua email su cloud, vai su Console Firebase -> Authentication -> Sign-in method -> Email/Password e clicca 'Abilita'. OPPURE entra subito cliccando il pulsante verde 'Entra con la mia Email in Modalità Locale' qui sotto!";
+        message = "L'accesso con email non è ancora attivo. Usa «Accedi con Google» oppure riprova più tardi.";
       }
       setLoginError(message);
     } finally {
       setIsLoggingIn(false);
     }
-  };
-
-  const handleLocalEmailLogin = () => {
-    if (!emailInput.trim()) {
-      setLoginError("Inserisci prima il tuo indirizzo email nel campo qui sopra.");
-      return;
-    }
-    setIsLoggingIn(true);
-    setLoginError(null);
-    const cleanEmail = emailInput.trim().toLowerCase();
-    const localUid = 'local-' + cleanEmail.replace(/[^a-z0-9]/g, '');
-    const displayName = nameInput.trim() || cleanEmail.split('@')[0] || 'Utente Locale';
-    const localUser = {
-      uid: localUid,
-      email: cleanEmail,
-      displayName: displayName
-    };
-    setUser(localUser as any);
-    setProfile({
-      id: localUid,
-      name: displayName,
-      email: cleanEmail,
-      dietaryRestrictions: [],
-      excludedIngredients: [],
-      plan: 'premium',
-      isAdmin: false,
-      isSuspended: false,
-      createdAt: new Date().toISOString(),
-      aiInteractionsThisMonth: 0
-    });
-    setIsLoggingIn(false);
   };
 
   const handleDemoLogin = () => {
@@ -499,40 +482,9 @@ export default function App() {
           </div>
 
           {loginError && (
-            <div className="mb-4 p-4 bg-amber-50 text-amber-900 text-xs rounded-2xl border border-amber-200 shadow-xs space-y-3">
-              <div className="flex items-start gap-2.5">
-                <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-                <div>
-                  <p className="font-bold text-sm text-amber-950 mb-1">
-                    {loginError.includes('ABILITAZIONE FIREBASE') 
-                      ? 'Registrazione Email disabilitata sul Cloud Firebase' 
-                      : 'Avviso Accesso'}
-                  </p>
-                  <p className="leading-relaxed text-amber-800">{loginError}</p>
-                </div>
-              </div>
-
-              {loginError.includes('ABILITAZIONE FIREBASE') && (
-                <div className="bg-white/90 rounded-xl p-3 border border-amber-100 space-y-2.5 shadow-2xs">
-                  <p className="font-semibold text-amber-950 text-xs">
-                    🔧 Come abilitare la registrazione in 3 passaggi (richiede 30 secondi):
-                  </p>
-                  <ol className="list-decimal list-inside space-y-1 text-slate-700 text-xs pl-1 font-medium">
-                    <li>Apri la <a href="https://console.firebase.google.com/" target="_blank" rel="noreferrer" className="text-indigo-600 font-bold underline">Console Firebase</a> e seleziona il progetto.</li>
-                    <li>Nel menu di sinistra vai su <b>Authentication</b> ➔ scheda <b>Sign-in method</b>.</li>
-                    <li>Clicca sulla voce <b>Email/Password</b>, attiva la levetta <b>Abilita</b> e premi <b>Salva</b>.</li>
-                  </ol>
-                </div>
-              )}
-
-              <button
-                type="button"
-                onClick={handleLocalEmailLogin}
-                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-3 rounded-xl flex items-center justify-center gap-2 text-xs shadow-xs transition-all cursor-pointer"
-              >
-                <Sparkles className="w-4 h-4" />
-                <span>Entra subito in Modalità Locale con {emailInput ? `"${emailInput}"` : 'questa email'}</span>
-              </button>
+            <div role="alert" className="mb-4 p-4 bg-amber-50 text-amber-900 rounded-2xl border border-amber-200 flex items-start gap-2.5">
+              <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+              <p className="text-sm leading-relaxed text-amber-900">{loginError}</p>
             </div>
           )}
 
@@ -1022,6 +974,7 @@ export default function App() {
       />
 
       <PWAInstallPrompt />
+      <UpdateBanner />
     </div>
   );
 }

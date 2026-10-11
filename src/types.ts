@@ -7,6 +7,10 @@ export interface FamilyMember {
   dislikedIngredients: string[];
   likedMeals?: string[];
   dislikedMeals?: string[];
+  /** Dieta solo di questa persona: se il piatto di tutti non va bene, il menù prepara un'alternativa */
+  dietaryRestrictions?: DietaryRestriction[];
+  /** Allergie o ingredienti da evitare assolutamente solo per questa persona */
+  allergies?: string[];
 }
 
 export interface UserProfile {
@@ -24,6 +28,7 @@ export interface UserProfile {
   createdAt?: string;
   aiInteractionsThisMonth?: number;
   aiUsage?: { month: string; flyerScans: number };
+  dishUsage?: { month: string; count: number };
   hadSubscription?: boolean;
   tempOTP?: string;
   tempOTPExpires?: string;
@@ -75,6 +80,9 @@ export interface Recipe {
 export interface DayPlan {
   lunchIds: string[];
   dinnerIds: string[];
+  /** Alternative per chi ha una dieta o un'allergia personale: id persona → id ricetta */
+  lunchAlt?: Record<string, string>;
+  dinnerAlt?: Record<string, string>;
 }
 
 export interface WeeklyPlan {

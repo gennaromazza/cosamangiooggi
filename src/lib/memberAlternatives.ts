@@ -1,0 +1,76 @@
+import type { FamilyMember, Recipe, WeeklyPlan } from '../types';
+import { hitsExclusion, satisfiesDiet } from './dietFilters';
+
+/** Una persona ha regole proprie (dieta o allergie) oltre a quelle di tutta la famiglia. */
+export const hasPersonalRules = (member: FamilyMember): boolean =>
+  (member.dietaryRestrictions?.length || 0) > 0 || (member.allergies?.length || 0) > 0;
+
+/** Il piatto rispetta la dieta e le allergie di questa persona. */
+export const fitsMember = (recipe: Recipe, member: FamilyMember): boolean =>
+  satisfiesDiet(recipe, member.dietaryRestrictions || []) && !hitsExclusion(recipe, member.allergies || []);
+
+const isMain = (recipe: Recipe) => recipe.category !== 'side' && recipe.category !== 'dessert';
+
+/** Persone per cui il pasto (i piatti principali) non va bene e serve un'alternativa. Contorni esclusi. */
+export function membersNeedingAlternative(mains: Recipe[], members: FamilyMember[]): FamilyMember[] {
+  const dishes = mains.filter(isMain);
+  return members.filter((member) => hasPersonalRules(member) && dishes.some((recipe) => !fitsMember(recipe, member)));
+}
+
+/**
+ * Sceglie un piatto alternativo per ogni persona che ne ha bisogno.
+ * `pool` contiene già solo ricette valide per tutta la famiglia (stagione, diete e allergie comuni).
+ * `used` ricorda le alternative già date a ciascuno nella settimana, per non ripeterle.
+ */
+export function pickAlternatives(args: {
+  mains: Recipe[];
+  members: FamilyMember[];
+  pool: Recipe[];
+  used?: Map<string, Set<string>>;
+  random?: () => number;
+}): Record<string, string> {
+  const { mains, members, pool, used = new Map(), random = Math.random } = args;
+  const result: Record<string, string> = {};
+  const mainIds = new Set(mains.map((recipe) => recipe.id));
+
+  for (const member of membersNeedingAlternative(mains, members)) {
+    let candidates = pool.filter((recipe) => isMain(recipe) && !mainIds.has(recipe.id) && fitsMember(recipe, member));
+    // Gusti della persona: preferenze, si rilassano se non resta nulla (le allergie no)
+    const liked = candidates.filter(
+      (recipe) =>
+        !(member.dislikedMeals || []).includes(recipe.id) && !hitsExclusion(recipe, member.dislikedIngredients || []),
+    );
+    if (liked.length > 0) candidates = liked;
+    if (candidates.length === 0) continue;
+
+    const already = used.get(member.id) || new Set<string>();
+    const fresh = candidates.filter((recipe) => !already.has(recipe.id));
+    const choices = fresh.length > 0 ? fresh : candidates;
+    const picked = choices[Math.floor(random() * choices.length)];
+    result[member.id] = picked.id;
+    used.set(member.id, new Set([...already, picked.id]));
+  }
+  return result;
+}
+
+/**
+ * Quante persone mangiano ogni piatto del piano. Chi ha un'alternativa mangia quella (1 porzione),
+ * gli altri mangiano il piatto di tutti: serve a spesa e dispensa per non comprare di troppo.
+ */
+export function planMeals(plan: WeeklyPlan, servings: number): { recipeId: string; people: number }[] {
+  const people = new Map<string, number>();
+  const add = (id: string, count: number) => people.set(id, (people.get(id) || 0) + count);
+  for (const day of Object.values(plan.days)) {
+    const slots: [string[] | undefined, Record<string, string> | undefined][] = [
+      [day.lunchIds, day.lunchAlt],
+      [day.dinnerIds, day.dinnerAlt],
+    ];
+    for (const [ids, alt] of slots) {
+      const altIds = Object.values(alt || {});
+      const forEveryoneElse = Math.max(servings - altIds.length, 0);
+      (ids || []).forEach((id) => add(id, forEveryoneElse));
+      altIds.forEach((id) => add(id, 1));
+    }
+  }
+  return [...people].filter(([, count]) => count > 0).map(([recipeId, count]) => ({ recipeId, people: count }));
+}
