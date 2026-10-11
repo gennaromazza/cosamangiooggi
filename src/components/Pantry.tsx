@@ -50,6 +50,7 @@ export default function Pantry({ userId, profile, onNavigateToPlanner }: Props) 
   // Suggested recipes display state
   const [matchFilter, setMatchFilter] = useState<'all' | 'ready' | 'almost'>('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
+  const [visibleSuggestions, setVisibleSuggestions] = useState(6);
 
   const [cookingSuccessMessage, setCookingSuccessMessage] = useState<string | null>(null);
   const [isConsuming, setIsConsuming] = useState(false);
@@ -319,20 +320,9 @@ export default function Pantry({ userId, profile, onNavigateToPlanner }: Props) 
   return (
     <div className="space-y-6">
       {/* Page Title Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold bg-gradient-to-r from-slate-800 to-indigo-900 bg-clip-text text-transparent">Dispensa Intelligente</h2>
-          <p className="text-slate-500">Monitora gli ingredienti che hai in casa e scopri come usarli senza sprechi.</p>
-        </div>
-        {onNavigateToPlanner && (
-          <button
-            onClick={onNavigateToPlanner}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl text-xs font-bold shadow-sm transition-all flex items-center justify-center gap-2 shrink-0 cursor-pointer active:scale-95"
-          >
-            <Sparkles className="w-4 h-4" />
-            <span>Genera Menù IA con questi Prodotti</span>
-          </button>
-        )}
+      <div>
+        <h2 className="text-3xl font-semibold text-slate-900">La dispensa</h2>
+        <p className="text-slate-600 mt-1">Cosa hai in casa, per non sprecare nulla.</p>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 items-start">
@@ -340,22 +330,16 @@ export default function Pantry({ userId, profile, onNavigateToPlanner }: Props) 
         <div className="xl:col-span-5 space-y-6">
           <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
             <div className="p-5 border-b border-slate-100 bg-slate-50/70">
-              <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2 mb-3">
-                <Package className="w-5 h-5 text-indigo-600" />
-                La Mia Dispensa
-              </h3>
-              
-              <div className="mb-4 flex items-center justify-between text-xs text-slate-500 font-semibold bg-white border border-slate-150 px-3 py-1.5 rounded-xl shadow-2xs">
-                <span>Prodotti in dispensa:</span>
-                <span className="font-black text-slate-850">
-                  {items.length} {Number.isFinite(limitsFor(profile?.plan).maxPantryItems) ? `/ ${limitsFor(profile?.plan).maxPantryItems} (Piano Gratuito)` : '(Illimitati)'}
-                </span>
-              </div>
-              
+              {Number.isFinite(limitsFor(profile?.plan).maxPantryItems) && (
+                <p className="mb-3 text-sm text-slate-500">
+                  {items.length} di {limitsFor(profile?.plan).maxPantryItems} prodotti (piano gratuito)
+                </p>
+              )}
+
               <div className="space-y-3">
                 <input
                   type="text"
-                  placeholder="Ingredienti (es. Zucchine, Uova, Farina)"
+                  placeholder="Cosa aggiungi? (es. zucchine)"
                   value={newItem.name}
                   onChange={(e) => {
                     setNewItem({ ...newItem, name: e.target.value });
@@ -497,164 +481,86 @@ export default function Pantry({ userId, profile, onNavigateToPlanner }: Props) 
           </div>
         </div>
 
-        {/* Right pane: "Cosa ho in dispensa?" Recipe Suggestions engine */}
+        {/* Cosa posso cucinare con quello che ho */}
         <div className="xl:col-span-7 space-y-6">
-          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-6">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-4">
-              <div>
-                <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">
-                  <Sparkles className="w-5 h-5 text-indigo-500 fill-indigo-200" />
-                  Cosa ho in dispensa?
-                </h3>
-                <p className="text-xs text-slate-400">Ricette su misura che riducono gli sprechi e massimizzano il risparmio.</p>
-              </div>
+          <div className="bg-white rounded-3xl border border-slate-200 p-5 shadow-sm space-y-4">
+            <div>
+              <h3 className="text-2xl font-semibold text-slate-900">Cosa posso cucinare?</h3>
+              <p className="text-sm text-slate-500 mt-1">Piatti che usano ciò che hai già in dispensa.</p>
             </div>
 
             {items.length === 0 ? (
-              <div className="text-center py-12 border-2 border-dashed border-slate-100 rounded-2xl bg-slate-50/50 space-y-3">
-                <ChefHat className="w-12 h-12 text-slate-300 mx-auto" />
-                <h4 className="font-bold text-slate-700">Pronto per gli abbinamenti?</h4>
-                <p className="text-xs text-slate-400 max-w-sm mx-auto px-4">
-                  Aggiungi gli ingredienti della tua dispensa nella sezione di sinistra. Ti consiglieremo le ricette migliori compatibili e ti diremo cosa comprare!
-                </p>
+              <div className="text-center py-10 rounded-2xl bg-slate-50">
+                <ChefHat className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+                <p className="text-slate-600 max-w-xs mx-auto">Aggiungi qualche prodotto e ti suggeriamo cosa cucinare.</p>
               </div>
             ) : (
-              <div className="space-y-6">
-                {/* Search and Filters Layout */}
-                <div className="space-y-4">
-                  <div className="flex flex-wrap items-center gap-4">
-                    {/* Filter level selector */}
-                    <div className="flex bg-slate-100 p-1 rounded-xl">
-                      {[
-                        { id: 'all', label: 'Tutte' },
-                        { id: 'ready', label: 'Pronte da cucinare' },
-                        { id: 'almost', label: 'Manca poco (1-2)' }
-                      ].map((btn) => (
-                        <button
-                          key={btn.id}
-                          onClick={() => setMatchFilter(btn.id as any)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold tracking-tight transition-all ${
-                            matchFilter === btn.id
-                              ? 'bg-white text-slate-800 shadow-sm'
-                              : 'text-slate-500 hover:text-slate-800'
-                          }`}
-                        >
-                          {btn.label}
-                        </button>
-                      ))}
-                    </div>
-
-                    <div className="hidden sm:block h-4 w-[1px] bg-slate-200" />
-
-                    {/* Filter categories pills */}
-                    <div className="flex gap-1.5 overflow-x-auto pb-1 max-w-full">
-                      {[
-                        { id: 'all', label: 'Tutte' },
-                        { id: 'lunch', label: 'Primi' },
-                        { id: 'dinner', label: 'Secondi' },
-                        { id: 'dessert', label: 'Dolci' },
-                        { id: 'side', label: 'Contorni' }
-                      ].map((cat) => (
-                        <button
-                          key={cat.id}
-                          onClick={() => setCategoryFilter(cat.id)}
-                          className={`px-2.5 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                            categoryFilter === cat.id
-                              ? 'bg-indigo-50 text-indigo-700 font-bold border border-indigo-200'
-                              : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
-                          }`}
-                        >
-                          {cat.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+              <div className="space-y-4">
+                <div className="flex bg-slate-100 p-1 rounded-2xl" role="group" aria-label="Quanto manca per cucinarli">
+                  {[
+                    { id: 'all', label: 'Tutti' },
+                    { id: 'ready', label: 'Hai tutto' },
+                    { id: 'almost', label: 'Manca poco' }
+                  ].map((btn) => (
+                    <button
+                      key={btn.id}
+                      onClick={() => { setMatchFilter(btn.id as any); setVisibleSuggestions(6); }}
+                      aria-pressed={matchFilter === btn.id}
+                      className={`flex-1 h-10 rounded-xl text-sm font-semibold transition-all ${
+                        matchFilter === btn.id ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'
+                      }`}
+                    >
+                      {btn.label}
+                    </button>
+                  ))}
                 </div>
 
-                {/* Recommendations list */}
-                <div className="space-y-4 max-h-[600px] overflow-y-auto pr-1">
-                  {matchedRecipesList.map(({ recipe, matchMetrics }) => {
+                <div className="divide-y divide-slate-100 border border-slate-100 rounded-2xl overflow-hidden">
+                  {matchedRecipesList.slice(0, visibleSuggestions).map(({ recipe, matchMetrics }) => {
                     const isReady = matchMetrics.missing.length === 0;
                     return (
-                      <div 
-                        key={recipe.id} 
-                        className="bg-white rounded-xl border border-slate-200 p-5 hover:border-indigo-300 hover:shadow-md transition-all group relative duration-200"
+                      <button
+                        key={recipe.id}
+                        onClick={() => setSelectedRecipe(recipe)}
+                        className="w-full text-left px-4 py-4 active:bg-slate-50 flex items-center gap-3"
                       >
-                        {/* Status absolute badges */}
-                        {isReady ? (
-                          <span className="absolute top-4 right-4 bg-emerald-50 text-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-100 flex items-center gap-1">
-                            <CheckCircle2 className="w-3 h-3" /> Cucinalo subito!
+                        <span className="flex-1 min-w-0">
+                          <span className="block font-semibold text-slate-900 leading-snug">{recipe.title}</span>
+                          <span className={`block text-sm mt-0.5 ${isReady ? 'text-emerald-700 font-semibold' : 'text-amber-700'}`}>
+                            {isReady
+                              ? 'Hai tutto, cucinalo subito'
+                              : `Ti manca: ${matchMetrics.missing.slice(0, 2).join(', ')}${matchMetrics.missing.length > 2 ? ` e altri ${matchMetrics.missing.length - 2}` : ''}`}
                           </span>
-                        ) : matchMetrics.missing.length <= 2 ? (
-                          <span className="absolute top-4 right-4 bg-amber-50 text-amber-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-amber-100 flex items-center gap-1">
-                            <AlertTriangle className="w-3 h-3 text-amber-500" /> Manca pochissimo
-                          </span>
-                        ) : null}
-
-                        <h4 className="font-bold text-slate-800 text-sm group-hover:text-indigo-600 transition-colors line-clamp-1 pr-32">
-                          {recipe.title}
-                        </h4>
-
-                        <div className="flex gap-3 text-[11px] text-slate-500 mt-1.5">
-                          <span className="flex items-center gap-0.5"><Clock className="w-3 h-3" /> {recipe.timeMin} min</span>
-                          <span className="flex items-center gap-0.5 capitalize"><Gauge className="w-3 h-3" /> {recipe.difficulty}</span>
-                          <span className="bg-slate-100 text-slate-600 px-1.5 py-0.2 rounded uppercase font-bold tracking-wider text-[8px]">{recipe.category === 'lunch' ? 'Primo' : recipe.category === 'dinner' ? 'Secondo' : recipe.category}</span>
-                        </div>
-
-                        {/* Ingredients tracking progress */}
-                        <div className="mt-4 space-y-1">
-                          <div className="flex justify-between text-[11px] font-extrabold text-slate-600">
-                            <span>Corrispondenza ingredienti:</span>
-                            <span>{Math.round(matchMetrics.percentage)}% ({matchMetrics.matchCount}/{matchMetrics.totalTracked})</span>
-                          </div>
-                          <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                            <div 
-                              className={`h-full transition-all duration-300 ${
-                                isReady ? 'bg-emerald-500' : matchMetrics.percentage >= 60 ? 'bg-indigo-500' : 'bg-amber-400'
-                              }`}
-                              style={{ width: `${matchMetrics.percentage}%` }}
-                            />
-                          </div>
-                        </div>
-
-                        {/* Possessed and Missing Lists */}
-                        <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-slate-100 pt-3 text-[11px]">
-                          <div>
-                            <span className="text-[9px] uppercase font-bold text-emerald-600 block mb-0.5">Hai in dispensa:</span>
-                            {matchMetrics.matched.length > 0 ? (
-                              <p className="text-slate-600 font-medium line-clamp-1">{matchMetrics.matched.join(', ')}</p>
-                            ) : (
-                              <span className="text-slate-400 italic">Nessuno tracciato</span>
-                            )}
-                          </div>
-                          <div>
-                            <span className="text-[9px] uppercase font-bold text-amber-600 block mb-0.5">Ti manca da acquistare:</span>
-                            {matchMetrics.missing.length > 0 ? (
-                              <p className="text-amber-700 font-extrabold line-clamp-1">{matchMetrics.missing.join(', ')}</p>
-                            ) : (
-                              <span className="text-emerald-600 font-bold">Nessuno di rilevante! Ricetta a costo zero 🎉</span>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="mt-3 pt-2 border-t border-slate-50 flex justify-end">
-                          <button
-                            onClick={() => setSelectedRecipe(recipe)}
-                            className="text-xs font-bold text-indigo-600 hover:text-indigo-800 transition-colors flex items-center gap-1"
-                          >
-                            Vedi preparazione e dosi →
-                          </button>
-                        </div>
-                      </div>
+                        </span>
+                        <span className="shrink-0 text-xs font-bold text-slate-500 bg-slate-100 rounded-full px-2.5 py-1">
+                          {matchMetrics.matchCount}/{matchMetrics.totalTracked}
+                        </span>
+                      </button>
                     );
                   })}
-
                   {matchedRecipesList.length === 0 && (
-                    <div className="text-center py-12 text-slate-400 text-xs">
-                      Nessuna ricetta corrisponde ai filtri di ricerca impostati.
-                    </div>
+                    <p className="text-center py-10 text-slate-500 px-4">Nessun piatto per ora: prova ad aggiungere altri prodotti.</p>
                   )}
                 </div>
+
+                {matchedRecipesList.length > visibleSuggestions && (
+                  <button
+                    onClick={() => setVisibleSuggestions(n => n + 6)}
+                    className="w-full h-12 rounded-2xl border border-slate-200 text-slate-700 font-semibold"
+                  >
+                    Mostra altri ({matchedRecipesList.length - visibleSuggestions})
+                  </button>
+                )}
+
+                {onNavigateToPlanner && (
+                  <button
+                    onClick={onNavigateToPlanner}
+                    className="w-full h-12 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold flex items-center justify-center gap-2"
+                  >
+                    <Sparkles className="w-5 h-5" />
+                    Crea il menù con questi prodotti
+                  </button>
+                )}
               </div>
             )}
           </div>

@@ -24,11 +24,21 @@ export default function VacationPlanner({ userId, onNavigateToShopping }: Props)
   const [targetServings, setTargetServings] = useState<number>(2);
   const [onlyNoCook, setOnlyNoCook] = useState<boolean>(false);
   const [addedToCartSuccess, setAddedToCartSuccess] = useState(false);
+  // Account demo/locali: niente database, i dati restano sul dispositivo
+  const isLocal = userId === 'demo-family-user' || userId.startsWith('local-');
 
   // Load custom user recipes from Firestore along with INITIAL_RECIPES
   useEffect(() => {
     if (!userId) {
       setLoading(false);
+      return;
+    }
+
+    if (isLocal) {
+      let userRecipes: Recipe[] = [];
+      try { userRecipes = JSON.parse(localStorage.getItem(`customRecipes_${userId}`) || '[]'); } catch { /* dati non validi */ }
+      const existingIds = new Set(INITIAL_RECIPES.map(r => r.id));
+      setRecipes([...INITIAL_RECIPES, ...userRecipes.filter(ur => !existingIds.has(ur.id))]);
       return;
     }
 
@@ -56,6 +66,14 @@ export default function VacationPlanner({ userId, onNavigateToShopping }: Props)
   // Load existing vacation plan from Firestore
   useEffect(() => {
     if (!userId) return;
+    if (isLocal) {
+      let saved: { [day: string]: { lunchId: string; dinnerId: string } } | null = null;
+      try { saved = JSON.parse(localStorage.getItem(`vacationPlan_${userId}`) || 'null'); } catch { saved = null; }
+      if (saved) setVacationPlan(saved);
+      else generateVacationPlan(false);
+      setLoading(false);
+      return;
+    }
     const planRef = doc(db, 'users', userId, 'vacationPlan', 'current');
     const unsub = onSnapshot(planRef, (snap) => {
       if (snap.exists()) {
@@ -132,7 +150,9 @@ export default function VacationPlanner({ userId, onNavigateToShopping }: Props)
     setVacationPlan(newPlan);
     setIsGenerating(false);
 
-    if (forceSave && userId) {
+    if (forceSave && userId && isLocal) {
+      localStorage.setItem(`vacationPlan_${userId}`, JSON.stringify(newPlan));
+    } else if (forceSave && userId) {
       try {
         await setDoc(doc(db, 'users', userId, 'vacationPlan', 'current'), {
           updatedAt: new Date().toISOString(),
@@ -162,7 +182,9 @@ export default function VacationPlanner({ userId, onNavigateToShopping }: Props)
     };
 
     setVacationPlan(updatedPlan);
-    if (userId) {
+    if (userId && isLocal) {
+      localStorage.setItem(`vacationPlan_${userId}`, JSON.stringify(updatedPlan));
+    } else if (userId) {
       try {
         await setDoc(doc(db, 'users', userId, 'vacationPlan', 'current'), {
           updatedAt: new Date().toISOString(),
@@ -193,6 +215,22 @@ export default function VacationPlanner({ userId, onNavigateToShopping }: Props)
         }
       });
     });
+
+    if (isLocal) {
+      let list: { id: string; name: string; amount: number; unit: string; needed: boolean }[] = [];
+      try { list = JSON.parse(localStorage.getItem(`voiceShopping_${userId}`) || '[]'); } catch { list = []; }
+      for (const [name, data] of itemsToAdd.entries()) {
+        const cleanName = name.charAt(0).toUpperCase() + name.slice(1);
+        const calcAmount = Math.round(data.amount * 10) / 10 || 1;
+        const existing = list.find(i => i.name.toLowerCase() === name);
+        if (existing) existing.amount = calcAmount;
+        else list.push({ id: `vac-${name}`, name: cleanName, amount: calcAmount, unit: data.unit, needed: true });
+      }
+      localStorage.setItem(`voiceShopping_${userId}`, JSON.stringify(list));
+      setAddedToCartSuccess(true);
+      setTimeout(() => setAddedToCartSuccess(false), 4000);
+      return;
+    }
 
     try {
       const voiceListRef = collection(db, 'users', userId, 'voiceShoppingItems');
@@ -240,54 +278,43 @@ export default function VacationPlanner({ userId, onNavigateToShopping }: Props)
 
   return (
     <div className="space-y-8 pb-12">
-      {/* Hero Header */}
-      <div className="relative overflow-hidden bg-gradient-to-br from-amber-500 via-orange-500 to-rose-500 rounded-3xl p-6 sm:p-8 text-white shadow-xl">
-        <div className="absolute top-0 right-0 -mt-8 -mr-8 w-48 h-48 bg-white/10 rounded-full blur-2xl pointer-events-none"></div>
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-3 max-w-2xl">
-            <div className="inline-flex items-center gap-2 px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-xs font-bold uppercase tracking-wider">
-              <Sun className="w-3.5 h-3.5 text-yellow-300" /> Speciale Estate & Spiaggia
-            </div>
-            <h1 className="text-2xl sm:text-4xl font-black tracking-tight leading-tight">
-              Menù Vacanze 0-Stress
-            </h1>
-            <p className="text-amber-100 text-sm sm:text-base leading-relaxed">
-              Dimentica lo stress del mare: <strong>Pranzi al sacco</strong> da preparare la sera prima o al mattino e conservare freschi nella borsa frigo, abbinati a <strong>Cene lampo in 10-15 min</strong> al rientro dall'ombrellone!
-            </p>
-          </div>
-
-          <div className="flex flex-col sm:flex-row gap-3">
-            <button
-              onClick={() => generateVacationPlan(true)}
-              disabled={isGenerating}
-              className="px-6 py-3.5 bg-white text-orange-600 font-extrabold rounded-2xl shadow-lg hover:bg-orange-50 transition-all flex items-center justify-center gap-2.5 cursor-pointer active:scale-95 disabled:opacity-50"
-            >
-              <Sparkles className={`w-5 h-5 text-amber-500 ${isGenerating ? 'animate-spin' : ''}`} />
-              <span>Genera Menù Vacanza</span>
-            </button>
-          </div>
+      {/* Intestazione */}
+      <div className="space-y-4">
+        <div>
+          <h2 className="text-3xl font-semibold text-slate-900">Menù vacanza</h2>
+          <p className="text-slate-600 mt-1">Pranzi al sacco e cene veloci, pronti per la settimana al mare.</p>
         </div>
 
-        {/* Quick Filter Bar */}
-        <div className="mt-6 pt-6 border-t border-white/20 flex flex-wrap items-center justify-between gap-4 text-xs">
-          <div className="flex items-center gap-3">
-            <span className="font-semibold text-white/90">Porzioni per la spiaggia:</span>
-            <div className="flex bg-white/20 rounded-xl p-1 backdrop-blur-xs">
+        <div className="bg-white border border-slate-200 rounded-3xl p-5 space-y-5">
+          <button
+            onClick={() => generateVacationPlan(true)}
+            disabled={isGenerating}
+            className="w-full h-14 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-lg flex items-center justify-center gap-2 shadow-md disabled:opacity-60 active:scale-[0.98] transition-all"
+          >
+            <Sparkles className={`w-5 h-5 ${isGenerating ? 'animate-spin' : ''}`} />
+            {isGenerating ? 'Sto preparando…' : 'Crea il menù vacanza'}
+          </button>
+
+          <div>
+            <p className="text-sm font-semibold text-slate-700 mb-2">Per quante persone?</p>
+            <div className="flex bg-slate-100 p-1 rounded-2xl" role="group" aria-label="Persone">
               {[2, 4, 6].map(num => (
                 <button
                   key={num}
                   onClick={() => setTargetServings(num)}
-                  className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
-                    targetServings === num ? 'bg-white text-orange-600 shadow-xs' : 'text-white hover:bg-white/10'
+                  aria-pressed={targetServings === num}
+                  className={`flex-1 h-10 rounded-xl text-sm font-semibold transition-all ${
+                    targetServings === num ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'
                   }`}
                 >
-                  {num} pers.
+                  {num}
                 </button>
               ))}
             </div>
           </div>
 
-          <label className="flex items-center gap-2 cursor-pointer select-none bg-white/15 px-3.5 py-1.5 rounded-xl hover:bg-white/25 transition-all">
+          <label className="flex items-center justify-between gap-4 cursor-pointer">
+            <span className="text-sm font-medium text-slate-800">Cene senza fornelli</span>
             <input
               type="checkbox"
               checked={onlyNoCook}
@@ -295,24 +322,21 @@ export default function VacationPlanner({ userId, onNavigateToShopping }: Props)
                 setOnlyNoCook(e.target.checked);
                 setTimeout(() => generateVacationPlan(true), 100);
               }}
-              className="rounded text-orange-600 focus:ring-0 w-4 h-4"
+              className="w-5 h-5 accent-indigo-600"
             />
-            <span className="font-bold text-white">Solo cene senza fornelli (0 cottura post-mare)</span>
           </label>
         </div>
-      </div>
 
-      {/* Cooler Box Tip Banner */}
-      <div className="bg-gradient-to-r from-sky-50 to-blue-50 border border-sky-100 rounded-2xl p-4 flex items-start gap-4">
-        <div className="p-2.5 bg-sky-500 text-white rounded-xl shrink-0 mt-0.5 shadow-xs">
-          <ThermometerSnowflake className="w-5 h-5" />
-        </div>
-        <div className="text-xs text-sky-900 space-y-1">
-          <h4 className="font-extrabold text-sm">Consiglio del Nutrizionista per la Borsa Frigo</h4>
-          <p className="leading-relaxed">
-            Per mantenere intatti sapori e sicurezza alimentare sotto l'ombrellone: <strong>1)</strong> Prepara insalate di riso, pasta o farro la sera prima e tienile in frigo a 4°C tutta la notte; <strong>2)</strong> Posiziona 2 siberini ghiacciati sul fondo e 1 in cima al contenitore; <strong>3)</strong> Evita maionese o uova crude e condisci con olio a crudo e limone prima di uscire.
+        <details className="bg-white border border-slate-200 rounded-2xl px-4 py-3">
+          <summary className="cursor-pointer list-none flex items-center justify-between text-sm font-semibold text-slate-700">
+            <span className="flex items-center gap-2"><ThermometerSnowflake className="w-4 h-4 text-sky-600" /> Consigli per la borsa frigo</span>
+            <span className="text-slate-400">▾</span>
+          </summary>
+          <p className="text-sm text-slate-600 leading-relaxed mt-3">
+            Prepara insalate di riso, pasta o farro la sera prima e tienile in frigo. Metti 2 siberini ghiacciati sul fondo e 1 in cima al contenitore.
+            Evita maionese e uova crude: condisci con olio a crudo e limone prima di uscire.
           </p>
-        </div>
+        </details>
       </div>
 
       {/* Day Selector Tabs */}
@@ -459,48 +483,31 @@ export default function VacationPlanner({ userId, onNavigateToShopping }: Props)
         </div>
       )}
 
-      {/* Action Bar for Week Shopping */}
-      <div className="bg-slate-900 text-white rounded-3xl p-6 sm:p-8 shadow-xl flex flex-col md:flex-row items-center justify-between gap-6">
-        <div className="space-y-2 text-center md:text-left">
-          <h3 className="text-lg sm:text-xl font-extrabold flex items-center justify-center md:justify-start gap-2">
-            <ShoppingCart className="w-6 h-6 text-orange-400" />
-            <span>Spesa Unica per Tutta la Settimana al Mare</span>
-          </h3>
-          <p className="text-xs sm:text-sm text-slate-400 max-w-xl leading-relaxed">
-            Esporta con un clic tutti gli ingredienti necessari per i 7 giorni (ricalcolati per {targetServings} persone) direttamente nella tua Lista della Spesa in app.
-          </p>
-        </div>
-
-        <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
-          <button
-            onClick={handleAddAllToShoppingList}
-            className={`px-6 py-4 rounded-2xl font-extrabold text-sm transition-all flex items-center justify-center gap-2 shadow-lg cursor-pointer ${
-              addedToCartSuccess
-                ? 'bg-emerald-500 text-white'
-                : 'bg-orange-500 hover:bg-orange-600 text-white active:scale-95'
-            }`}
-          >
-            {addedToCartSuccess ? (
-              <>
-                <Check className="w-5 h-5" />
-                <span>Aggiunto alla Spesa!</span>
-              </>
-            ) : (
-              <>
-                <ShoppingCart className="w-5 h-5" />
-                <span>Invia a Lista Spesa ({targetServings} pers.)</span>
-              </>
-            )}
-          </button>
-          {onNavigateToShopping && (
-            <button
-              onClick={onNavigateToShopping}
-              className="px-5 py-4 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-2xl text-sm transition-all cursor-pointer"
-            >
-              Apri Lista Spesa
-            </button>
+      {/* Spesa della settimana: un solo pulsante */}
+      <div className="space-y-3">
+        <button
+          onClick={handleAddAllToShoppingList}
+          className={`w-full h-14 rounded-2xl font-bold text-lg flex items-center justify-center gap-2 shadow-md active:scale-[0.98] transition-all ${
+            addedToCartSuccess ? 'bg-emerald-600 text-white' : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+          }`}
+        >
+          {addedToCartSuccess ? (
+            <>
+              <Check className="w-5 h-5" />
+              Aggiunto alla spesa!
+            </>
+          ) : (
+            <>
+              <ShoppingCart className="w-5 h-5" />
+              Aggiungi tutto alla spesa
+            </>
           )}
-        </div>
+        </button>
+        {onNavigateToShopping && (
+          <button onClick={onNavigateToShopping} className="block mx-auto text-sm font-semibold text-slate-600 underline underline-offset-4">
+            Apri la lista della spesa
+          </button>
+        )}
       </div>
 
       {/* Full Recipe Modal */}

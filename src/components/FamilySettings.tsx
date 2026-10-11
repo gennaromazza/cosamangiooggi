@@ -7,7 +7,7 @@ import { Browser } from '@capacitor/browser';
 import { collection, query, onSnapshot, addDoc, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firebaseUtils';
 import { FamilyMember, DietaryRestriction, UserProfile, Recipe } from '../types';
-import { Plus, Trash2, Heart, HeartOff, User, Settings2, X, UtensilsCrossed, ShieldCheck, Sparkles, RefreshCw, Calendar, Mail, Info, CreditCard } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, X } from 'lucide-react';
 import { INITIAL_RECIPES } from '../data/recipes';
 
 interface Props {
@@ -16,9 +16,10 @@ interface Props {
   onProfileUpdate?: (profile: UserProfile | null) => void;
   onNavigateToPantry?: () => void;
   onNavigateToPlanner?: () => void;
+  onNavigateToBusiness?: () => void;
 }
 
-export default function FamilySettings({ userId, profile: propProfile, onProfileUpdate, onNavigateToPantry, onNavigateToPlanner }: Props) {
+export default function FamilySettings({ userId, profile: propProfile, onProfileUpdate, onNavigateToPantry, onNavigateToPlanner, onNavigateToBusiness }: Props) {
   const [members, setMembers] = useState<FamilyMember[]>([]);
   const [profile, setProfile] = useState<UserProfile | null>(propProfile || null);
 
@@ -31,6 +32,8 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
   const [loading, setLoading] = useState(true);
   const [newMemberName, setNewMemberName] = useState('');
   const [showLimitWarning, setShowLimitWarning] = useState(false);
+  const [openMemberId, setOpenMemberId] = useState<string | null>(null);
+  const [memberTab, setMemberTab] = useState<'like' | 'dislike' | 'meals'>('dislike');
 
   const allRecipes = [...INITIAL_RECIPES, ...customRecipes];
 
@@ -317,443 +320,306 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
 
   if (loading) return <div className="p-8 text-center">Caricamento...</div>;
 
+  const isPaid = !!profile?.plan && profile.plan !== 'free';
+  const DIET_OPTIONS = [
+    { id: 'vegan', emoji: '🌱', label: 'Vegani' },
+    { id: 'gluten-free', emoji: '🌾', label: 'Senza glutine' },
+    { id: 'lactose-free', emoji: '🥛', label: 'Senza lattosio' },
+  ] as const;
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800">Membri della Famiglia</h2>
-          <p className="text-slate-500">Imposta i gusti di tutti per menù personalizzati.</p>
-        </div>
-        <button
-          onClick={() => window.dispatchEvent(new CustomEvent('open-welcome-tour'))}
-          className="self-start md:self-auto text-sm font-bold text-indigo-600 hover:text-indigo-800 underline underline-offset-4"
-        >
-          Rivedi la guida iniziale
-        </button>
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-3xl font-semibold text-slate-900">La famiglia</h2>
+        <p className="text-slate-600 mt-1">Chi mangia a tavola e cosa evitare.</p>
       </div>
 
-      {/* Visual subscription and profile status card */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs relative overflow-hidden">
-        <div className="absolute top-0 left-0 w-2 h-full bg-indigo-600" />
-        
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-          <div className="space-y-4 flex-1">
-            <div className="flex items-center gap-2.5">
-              <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl">
-                <User className="w-5 h-5" />
-              </div>
-              <div>
-                <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Profilo Famiglia</span>
-                <h3 className="text-lg font-extrabold text-slate-800">
-                  {profile?.name || 'Nuova Famiglia spesa'}
-                </h3>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-xs">
-              <div className="flex items-center gap-2 text-slate-600 bg-slate-50 border border-slate-100 p-2.5 rounded-xl">
-                <Mail className="w-4 h-4 text-slate-400 shrink-0" />
-                <div className="truncate">
-                  <span className="text-[9px] uppercase font-bold text-slate-400 block">E-mail</span>
-                  <span className="font-semibold">{profile?.email || 'N/A'}</span>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 text-slate-600 bg-slate-50 border border-slate-100 p-2.5 rounded-xl">
-                <Calendar className="w-4 h-4 text-slate-400 shrink-0" />
-                <div>
-                  <span className="text-[9px] uppercase font-bold text-slate-400 block">Registrato il</span>
-                  <span className="font-semibold">
-                    {profile?.createdAt ? new Date(profile.createdAt).toLocaleDateString('it-IT') : 'N/A'}
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 text-slate-600 bg-slate-50 border border-slate-100 p-2.5 rounded-xl sm:col-span-2 md:col-span-1">
-                <CreditCard className="w-4 h-4 text-slate-400 shrink-0" />
-                <div>
-                  <span className="text-[9px] uppercase font-bold text-slate-400 block">Livello Piano</span>
-                  <span className={`inline-flex items-center gap-1 font-bold rounded px-1.5 py-0.5 mt-0.5 ${
-                    profile?.plan === 'pro' ? 'bg-purple-50 text-purple-700' :
-                    profile?.plan === 'smart' ? 'bg-indigo-50 text-indigo-700' :
-                    'bg-slate-100 text-slate-600'
-                  }`}>
-                    {planName(profile?.plan)}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-slate-50/80 border border-slate-100 p-5 rounded-2xl flex flex-col justify-between gap-4 lg:w-80 shrink-0">
-            <div>
-              <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider mb-1">Stato Abbonamento</span>
-              
-              {(!profile || !profile.plan || profile.plan === 'free') ? (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-slate-400" />
-                    <span className="text-xs font-bold text-slate-600">Piano Gratuito</span>
-                  </div>
-                  <p className="text-[11px] text-slate-500 leading-normal">
-                    Sei sul piano gratuito: fino a 4 persone e 20 prodotti in dispensa. Con Famiglia non hai limiti.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {(profile.autoRenew !== false && profile.subscriptionStatus !== 'pending_renewal') ? (
-                    <>
-                      <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-100 px-3 py-1.5 rounded-xl w-fit">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                        <span className="text-xs font-extrabold text-emerald-800 font-bold">Premium attivo</span>
-                      </div>
-                      <p className="text-[11px] text-slate-500 leading-normal font-medium">
-                        Il tuo abbonamento è attivo con fatturazione e rinnovo automatico regolare.
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <div className="flex items-center gap-2 bg-amber-50 border border-amber-150 px-3 py-1.5 rounded-xl w-fit">
-                        <span className="w-2 h-2 rounded-full bg-amber-500" />
-                        <span className="text-xs font-extrabold text-amber-800 font-bold">In attesa di rinnovo</span>
-                      </div>
-                      <p className="text-[11px] text-slate-500 leading-normal font-medium">
-                        Rinnovo automatico in sospeso o disattivato. L'abbonamento rimarrà attivo fino al termine del periodo pagato.
-                      </p>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {profile && profile.plan !== 'free' && (
-              <button
-                type="button"
-                onClick={toggleAutoRenew}
-                className="w-full text-center py-2 px-3 border border-slate-200 hover:border-indigo-200 hover:bg-white text-[11px] font-bold text-slate-600 hover:text-indigo-600 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5"
-              >
-                <RefreshCw className="w-3.5 h-3.5 animate-spin-slow" />
-                <span>
-                  {(profile.autoRenew !== false && profile.subscriptionStatus !== 'pending_renewal')
-                    ? "Disattiva rinnovo automatico"
-                    : "Attiva rinnovo automatico"
-                  }
-                </span>
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-2xl border border-slate-200 p-6">
-        <div className="mb-6 flex items-center justify-between text-xs text-slate-500 font-semibold bg-slate-50 border border-slate-150 px-4 py-2 rounded-xl">
-          <span>Profili aggiuntivi aggiunti:</span>
-          <span className="font-black text-slate-850">
-            {members.length} {Number.isFinite(limitsFor(profile?.plan).maxMembers) ? `/ ${limitsFor(profile?.plan).maxMembers} (Piano Gratuito)` : '(Illimitati)'}
+      {/* A tavola */}
+      <div className="bg-white rounded-3xl border border-slate-200 p-5 space-y-4">
+        <div className="flex items-baseline justify-between gap-3">
+          <h3 className="text-xl font-semibold text-slate-900">A tavola</h3>
+          <span className="text-sm text-slate-500">
+            {members.length}
+            {Number.isFinite(limitsFor(profile?.plan).maxMembers) ? ` di ${limitsFor(profile?.plan).maxMembers}` : ''}
           </span>
         </div>
 
-        <div className="flex gap-2 mb-4">
+        <div className="flex gap-2">
           <input
             type="text"
-            placeholder="Nome membro (es. Luca)"
+            placeholder="Aggiungi una persona (es. Luca)"
             value={newMemberName}
             onChange={(e) => {
               setNewMemberName(e.target.value);
               if (showLimitWarning) setShowLimitWarning(false);
             }}
-            className="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            onKeyDown={(e) => e.key === 'Enter' && addMember()}
+            className="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-2xl px-4 h-12 focus:outline-none focus:ring-2 focus:ring-indigo-500"
           />
-          <button 
+          <button
             onClick={addMember}
-            className="shrink-0 bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-indigo-700 transition-colors"
+            aria-label="Aggiungi persona"
+            className="shrink-0 h-12 w-12 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl flex items-center justify-center"
           >
-            <Plus className="w-4 h-4" />
-            Aggiungi
+            <Plus className="w-5 h-5" />
           </button>
         </div>
 
         {showLimitWarning && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-150 rounded-xl text-xs text-red-800 space-y-1 animate-pulse">
-            <div className="flex items-center gap-2 font-bold">
-              <span>⚠️ Limite profili raggiunto</span>
-            </div>
-            <p className="text-[11px] leading-relaxed text-slate-600">
-              Il piano gratuito comprende fino a <strong>4 persone a tavola</strong>. Con il piano Famiglia o Chef IA non hai limiti.
-            </p>
-          </div>
+          <p className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-2xl p-3">
+            Il piano gratuito comprende fino a <strong>{limitsFor(profile?.plan).maxMembers} persone</strong>. Con il piano Famiglia non hai limiti.
+            {onNavigateToBusiness && (
+              <button onClick={onNavigateToBusiness} className="ml-1 font-bold underline underline-offset-4">Scopri i piani</button>
+            )}
+          </p>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {members.map(member => (
-            <div key={member.id} className="border border-slate-100 rounded-xl p-6 bg-slate-50/50">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600">
-                    <User className="w-5 h-5" />
+        {members.length === 0 ? (
+          <p className="text-slate-500 py-4 text-center">Aggiungi chi mangia con te: il menù terrà conto dei suoi gusti.</p>
+        ) : (
+          <div className="divide-y divide-slate-100 border border-slate-100 rounded-2xl overflow-hidden">
+            {members.map(member => {
+              const open = openMemberId === member.id;
+              const dislikes = (member.dislikedIngredients?.length || 0) + (member.dislikedMeals?.length || 0);
+              const likes = (member.likedIngredients?.length || 0) + (member.likedMeals?.length || 0);
+              return (
+                <div key={member.id}>
+                  <div className="flex items-center">
+                    <button
+                      onClick={() => setOpenMemberId(open ? null : member.id)}
+                      aria-expanded={open}
+                      className="flex-1 min-w-0 flex items-center gap-3 px-4 py-4 text-left active:bg-slate-50"
+                    >
+                      <span className="w-11 h-11 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center shrink-0">
+                        {member.name.charAt(0).toUpperCase()}
+                      </span>
+                      <span className="flex-1 min-w-0">
+                        <span className="block font-semibold text-slate-900 truncate">{member.name}</span>
+                        <span className="block text-sm text-slate-500">
+                          {likes + dislikes === 0 ? 'Nessun gusto indicato' : `${likes} piace · ${dislikes} da evitare`}
+                        </span>
+                      </span>
+                      <ChevronDown className={`w-5 h-5 text-slate-400 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+                    </button>
+                    <button
+                      onClick={() => deleteMember(member.id)}
+                      aria-label={`Rimuovi ${member.name}`}
+                      className="shrink-0 w-11 h-11 mr-2 rounded-full flex items-center justify-center text-slate-300 hover:text-red-500"
+                    >
+                      <Trash2 className="w-5 h-5" />
+                    </button>
                   </div>
-                  <h3 className="font-bold text-slate-800">{member.name}</h3>
-                </div>
-                <button 
-                  onClick={() => deleteMember(member.id)}
-                  className="text-slate-400 hover:text-red-500 transition-colors"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
 
-              <div className="space-y-4">
-                <div>
-                  <label className="text-xs font-bold text-slate-400 uppercase flex items-center gap-1 mb-2">
-                    <Heart className="w-3 h-3 text-pink-500" />
-                    Ingredienti preferiti
-                  </label>
-                  <div className="flex flex-wrap gap-2">
-                    {COMMON_INGREDIENTS.map(ing => {
-                      const isLiked = member.likedIngredients?.includes(ing);
-                      const isDisliked = member.dislikedIngredients?.includes(ing);
-                      return (
-                        <button
-                          key={ing}
-                          type="button"
-                          disabled={isDisliked}
-                          onClick={() => updatePreferences(member.id, 'likedIngredients', ing)}
-                          className={`text-xs px-3 py-1 rounded-full border transition-all ${
-                            isLiked
-                              ? 'bg-pink-50 border-pink-200 text-pink-600 font-bold'
-                              : isDisliked
-                              ? 'bg-slate-100 border-slate-200 text-slate-400 opacity-40 cursor-not-allowed line-through'
-                              : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
-                          }`}
-                          title={isDisliked ? 'Ingrediente non gradito: impossibile selezionarlo tra i preferiti' : ing}
-                        >
-                          {ing}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                  {open && (
+                    <div className="px-4 pb-5 space-y-4 bg-slate-50/60">
+                      <div className="flex bg-slate-100 p-1 rounded-2xl" role="group" aria-label="Gusti di questa persona">
+                        {([
+                          ['dislike', 'Non mangia'],
+                          ['like', 'Ama'],
+                          ['meals', 'Piatti'],
+                        ] as const).map(([id, label]) => (
+                          <button
+                            key={id}
+                            onClick={() => setMemberTab(id)}
+                            aria-pressed={memberTab === id}
+                            className={`flex-1 h-10 rounded-xl text-sm font-semibold ${
+                              memberTab === id ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
 
-                <div>
-                  <label className="text-xs font-bold text-slate-400 uppercase flex items-center gap-1 mb-2">
-                    <HeartOff className="w-3 h-3 text-slate-400" />
-                    Ingredienti non graditi
-                  </label>
-                  <div className="flex flex-wrap gap-2">
-                    {COMMON_INGREDIENTS.map(ing => {
-                      const isDisliked = member.dislikedIngredients?.includes(ing);
-                      return (
-                        <button
-                          key={ing}
-                          type="button"
-                          onClick={() => updatePreferences(member.id, 'dislikedIngredients', ing)}
-                          className={`text-xs px-3 py-1 rounded-full border transition-all ${
-                            isDisliked
-                              ? 'bg-slate-200 border-slate-300 text-slate-700 font-bold'
-                              : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
-                          }`}
-                        >
-                          {ing}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                      {memberTab === 'dislike' && (
+                        <div>
+                          <p className="text-sm text-slate-600 mb-3">Tocca gli ingredienti che non deve trovare nel piatto.</p>
+                          <div className="flex flex-wrap gap-2">
+                            {COMMON_INGREDIENTS.map(ing => {
+                              const on = member.dislikedIngredients?.includes(ing);
+                              return (
+                                <button
+                                  key={ing}
+                                  type="button"
+                                  aria-pressed={!!on}
+                                  onClick={() => updatePreferences(member.id, 'dislikedIngredients', ing)}
+                                  className={`px-3.5 h-10 rounded-full border text-sm font-medium ${
+                                    on ? 'bg-slate-800 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-700'
+                                  }`}
+                                >
+                                  {ing}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
 
-                <div>
-                  <label className="text-xs font-bold text-slate-400 uppercase flex items-center gap-1 mb-2">
-                    <UtensilsCrossed className="w-3 h-3 text-emerald-500" />
-                    Piatti preferiti (Ricette amate)
-                  </label>
-                  <div className="max-h-36 overflow-y-auto p-2.5 bg-white border border-slate-200/80 rounded-xl flex flex-wrap gap-1.5 shadow-2xs">
-                    {allRecipes.map(recipe => {
-                      const isLiked = member.likedMeals?.includes(recipe.id);
-                      const isDisliked = member.dislikedMeals?.includes(recipe.id);
-                      return (
-                        <button
-                          key={recipe.id}
-                          type="button"
-                          disabled={isDisliked}
-                          onClick={() => updatePreferences(member.id, 'likedMeals', recipe.id)}
-                          className={`text-xs px-2.5 py-1 rounded-full border transition-all flex items-center gap-1 ${
-                            isLiked
-                              ? 'bg-emerald-50 border-emerald-200 text-emerald-700 font-bold shadow-2xs'
-                              : isDisliked
-                              ? 'bg-slate-100 border-slate-200 text-slate-400 opacity-40 cursor-not-allowed line-through'
-                              : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
-                          }`}
-                          title={isDisliked ? 'Piatto non gradito: impossibile selezionarlo come preferito' : recipe.title}
-                        >
-                          {recipe.title}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                      {memberTab === 'like' && (
+                        <div>
+                          <p className="text-sm text-slate-600 mb-3">Tocca gli ingredienti che ama: li useremo più spesso.</p>
+                          <div className="flex flex-wrap gap-2">
+                            {COMMON_INGREDIENTS.map(ing => {
+                              const on = member.likedIngredients?.includes(ing);
+                              const blocked = member.dislikedIngredients?.includes(ing);
+                              return (
+                                <button
+                                  key={ing}
+                                  type="button"
+                                  disabled={blocked}
+                                  aria-pressed={!!on}
+                                  onClick={() => updatePreferences(member.id, 'likedIngredients', ing)}
+                                  className={`px-3.5 h-10 rounded-full border text-sm font-medium ${
+                                    on
+                                      ? 'bg-pink-600 border-pink-600 text-white'
+                                      : blocked
+                                      ? 'bg-slate-100 border-slate-200 text-slate-300 line-through cursor-not-allowed'
+                                      : 'bg-white border-slate-200 text-slate-700'
+                                  }`}
+                                >
+                                  {ing}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
 
-                <div>
-                  <label className="text-xs font-bold text-slate-400 uppercase flex items-center gap-1 mb-2">
-                    <HeartOff className="w-3 h-3 text-red-400" />
-                    Piatti non graditi (Esclusi per questo membro)
-                  </label>
-                  <div className="max-h-36 overflow-y-auto p-2.5 bg-white border border-slate-200/80 rounded-xl flex flex-wrap gap-1.5 shadow-2xs">
-                    {allRecipes.map(recipe => {
-                      const isDisliked = member.dislikedMeals?.includes(recipe.id);
-                      return (
-                        <button
-                          key={recipe.id}
-                          type="button"
-                          onClick={() => updatePreferences(member.id, 'dislikedMeals', recipe.id)}
-                          className={`text-xs px-2.5 py-1 rounded-full border transition-all flex items-center gap-1 ${
-                            isDisliked
-                              ? 'bg-red-50 border-red-200 text-red-700 font-bold shadow-2xs'
-                              : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
-                          }`}
-                          title={recipe.title}
-                        >
-                          {recipe.title}
-                        </button>
-                      );
-                    })}
-                  </div>
+                      {memberTab === 'meals' && (
+                        <div className="space-y-5">
+                          {([
+                            { field: 'likedMeals', title: 'Piatti che ama', onClass: 'bg-emerald-600 border-emerald-600 text-white', blockedField: 'dislikedMeals' },
+                            { field: 'dislikedMeals', title: 'Piatti da evitare', onClass: 'bg-slate-800 border-slate-800 text-white', blockedField: null },
+                          ] as const).map(group => (
+                            <div key={group.field}>
+                              <p className="text-sm font-semibold text-slate-800 mb-2">{group.title}</p>
+                              <div className="max-h-48 overflow-y-auto p-2.5 bg-white border border-slate-200 rounded-2xl flex flex-wrap gap-2">
+                                {allRecipes.map(recipe => {
+                                  const on = (member[group.field] || []).includes(recipe.id);
+                                  const blocked = group.blockedField ? (member[group.blockedField] || []).includes(recipe.id) : false;
+                                  return (
+                                    <button
+                                      key={recipe.id}
+                                      type="button"
+                                      disabled={blocked}
+                                      aria-pressed={on}
+                                      onClick={() => updatePreferences(member.id, group.field, recipe.id)}
+                                      className={`px-3 h-9 rounded-full border text-sm ${
+                                        on ? group.onClass : blocked ? 'bg-slate-100 border-slate-200 text-slate-300 line-through' : 'bg-white border-slate-200 text-slate-700'
+                                      }`}
+                                    >
+                                      {recipe.title}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {members.length === 0 && (
-          <div className="text-center py-12">
-            <User className="w-12 h-12 text-slate-200 mx-auto mb-4" />
-            <p className="text-slate-400">Aggiungi i membri della tua famiglia per iniziare.</p>
+              );
+            })}
           </div>
         )}
       </div>
 
-      <div className="bg-orange-50 border border-orange-100 rounded-xl p-6 flex flex-col md:flex-row gap-6">
-        <div className="flex gap-4">
-          <div className="bg-orange-100 p-2 rounded-lg h-fit">
-            <Settings2 className="text-orange-600 w-5 h-5" />
-          </div>
-          <div>
-            <h4 className="text-sm font-bold text-orange-900">Restrizioni Alimentari Globali</h4>
-            <p className="text-xs text-orange-700 leading-relaxed mb-4">
-              Queste impostazioni filtrano automaticamente tutte le ricette nel piano settimanale.
-            </p>
-          </div>
+      {/* Da evitare per tutti: diete e allergie in un'unica scheda */}
+      <div className="bg-white rounded-3xl border border-slate-200 p-5 space-y-5">
+        <div>
+          <h3 className="text-xl font-semibold text-slate-900">Da evitare per tutti</h3>
+          <p className="text-sm text-slate-500 mt-1">Il menù non li proporrà mai.</p>
         </div>
-        
-        <div className="flex flex-wrap gap-2 md:ml-auto">
-          {([
-            { id: 'vegan', label: 'Vegan' },
-            { id: 'lactose-free', label: 'Senza Lattosio' },
-            { id: 'gluten-free', label: 'Senza Glutine' }
-          ] as const).map(diet => {
-            const isActive = profile?.dietaryRestrictions?.includes(diet.id);
+
+        <div className="flex flex-wrap gap-2">
+          {DIET_OPTIONS.map(diet => {
+            const on = profile?.dietaryRestrictions?.includes(diet.id);
             return (
               <button
                 key={diet.id}
                 onClick={() => updateGlobalRestrictions(diet.id)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all border ${
-                  isActive
-                    ? 'bg-orange-200 border-orange-300 text-orange-900 shadow-sm'
-                    : 'bg-white border-orange-100 text-orange-600 hover:border-orange-200'
+                aria-pressed={!!on}
+                className={`px-4 h-11 rounded-full border text-sm font-semibold flex items-center gap-2 ${
+                  on ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-200 text-slate-700'
                 }`}
               >
-                {isActive && <div className="w-2 h-2 rounded-full bg-orange-600 animate-pulse" />}
+                <span>{diet.emoji}</span>
                 {diet.label}
               </button>
             );
           })}
         </div>
-      </div>
 
-      <div className="bg-red-50 border border-red-100 rounded-xl p-6">
-        <div className="flex gap-4 mb-4">
-          <div className="bg-red-100 p-2 rounded-lg h-fit">
-            <HeartOff className="text-red-600 w-5 h-5" />
-          </div>
-          <div>
-            <h4 className="text-sm font-bold text-red-900">Allergie e Ingredienti da Escludere</h4>
-            <p className="text-xs text-red-700 leading-relaxed">
-              Aggiungi qui gli ingredienti che devono essere totalmente evitati nella generazione dei menù.
-            </p>
-          </div>
-        </div>
-
-        <div className="flex gap-2 mb-4">
-          <input
-            type="text"
-            placeholder="Aggiungi ingrediente (es. Arachidi)"
-            value={newAllergy}
-            onChange={(e) => setNewAllergy(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && addAllergy()}
-            className="flex-1 min-w-0 bg-white border border-red-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
-          />
-          <button 
-            onClick={addAllergy}
-            className="shrink-0 bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-red-700 transition-colors"
-          >
-            Aggiungi
-          </button>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          {profile?.excludedIngredients?.map(allergy => (
-            <div 
-              key={allergy}
-              className="flex items-center gap-2 bg-white border border-red-200 px-3 py-1.5 rounded-full text-sm font-medium text-red-700"
+        <div>
+          <p className="text-sm font-semibold text-slate-800 mb-2">Allergie o ingredienti da escludere</p>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="Es. arachidi"
+              value={newAllergy}
+              onChange={(e) => setNewAllergy(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && addAllergy()}
+              className="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-2xl px-4 h-12 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <button
+              onClick={addAllergy}
+              aria-label="Aggiungi allergia"
+              className="shrink-0 h-12 w-12 bg-slate-800 hover:bg-slate-900 text-white rounded-2xl flex items-center justify-center"
             >
-              {allergy}
-              <button 
-                onClick={() => removeAllergy(allergy)}
-                className="hover:text-red-900 p-0.5"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
+              <Plus className="w-5 h-5" />
+            </button>
+          </div>
+          {profile?.excludedIngredients && profile.excludedIngredients.length > 0 && (
+            <div className="flex flex-wrap gap-2 mt-3">
+              {profile.excludedIngredients.map(allergy => (
+                <span key={allergy} className="inline-flex items-center gap-1.5 bg-red-50 border border-red-200 text-red-800 pl-3.5 pr-2 h-10 rounded-full text-sm font-medium">
+                  {allergy}
+                  <button onClick={() => removeAllergy(allergy)} aria-label={`Rimuovi ${allergy}`} className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-red-100">
+                    <X className="w-4 h-4" />
+                  </button>
+                </span>
+              ))}
             </div>
-          ))}
-          {(!profile?.excludedIngredients || profile.excludedIngredients.length === 0) && (
-            <p className="text-xs text-red-400 italic">Nessun ingrediente escluso.</p>
           )}
         </div>
       </div>
 
-      {/* Next Step Guidance: Passa alla Dispensa */}
-      {members.length > 0 && (onNavigateToPantry || onNavigateToPlanner) && (
-        <div className="bg-gradient-to-r from-indigo-50 via-emerald-50 to-indigo-50 border border-indigo-200/80 rounded-2xl p-6 shadow-sm">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <span className="bg-emerald-600 text-white text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full tracking-wider shadow-2xs">Step 1 Completato</span>
-                <h3 className="text-base font-bold text-slate-900">Famiglia configurata con successo!</h3>
-              </div>
-              <p className="text-xs text-slate-600 leading-relaxed max-w-xl">
-                Ora puoi passare alla <strong>Dispensa</strong> per impostare i prodotti che hai già in casa prima di generare il menù. <em>(Tuttavia, questo passaggio è facoltativo e può essere saltato).</em>
-              </p>
-            </div>
-            <div className="flex flex-col sm:flex-row gap-2.5 shrink-0">
-              {onNavigateToPantry && (
-                <button
-                  onClick={onNavigateToPantry}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl text-xs font-bold shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95"
-                >
-                  <span>Imposta Prodotti in Dispensa</span>
-                  <span>→</span>
-                </button>
-              )}
-              {onNavigateToPlanner && (
-                <button
-                  onClick={onNavigateToPlanner}
-                  className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center cursor-pointer shadow-2xs"
-                >
-                  Salta e Genera Menù
-                </button>
-              )}
-            </div>
-          </div>
+      {/* Piano e abbonamento: una riga */}
+      <div className="bg-white rounded-3xl border border-slate-200 p-5 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm text-slate-500">Il tuo piano</p>
+          <p className="text-lg font-semibold text-slate-900">{planName(profile?.plan)}</p>
         </div>
+        {isPaid ? (
+          <button onClick={toggleAutoRenew} className="shrink-0 px-4 h-11 rounded-2xl border border-slate-200 text-slate-700 text-sm font-semibold">
+            Gestisci
+          </button>
+        ) : (
+          onNavigateToBusiness && (
+            <button onClick={onNavigateToBusiness} className="shrink-0 px-4 h-11 rounded-2xl bg-indigo-600 text-white text-sm font-bold">
+              Scopri i piani
+            </button>
+          )
+        )}
+      </div>
+
+      {members.length > 0 && onNavigateToPlanner && (
+        <button
+          onClick={onNavigateToPlanner}
+          className="w-full h-14 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-lg shadow-md"
+        >
+          Crea il menù della settimana
+        </button>
       )}
+
+      <button
+        onClick={() => window.dispatchEvent(new CustomEvent('open-welcome-tour'))}
+        className="block mx-auto text-sm font-semibold text-slate-500 underline underline-offset-4"
+      >
+        Rivedi la guida iniziale
+      </button>
     </div>
   );
 }

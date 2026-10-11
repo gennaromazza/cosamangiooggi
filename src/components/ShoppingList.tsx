@@ -69,7 +69,7 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
   const [shoppingSearch, setShoppingSearch] = useState('');
   const [viewMode, setViewMode] = useState<'all' | 'departments'>('all');
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [itemsPerPage, setItemsPerPage] = useState(15);
   const [newItem, setNewItem] = useState({ name: '', amount: 1, unit: 'pz' });
   const [loading, setLoading] = useState(true);
   const [pantryCount, setPantryCount] = useState<number>(0);
@@ -91,14 +91,20 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
         const savedCustomStr = localStorage.getItem(`customRecipes_${userId}`);
         const customRecipes = savedCustomStr ? JSON.parse(savedCustomStr) as Recipe[] : [];
         const allRecipes = [...INITIAL_RECIPES, ...customRecipes];
-        const targetServings = 4;
+        // Porzioni = persone a tavola (come nel menù); senza persone indicate, 2
+        let localMembers = 0;
+        try { localMembers = (JSON.parse(localStorage.getItem(`members_${userId}`) || '[]') as unknown[]).length; } catch { /* dati non validi */ }
+        const targetServings = localMembers || 2;
 
         const savedPantryStr = localStorage.getItem(`pantry_${userId}`);
         const pantry = savedPantryStr ? JSON.parse(savedPantryStr) as PantryItem[] : [];
         setPantryCount(pantry.length);
+        // Articoli aggiunti a mano (o dal pianificatore vacanze): prima venivano salvati ma mai mostrati
+        try { setVoiceList(JSON.parse(localStorage.getItem(`voiceShopping_${userId}`) || '[]')); } catch { setVoiceList([]); }
 
         if (!activePlan) {
           setShoppingList([]);
+          setLoading(false);
           return;
         }
 
@@ -135,6 +141,7 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
           category: 'Ricetta dal Menu'
         }));
         setShoppingList(autoList);
+        setLoading(false);
         return;
       }
 
@@ -163,6 +170,7 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
 
           if (!activePlan) {
             setShoppingList([]);
+            setLoading(false);
             return;
           }
 
@@ -240,6 +248,7 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
       const list = savedStr ? JSON.parse(savedStr) : [];
       const updated = [...list, { id: Date.now().toString(), name: newItem.name.trim(), amount: newItem.amount, unit: newItem.unit, needed: true }];
       localStorage.setItem(`voiceShopping_${userId}`, JSON.stringify(updated));
+      setVoiceList(updated);
       setNewItem({ name: '', amount: 1, unit: 'pz' });
       return;
     }
@@ -264,6 +273,7 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
       if (savedStr) {
         const list = JSON.parse(savedStr).filter((item: any) => item.id !== id);
         localStorage.setItem(`voiceShopping_${userId}`, JSON.stringify(list));
+        setVoiceList(list);
       }
       return;
     }
@@ -368,7 +378,7 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
   };
 
-  if (loading) return <div className="p-8 text-center text-slate-500">Aggiornamento sincronizzato della spesa in corso...</div>;
+  if (loading) return <div className="p-8 text-center text-slate-500">Preparo la lista della spesa…</div>;
 
   const totalLength = shoppingList.length + voiceList.length;
 
@@ -396,10 +406,7 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
 
   // Pagination for the Unified View
   const totalItems = unifiedList.length;
-  const totalPages = Math.ceil(totalItems / itemsPerPage) || 1;
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const endIndex = startIndex + itemsPerPage;
-  const paginatedList = unifiedList.slice(startIndex, endIndex);
+  const paginatedList = unifiedList.slice(0, itemsPerPage);
 
   // Group by Supermarket Department
   const groupedByDept = DEPARTMENTS.map(dept => {
@@ -414,8 +421,8 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold bg-gradient-to-r from-slate-800 to-indigo-900 bg-clip-text text-transparent">Lista della Spesa</h2>
-          <p className="text-slate-500">Sincronizzata in tempo reale con dispensa e comandi vocali.</p>
+          <h2 className="text-3xl font-semibold text-slate-900">La spesa</h2>
+          <p className="text-slate-600 mt-1">Quello che ti serve comprare per il menù.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           {totalLength > 0 && (
@@ -505,24 +512,6 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
                   <span className="text-xs bg-indigo-50 border border-indigo-100 text-indigo-650 px-2.5 py-0.5 rounded-full font-bold font-mono">
                     {totalItems} articoli
                   </span>
-                  {totalItems > 0 && (
-                    <div className="flex items-center gap-1 text-[11px] text-slate-500">
-                      <span>Mostra:</span>
-                      <select
-                        value={itemsPerPage}
-                        onChange={(e) => {
-                          setItemsPerPage(Number(e.target.value));
-                          setCurrentPage(1);
-                        }}
-                        className="bg-transparent border-none text-slate-700 focus:outline-none cursor-pointer font-bold"
-                      >
-                        <option value={5}>5</option>
-                        <option value={10}>10</option>
-                        <option value={20}>20</option>
-                        <option value={50}>50</option>
-                      </select>
-                    </div>
-                  )}
                 </div>
               </div>
 
@@ -535,31 +524,17 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
                       <div className="flex items-center gap-3">
                         <button
                           onClick={() => handlePurchaseItem(item.name, isManual ? item.amount : Math.ceil(item.amount), item.unit, item.id)}
-                          className="text-slate-300 hover:text-indigo-600 transition-colors cursor-pointer"
+                          className="w-11 h-11 -ml-2 flex items-center justify-center text-slate-300 hover:text-indigo-600 transition-colors cursor-pointer"
                           title="Segna come acquistato e sposta in dispensa"
+                          aria-label={`Ho comprato ${item.name}`}
                         >
-                          <Circle className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                          <Circle className="w-6 h-6 group-hover:scale-110 transition-transform" />
                         </button>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-slate-800 text-sm capitalize">{item.name}</span>
-                            {deptInfo && (
-                              <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-semibold border ${deptInfo.color}`}>
-                                {deptInfo.name.split(' ')[0]}
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-slate-400">
-                            {isManual ? (
-                              <span className="text-indigo-500 font-medium flex items-center gap-0.5">
-                                <PenLine className="w-2.5 h-2.5" /> Manuale / Voce
-                              </span>
-                            ) : (
-                              <span className="flex items-center gap-0.5">
-                                <Calendar className="w-2.5 h-2.5" /> Rilevato dal Menù
-                              </span>
-                            )}
-                          </div>
+                        <div className="min-w-0">
+                          <span className="block font-semibold text-slate-900 capitalize">{item.name}</span>
+                          <span className="block text-xs text-slate-500">
+                            {isManual ? 'Aggiunto da te' : deptInfo ? deptInfo.name.split(' ')[0].replace(/[,;]$/, '') : ''}
+                          </span>
                         </div>
                       </div>
                       
@@ -588,35 +563,14 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
                 )}
               </div>
 
-              {/* Pagination controls */}
-              {totalPages > 1 && (
-                <div className="flex items-center justify-between pt-4 border-t border-slate-110 bg-slate-50/40 px-5 py-3.5">
-                  <div className="text-xs text-slate-500 font-medium font-mono">
-                    Elementi {startIndex + 1} - {Math.min(endIndex, totalItems)} di {totalItems}
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                      disabled={currentPage === 1}
-                      className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-800 disabled:opacity-40 disabled:hover:bg-white transition-colors cursor-pointer"
-                      title="Pagina precedente"
-                    >
-                      <ChevronLeft className="w-4 h-4" />
-                    </button>
-                    
-                    <span className="text-xs font-bold text-slate-700 min-w-[50px] text-center">
-                      {currentPage} / {totalPages}
-                    </span>
-
-                    <button
-                      onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                      disabled={currentPage === totalPages}
-                      className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-800 disabled:opacity-40 disabled:hover:bg-white transition-colors cursor-pointer"
-                      title="Pagina successiva"
-                    >
-                      <ChevronRight className="w-4 h-4" />
-                    </button>
-                  </div>
+              {totalItems > itemsPerPage && (
+                <div className="p-4 border-t border-slate-100">
+                  <button
+                    onClick={() => setItemsPerPage(n => n + 15)}
+                    className="w-full h-12 rounded-2xl border border-slate-200 bg-white text-slate-700 font-semibold"
+                  >
+                    Mostra altri ({totalItems - itemsPerPage})
+                  </button>
                 </div>
               )}
             </div>
@@ -729,12 +683,6 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
             </div>
           </div>
 
-          <div className="bg-indigo-50/50 border border-indigo-100 rounded-2xl p-5 space-y-3">
-            <h4 className="text-xs font-bold text-indigo-900 uppercase tracking-wide">💡 Assistente di Sincronizzazione</h4>
-            <p className="text-xs text-indigo-700 leading-relaxed">
-              Toccando il pulsante cerchio (<Circle className="w-3 h-3 inline text-slate-350" />) per acquistare qualsiasi ingrediente, questo viene <strong>automaticamente inserito in Dispensa</strong> e la lista della spesa si aggiorna in tempo reale.
-            </p>
-          </div>
         </div>
       </div>
 
