@@ -19,7 +19,8 @@ import {
   Lock,
   MessageSquare,
   Wallet,
-  Sun
+  Sun,
+  MoreHorizontal
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Logo from './components/Logo';
@@ -58,6 +59,7 @@ export default function App() {
   const [voiceIsListening, setVoiceIsListening] = useState(false);
   
   // Premium Gate Trigger State
+  const [showMore, setShowMore] = useState(false);
   const [showPremiumGate, setShowPremiumGate] = useState<'voice' | 'offers' | null>(null);
 
   // Shopping List Visibility Constraints
@@ -387,7 +389,7 @@ export default function App() {
 
   // Compile active tabs dynamically
   const tabs = useMemo(() => {
-    const isShoppingVisible = hasMealPlan && hasFamilyMember;
+    const isShoppingVisible = hasMealPlan;
     const list = [
       { id: 'planner', label: 'Menu', icon: Calendar },
       ...(isShoppingVisible ? [{ id: 'shopping', label: 'Spesa', icon: ShoppingCart }] : []),
@@ -406,6 +408,19 @@ export default function App() {
     }
     return list;
   }, [userIsAdmin, hasMealPlan, hasFamilyMember]);
+
+  // Barra in basso: cinque voci principali, il resto sta sotto "Altro"
+  const PRIMARY_TAB_IDS = ['planner', 'shopping', 'pantry', 'recipes', 'family'];
+  const primaryTabs = tabs.filter(t => PRIMARY_TAB_IDS.includes(t.id));
+  const moreTabs = tabs.filter(t => !PRIMARY_TAB_IDS.includes(t.id));
+  const moreDescriptions: Record<string, string> = {
+    offers: 'Scansiona i volantini del supermercato',
+    vacation: 'Menù e spesa anche fuori casa',
+    guide: 'Come funziona e cosa mangiare',
+    business: 'Piani e abbonamento',
+    admin: 'Gestione utenti',
+  };
+  const moreActive = moreTabs.some(t => t.id === activeTab);
 
   if (authLoading) {
     return (
@@ -792,20 +807,67 @@ export default function App() {
         </AnimatePresence>
       </main>
 
+      {/* Menù "Altro" (mobile) */}
+      <AnimatePresence>
+        {showMore && (
+          <div className="fixed inset-0 z-[45] md:hidden">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowMore(false)}
+              className="absolute inset-0 bg-slate-950/40"
+            />
+            <motion.div
+              initial={{ y: 40, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 40, opacity: 0 }}
+              className="absolute left-3 right-3 bottom-[calc(5rem+env(safe-area-inset-bottom))] bg-white rounded-3xl shadow-2xl border border-slate-200 p-2"
+            >
+              {moreTabs.map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => { setActiveTab(tab.id as Tab); setShowMore(false); }}
+                  className={`w-full flex items-center gap-4 p-3 rounded-2xl text-left ${activeTab === tab.id ? 'bg-indigo-50' : 'active:bg-slate-50'}`}
+                >
+                  <span className="w-11 h-11 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+                    <tab.icon className="w-6 h-6" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block font-bold text-slate-900">{tab.label}</span>
+                    <span className="block text-sm text-slate-500">{moreDescriptions[tab.id]}</span>
+                  </span>
+                </button>
+              ))}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Bottom Navigation (Mobile) */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-4 pt-2.5 pb-[max(0.25rem,env(safe-area-inset-bottom))] flex items-center gap-2 overflow-x-auto z-40 md:hidden [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] snap-x snap-mandatory">
-        {tabs.map((tab) => (
+      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-2 pt-2.5 pb-[max(0.25rem,env(safe-area-inset-bottom))] flex items-center justify-around z-40 md:hidden">
+        {primaryTabs.map((tab) => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id as Tab)}
-            className={`flex flex-col items-center gap-1 transition-colors min-w-[64px] shrink-0 pb-1 cursor-pointer snap-start ${
-              activeTab === tab.id ? 'text-indigo-600 font-bold' : 'text-slate-400'
+            onClick={() => { setActiveTab(tab.id as Tab); setShowMore(false); }}
+            className={`flex flex-col items-center gap-1 transition-colors flex-1 pb-1 cursor-pointer ${
+              activeTab === tab.id && !showMore ? 'text-indigo-600 font-bold' : 'text-slate-400'
             }`}
           >
             <tab.icon className="w-5.5 h-5.5" />
             <span className="text-[10px] font-medium">{tab.label}</span>
           </button>
         ))}
+        <button
+          onClick={() => setShowMore(m => !m)}
+          aria-expanded={showMore}
+          className={`flex flex-col items-center gap-1 transition-colors flex-1 pb-1 cursor-pointer ${
+            showMore || moreActive ? 'text-indigo-600 font-bold' : 'text-slate-400'
+          }`}
+        >
+          <MoreHorizontal className="w-5.5 h-5.5" />
+          <span className="text-[10px] font-medium">Altro</span>
+        </button>
       </nav>
 
       {/* Sidebar Navigation (Desktop) */}

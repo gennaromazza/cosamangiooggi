@@ -5,10 +5,11 @@ import { handleFirestoreError, OperationType } from '../lib/firebaseUtils';
 import { WeeklyPlan, Recipe, UserProfile, DietaryRestriction, PantryItem, DayPlan } from '../types';
 import { INITIAL_RECIPES } from '../data/recipes';
 import { calculateNutrients } from '../lib/nutritionUtils';
-import { Calendar as CalendarIcon, RefreshCcw, Save, Trash2, ChevronLeft, ChevronRight, X, Clock, Gauge, UtensilsCrossed, ChefHat, Info, Tag, Sparkles, Users, Heart, ShoppingCart, Check, AlertTriangle, Package } from 'lucide-react';
+import { Calendar as CalendarIcon, RefreshCcw, Save, Trash2, ChevronLeft, ChevronRight, X, Clock, Gauge, UtensilsCrossed, ChefHat, Info, Tag, Sparkles, Users, Heart, ShoppingCart, Check, AlertTriangle, Package, SlidersHorizontal } from 'lucide-react';
 import { getCurrentSeason, scaleIngredientAmount, getRawIngredientNames } from '../lib/utils';
 import { checkIngredientMatch, isStaple, calculateMissingFromPantry } from '../lib/pantrySync';
 import { hitsExclusion, satisfiesDiet } from '../lib/dietFilters';
+import TipCard from './TipCard';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface Props {
@@ -31,6 +32,7 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
   const [targetServings, setTargetServings] = useState(2);
   // Le porzioni partono dalle persone a tavola (come la lista della spesa), finché non le cambi a mano
   const [servingsTouched, setServingsTouched] = useState(false);
+  const [showOptions, setShowOptions] = useState(false);
   useEffect(() => {
     if (!servingsTouched && familyMembers.length > 0) setTargetServings(familyMembers.length);
   }, [familyMembers.length, servingsTouched]);
@@ -993,177 +995,109 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
       .slice(0, 6);
   };
 
+  const generateNow = () => generatePlan(true, familyMembers.length === 0);
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800">Piano Settimanale</h2>
-          <p className="text-slate-500 italic">Pianifica 3x Carne Bianca, 3x Pesce, 2x Formaggi, 2x Uova.</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-4">
+    <div className="space-y-5">
+      {/* Intestazione: titolo, chi mangia, e due piccoli comandi */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-3xl font-semibold text-slate-900">Il menù della settimana</h2>
+          {familyMembers.length > 0 ? (
+            <p className="text-slate-600 mt-1">
+              A tavola: <strong className="font-semibold text-slate-800">{familyMembers.map(m => m.name).join(', ')}</strong>
+              {onNavigateToFamily && (
+                <button onClick={onNavigateToFamily} className="ml-2 text-sm font-semibold text-indigo-600 underline underline-offset-4">
+                  Modifica
+                </button>
+              )}
+            </p>
+          ) : (
+            <p className="text-slate-600 mt-1">Pranzi e cene, pronti da cucinare.</p>
+          )}
           {profile?.currentOffers && profile.currentOffers.length > 0 && (
-            <div className="bg-emerald-50 border border-emerald-100 px-3 py-2 rounded-lg flex items-center gap-2">
-              <Tag className="w-4 h-4 text-emerald-600" />
-              <span className="text-xs font-bold text-emerald-700"> {profile.currentOffers.length} Offerte Attive</span>
-            </div>
+            <p className="mt-1 text-sm font-semibold text-emerald-700 flex items-center gap-1.5">
+              <Tag className="w-4 h-4" /> {profile.currentOffers.length} offerte del volantino nel menù
+            </p>
           )}
-          <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-2 rounded-lg border border-slate-200 shadow-sm hover:bg-slate-50 transition-colors">
-            <input 
-              type="checkbox" 
-              checked={excludeVeganAlternatives}
-              onChange={(e) => setExcludeVeganAlternatives(e.target.checked)}
-              className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
-            />
-            <span className="text-sm font-medium text-slate-700">Escludi piatti vegani</span>
-          </label>
-          {favorites.length > 0 && (
-            <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-2 rounded-lg border border-slate-200 shadow-sm hover:bg-slate-50 transition-colors">
-              <input 
-                type="checkbox" 
-                checked={useOnlyFavorites}
-                onChange={(e) => setUseOnlyFavorites(e.target.checked)}
-                className="w-4 h-4 text-rose-600 rounded border-slate-300 focus:ring-rose-500 focus:accent-rose-500"
-              />
-              <Heart className="w-3.5 h-3.5 text-rose-550 fill-rose-500" />
-              <span className="text-sm font-medium text-slate-700">Usa preferiti ({favorites.length})</span>
-            </label>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {currentPlan && (
+            <button
+              onClick={generateNow}
+              disabled={isGenerating}
+              aria-label="Crea un nuovo menù"
+              className="h-11 px-3.5 rounded-2xl border border-slate-200 bg-white text-slate-700 text-sm font-semibold flex items-center gap-2 disabled:opacity-50"
+            >
+              <RefreshCcw className={`w-4 h-4 ${isGenerating ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">Nuovo menù</span>
+            </button>
           )}
-          <button 
-            onClick={() => generatePlan(false)}
-            disabled={isGenerating}
-            className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          <button
+            onClick={() => setShowOptions(o => !o)}
+            aria-label="Opzioni del menù"
+            aria-expanded={showOptions}
+            className={`h-11 w-11 rounded-2xl border flex items-center justify-center ${
+              showOptions ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-600'
+            }`}
           >
-            <RefreshCcw className={`w-4 h-4 ${isGenerating ? 'animate-spin' : ''}`} />
-            {isGenerating ? 'Generando...' : 'Genera per tutta la Famiglia'}
+            <SlidersHorizontal className="w-5 h-5" />
           </button>
         </div>
       </div>
 
-      {familyMembers.length === 0 ? (
-        <div className="bg-amber-50/95 border border-amber-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
-          <div className="flex items-center gap-3">
-            <div className="bg-amber-500 p-2.5 rounded-xl text-white shadow-xs shrink-0">
-              <AlertTriangle className="w-5 h-5" />
-            </div>
-            <div>
-              <h4 className="text-sm font-bold text-amber-900">
-                {currentPlan?.generatedWithoutFamily ? 'Menù Standard (Senza Membri Configurati)' : 'Nessun Membro della Famiglia Configurato'}
-              </h4>
-              <p className="text-xs text-amber-800">
-                {currentPlan?.generatedWithoutFamily
-                  ? 'Stai visualizzando un menù generico senza restrizioni familiari. Per personalizzarlo aggiungi un membro.'
-                  : 'Prima di generare un menù personalizzato aggiungi un membro, oppure genera subito un menù standard per tutti.'}
-              </p>
-            </div>
-          </div>
-          <div className="flex flex-col sm:flex-row gap-2 shrink-0">
-            {onNavigateToFamily && (
-              <button
-                onClick={onNavigateToFamily}
-                className="bg-amber-600 hover:bg-amber-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold shadow-sm transition-all whitespace-nowrap cursor-pointer active:scale-95 flex items-center justify-center gap-1.5"
-              >
-                <Users className="w-3.5 h-3.5" />
-                <span>Aggiungi Membro</span>
-              </button>
-            )}
-            <button
-              onClick={() => generatePlan(false, true)}
-              className="bg-white hover:bg-amber-100/50 text-amber-950 border border-amber-300 px-3.5 py-2 rounded-xl text-xs font-bold transition-all shadow-2xs whitespace-nowrap cursor-pointer active:scale-95 flex items-center justify-center gap-1.5"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-              <span>Genera Senza Considerare i Membri</span>
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          <div className="bg-indigo-50/50 border border-indigo-100 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="bg-indigo-600 p-2 rounded-lg">
-                <Users className="text-white w-4 h-4" />
-              </div>
-              <div>
-                <h4 className="text-sm font-bold text-indigo-900">Ottimizzato per la Famiglia</h4>
-                <p className="text-xs text-indigo-700">Il menù rispetta i gusti e le antipatie di tutti i membri.</p>
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {familyMembers.map((member) => (
-                <div key={member.id} className="flex items-center gap-1.5 bg-white px-2 py-1 rounded-lg border border-indigo-100 shadow-sm">
-                  <div className="w-5 h-5 rounded-full bg-indigo-100 flex items-center justify-center text-[10px] font-bold text-indigo-600">
-                    {member.name.charAt(0)}
-                  </div>
-                  <span className="text-[11px] font-medium text-slate-700">{member.name}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {pantryItems.length === 0 && (
-            <div className="bg-emerald-50/70 border border-emerald-200/80 rounded-2xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
-              <div className="flex items-center gap-2.5">
-                <div className="bg-emerald-600 p-2 rounded-lg text-white shrink-0">
-                  <Package className="w-4 h-4" />
-                </div>
-                <div>
-                  <h4 className="text-xs font-bold text-emerald-900">Step Dispensa (Facoltativo)</h4>
-                  <p className="text-[11px] text-emerald-800">
-                    Puoi impostare i prodotti che possiedi a casa prima di generare il menù per evitare sprechi.
-                  </p>
-                </div>
-              </div>
-              {onNavigateToPantry && (
-                <button
-                  onClick={onNavigateToPantry}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-2xs transition-all whitespace-nowrap cursor-pointer active:scale-95 shrink-0"
-                >
-                  Imposta Prodotti
-                </button>
-              )}
-            </div>
+      {/* Opzioni: nascoste finché non servono */}
+      {showOptions && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-1">
+          <label className="flex items-center justify-between gap-4 py-2 cursor-pointer">
+            <span className="text-sm font-medium text-slate-800">Senza piatti vegani</span>
+            <input
+              type="checkbox"
+              checked={excludeVeganAlternatives}
+              onChange={(e) => setExcludeVeganAlternatives(e.target.checked)}
+              className="w-5 h-5 accent-indigo-600"
+            />
+          </label>
+          {favorites.length > 0 && (
+            <label className="flex items-center justify-between gap-4 py-2 cursor-pointer border-t border-slate-100">
+              <span className="text-sm font-medium text-slate-800">Solo i miei preferiti ({favorites.length})</span>
+              <input
+                type="checkbox"
+                checked={useOnlyFavorites}
+                onChange={(e) => setUseOnlyFavorites(e.target.checked)}
+                className="w-5 h-5 accent-indigo-600"
+              />
+            </label>
           )}
-        </div>
-      )}
-
-      {profile?.currentOffers && profile.currentOffers.length > 0 && (
-        <div className="bg-emerald-50/50 border border-emerald-100 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="bg-emerald-600 p-2 rounded-lg">
-              <Sparkles className="text-white w-4 h-4" />
-            </div>
-            <div>
-              <h4 className="text-sm font-bold text-emerald-900">Offerte del Volantino</h4>
-              <p className="text-xs text-emerald-700">Il menù darà la precedenza a queste offerte per farti risparmiare.</p>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-1.5 max-w-xl">
-            {profile.currentOffers.slice(0, 10).map((offer, idx) => (
-              <span key={idx} className="bg-white px-2 py-0.5 rounded-md text-[10px] font-bold text-emerald-600 border border-emerald-100 shadow-sm">
-                {offer}
-              </span>
-            ))}
-            {profile.currentOffers.length > 10 && <span className="text-[10px] text-emerald-400 font-bold">+{profile.currentOffers.length - 10}</span>}
-          </div>
+          <p className="text-xs text-slate-500 pt-2">Le opzioni valgono dal prossimo menù che crei.</p>
         </div>
       )}
 
       {!currentPlan ? (
-        <div className="bg-white border-2 border-dashed border-slate-200 rounded-2xl p-12 text-center">
-          <div className="bg-slate-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-            <CalendarIcon className="text-slate-400 w-8 h-8" />
+        <div className="bg-white border border-slate-200 rounded-3xl p-8 text-center shadow-sm">
+          <div className="w-20 h-20 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto mb-5">
+            <CalendarIcon className="w-10 h-10" />
           </div>
-          <h3 className="text-lg font-medium text-slate-900">La settimana è ancora da scrivere</h3>
-          <p className="text-slate-500 mb-6">Un tocco e il menù di stagione è pronto per tutta la famiglia.</p>
-          <button 
-            onClick={() => generatePlan(false)}
-            className="text-indigo-600 font-semibold hover:underline cursor-pointer"
+          <h3 className="text-2xl font-semibold text-slate-900">Cosa mangiamo questa settimana?</h3>
+          <p className="text-slate-600 mt-2 max-w-xs mx-auto leading-relaxed">
+            Con un tocco il menù è pronto. Poi puoi cambiare ogni piatto come preferisci.
+          </p>
+          <button
+            onClick={generateNow}
+            disabled={isGenerating}
+            className="mt-6 w-full h-14 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-lg shadow-md flex items-center justify-center gap-2 disabled:opacity-60 active:scale-[0.98] transition-all"
           >
-            Crea il menù della settimana
+            <RefreshCcw className={`w-5 h-5 ${isGenerating ? 'animate-spin' : ''}`} />
+            {isGenerating ? 'Sto preparando…' : 'Crea il menù della settimana'}
           </button>
+          {familyMembers.length === 0 && onNavigateToFamily && (
+            <button onClick={onNavigateToFamily} className="mt-4 text-sm font-semibold text-indigo-600 underline underline-offset-4">
+              Prima aggiungi chi mangia a tavola
+            </button>
+          )}
         </div>
       ) : (() => {
-        const isPlanDisabledBecauseNoFamily = familyMembers.length === 0 && !currentPlan.generatedWithoutFamily;
-        const plan = currentPlan.days[activeDay];
+                const plan = currentPlan.days[activeDay];
         const lunchRecipes = (plan?.lunchIds || []).map(id => recipes.find(r => r.id === id)).filter(Boolean) as Recipe[];
         const dinnerRecipes = (plan?.dinnerIds || []).map(id => recipes.find(r => r.id === id)).filter(Boolean) as Recipe[];
 
@@ -1184,179 +1118,33 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
 
         return (
           <div className="space-y-6">
-            {/* PLAN DISABLED BECAUSE FAMILY DELETED BANNER */}
-            {isPlanDisabledBecauseNoFamily && (
-              <motion.div 
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-rose-50/95 border-2 border-rose-300 rounded-3xl p-6 shadow-md"
-              >
-                <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                  <div className="flex items-start gap-3.5">
-                    <div className="bg-rose-500 p-3 rounded-2xl text-white shadow-sm shrink-0">
-                      <AlertTriangle className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <h3 className="text-base font-extrabold text-rose-950">Menù Settimanale Disabilitato / Non Aggiornato</h3>
-                      <p className="text-xs text-rose-900 mt-1 leading-relaxed max-w-xl">
-                        Hai rimosso tutti i membri della famiglia, pertanto questo menù non riflette più le restrizioni o preferenze inserite. Per sbloccare e aggiornare la pianificazione puoi <strong>aggiungere un membro della famiglia</strong> oppure <strong>generare un menù standard per tutti</strong>.
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex flex-col sm:flex-row gap-2.5 w-full md:w-auto shrink-0">
-                    {onNavigateToFamily && (
-                      <button
-                        onClick={onNavigateToFamily}
-                        className="bg-white hover:bg-rose-100/50 text-rose-950 border border-rose-300 px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-2xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
-                      >
-                        <Users className="w-4 h-4" />
-                        <span>Aggiungi Membro</span>
-                      </button>
-                    )}
-                    <button
-                      onClick={() => generatePlan(false, true)}
-                      className="bg-rose-600 hover:bg-rose-700 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
-                    >
-                      <Sparkles className="w-4 h-4" />
-                      <span>Genera Senza Considerare i Membri</span>
-                    </button>
-                  </div>
-                </div>
-              </motion.div>
-            )}
+            {/* Un solo suggerimento alla volta, in ordine di importanza */}
+            {familyMembers.length === 0 ? (
+              onNavigateToFamily && (
+                <TipCard
+                  icon={<Users className="w-5 h-5" />}
+                  text="Questo menù è uguale per tutti. Aggiungi chi mangia a tavola per personalizzarlo."
+                  actionLabel="Aggiungi"
+                  onAction={onNavigateToFamily}
+                />
+              )
+            ) : missingIngredientsInfo.count > 0 && !isMissingBannerDismissed ? (
+              <TipCard
+                icon={<ShoppingCart className="w-5 h-5" />}
+                text={`Per questo menù mancano ${missingIngredientsInfo.count} prodotti.`}
+                actionLabel="Vedi la spesa"
+                onAction={onNavigateToShopping}
+                onDismiss={handleDismissBanner}
+              />
+            ) : planHasMeals && missingIngredientsInfo.count === 0 ? (
+              <TipCard
+                tone="success"
+                icon={<Check className="w-5 h-5" />}
+                text="Hai già tutto in dispensa: questa settimana niente spesa."
+              />
+            ) : null}
 
-            <div className={isPlanDisabledBecauseNoFamily ? 'opacity-40 pointer-events-none select-none grayscale-[40%] transition-all space-y-6' : 'space-y-6'}>
-              {/* PANTRY MISSING BANNER */}
-            {missingIngredientsInfo.count > 0 && !isMissingBannerDismissed && (
-              <motion.div 
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-amber-50/60 border border-amber-200/80 rounded-3xl p-5 shadow-sm relative pr-12 md:pr-14"
-              >
-                {/* Dismiss button */}
-                <button
-                  onClick={handleDismissBanner}
-                  className="absolute top-4 right-4 p-1.5 rounded-full text-amber-700/60 hover:text-amber-950 hover:bg-amber-100/50 transition-all cursor-pointer"
-                  title="Nascondi questo avviso"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-
-                <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
-                  <div className="flex items-start gap-4">
-                    <div className="bg-amber-100 text-amber-700 p-3 rounded-2xl flex-shrink-0">
-                      <ShoppingCart className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h4 className="text-base font-black text-amber-950 flex items-center gap-2 flex-wrap">
-                        Prodotti mancanti in dispensa rilevati! ({missingIngredientsInfo.count})
-                        <span className="bg-amber-100/80 border border-amber-200/80 text-amber-850 px-2.5 py-0.5 rounded-full text-[10px] font-bold">
-                          Sincronizzazione Automatica Attiva ⚡
-                        </span>
-                      </h4>
-                      <p className="text-xs text-amber-800 font-medium mt-1 leading-relaxed">
-                        I seguenti ingredienti mancano nella tua dispensa per completare il menù di questa settimana. 
-                        <strong> Cliccando il pulsante qui sotto, la tua lista della spesa viene aggiornata automaticamente</strong> con questi elementi pronti da spuntare quando li acquisti.
-                      </p>
-                      
-                      {/* Micro inline list of some missing ingredients */}
-                      <div className="flex flex-wrap gap-1.5 mt-3 max-h-24 overflow-y-auto">
-                        {missingIngredientsInfo.items.slice(0, 10).map((item, idx) => (
-                          <span key={idx} className="bg-white/85 backdrop-blur-xs border border-amber-200/50 px-2.5 py-1 text-[10px] font-black rounded-xl text-amber-955 shadow-2xs flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                            {item.name} ({Math.ceil(item.amount)} {item.unit})
-                          </span>
-                        ))}
-                        {missingIngredientsInfo.count > 10 && (
-                          <span className="text-[10px] font-black text-amber-600 px-1.5 py-1 bg-amber-100/50 rounded-xl border border-amber-200/20">
-                            + altri {missingIngredientsInfo.count - 10}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => {
-                      if (isSyncing || syncSuccess) return;
-                      setIsSyncing(true);
-                      setTimeout(() => {
-                        setIsSyncing(false);
-                        setSyncSuccess(true);
-                        handleDismissBanner(); // Persist dismissal since it's now synced
-                        setTimeout(() => {
-                          if (onNavigateToShopping) {
-                            onNavigateToShopping();
-                          }
-                          setSyncSuccess(false);
-                        }, 1200);
-                      }, 900);
-                    }}
-                    disabled={isSyncing || syncSuccess}
-                    className={`w-full lg:w-auto px-5 py-3 font-extrabold text-xs rounded-2xl transition-all shadow-md flex items-center justify-center gap-2 shrink-0 cursor-pointer ${
-                      syncSuccess 
-                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-100 active:scale-95' 
-                        : isSyncing 
-                        ? 'bg-amber-500 text-white cursor-wait active:scale-95' 
-                        : 'bg-amber-600 hover:bg-amber-700 text-white shadow-amber-100 active:scale-97'
-                    }`}
-                  >
-                    {syncSuccess ? (
-                      <>
-                        <Check className="w-4 h-4 shrink-0 animate-bounce" />
-                        Sincronizzato! Apertura Lista...
-                      </>
-                    ) : isSyncing ? (
-                      <>
-                        <RefreshCcw className="w-4 h-4 shrink-0 animate-spin" />
-                        Aggiornamento in corso...
-                      </>
-                    ) : (
-                      <>
-                        <ShoppingCart className="w-4 h-4 shrink-0" />
-                        Sincronizza e Vedi Lista Spesa
-                      </>
-                    )}
-                  </button>
-                </div>
-              </motion.div>
-            )}
-
-            {/* FULLY STOCKED PANTRY REASSURING GREEN BANNER */}
-            {planHasMeals && missingIngredientsInfo.count === 0 && (
-              <motion.div 
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-emerald-50/70 border border-emerald-200/50 rounded-3xl p-5 shadow-sm text-emerald-900"
-              >
-                <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
-                  <div className="flex items-start gap-4">
-                    <div className="bg-emerald-100 text-emerald-700 p-3 rounded-2xl flex-shrink-0 animate-pulse">
-                      <Check className="w-5 h-5 font-bold" />
-                    </div>
-                    <div>
-                      <h4 className="text-base font-black text-emerald-950 flex items-center gap-2 flex-wrap">
-                        Dispensa completamente fornita! 🎉
-                        <span className="bg-emerald-100/85 border border-emerald-200/55 text-emerald-850 px-2.5 py-0.5 rounded-full text-[10px] font-bold">
-                          Hai tutti i prodotti 🟢
-                        </span>
-                      </h4>
-                      <p className="text-xs text-emerald-800 mt-1 leading-relaxed">
-                        Tutti i prodotti necessari per cucinare il menù pianificato per questa settimana sono già presenti nella tua dispensa. 
-                        <strong> Non hai bisogno di fare la spesa</strong> per questi pasti! Buon appetito.
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={onNavigateToShopping}
-                    className="w-full lg:w-auto px-5 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-2xl transition-all shadow-md active:scale-97 flex items-center justify-center gap-2 shrink-0 cursor-pointer"
-                  >
-                    <ShoppingCart className="w-4 h-4 shrink-0" />
-                    Apri Lista della Spesa
-                  </button>
-                </div>
-              </motion.div>
-            )}
-
+            <div className="space-y-6">
             {/* Horizontal Slide Bar for Days of the Week */}
             <div className="bg-white rounded-3xl border border-slate-200 p-2 shadow-sm flex items-center justify-between gap-2">
               <button
@@ -1510,29 +1298,13 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
                                     </div>
                                   </div>
 
-                                  <div onClick={() => setSelectedRecipe(recipe)} className="cursor-pointer space-y-2">
-                                    {/* Ingredient Micro Pills */}
-                                    <div className="flex flex-wrap gap-1.5 pt-1">
-                                      {recipe.ingredients.slice(0, 4).map((ing, iIdx) => (
-                                        <span key={iIdx} className="text-[10px] px-2 py-0.5 rounded-lg bg-white/80 text-slate-600 border border-slate-200/50 font-medium">
-                                          {ing.name}
-                                        </span>
-                                      ))}
-                                      {recipe.ingredients.length > 4 && (
-                                        <span className="text-[10px] px-2 py-0.5 rounded-lg bg-white/80 text-slate-400 font-bold border border-slate-100">
-                                          +{recipe.ingredients.length - 4} altri
-                                        </span>
-                                      )}
-                                    </div>
-
-                                    {/* Nutritional mini pill */}
-                                    <div className="flex items-center gap-3 text-[10px] text-slate-500 font-semibold pt-1">
-                                      <span>🥩 {Math.round(rNutrients.protein * rRatio)}g <span className="text-[9px] text-slate-400 font-normal">pro</span></span>
-                                      <span>🍞 {Math.round(rNutrients.carbs * rRatio)}g <span className="text-[9px] text-slate-400 font-normal">carb</span></span>
-                                      <span>💧 {Math.round(rNutrients.fat * rRatio)}g <span className="text-[9px] text-slate-400 font-normal">grassi</span></span>
-                                      <span className="ml-auto text-[10px] font-black text-slate-700">{Math.round(rNutrients.calories * rRatio)} kcal</span>
-                                    </div>
-                                  </div>
+                                  <p
+                                    onClick={() => setSelectedRecipe(recipe)}
+                                    className="cursor-pointer text-sm text-slate-600 leading-snug"
+                                  >
+                                    {recipe.ingredients.slice(0, 3).map(ing => ing.name).join(', ')}
+                                    {recipe.ingredients.length > 3 ? '…' : ''}
+                                  </p>
                                 </div>
                               </div>
                             </div>
@@ -1547,16 +1319,6 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
                     )}
                   </div>
 
-                  {lunchRecipes.length > 0 && (
-                    <div className="mt-4 pt-3 border-t border-slate-50 flex justify-end">
-                      <button
-                        onClick={() => setSelectedRecipe(lunchRecipes[0])}
-                        className="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 cursor-pointer"
-                      >
-                        Visualizza ricetta completa &rarr;
-                      </button>
-                    </div>
-                  )}
                 </div>
 
                 {/* DINNER CARD */}
@@ -1630,29 +1392,13 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
                                     </div>
                                   </div>
 
-                                  <div onClick={() => setSelectedRecipe(recipe)} className="cursor-pointer space-y-2">
-                                    {/* Ingredient Micro Pills */}
-                                    <div className="flex flex-wrap gap-1.5 pt-1">
-                                      {recipe.ingredients.slice(0, 4).map((ing, iIdx) => (
-                                        <span key={iIdx} className="text-[10px] px-2 py-0.5 rounded-lg bg-white/80 text-slate-600 border border-slate-200/50 font-medium">
-                                          {ing.name}
-                                        </span>
-                                      ))}
-                                      {recipe.ingredients.length > 4 && (
-                                        <span className="text-[10px] px-2 py-0.5 rounded-lg bg-white/80 text-slate-400 font-bold border border-slate-100">
-                                          +{recipe.ingredients.length - 4} altri
-                                        </span>
-                                      )}
-                                    </div>
-
-                                    {/* Nutritional mini pill */}
-                                    <div className="flex items-center gap-3 text-[10px] text-slate-500 font-semibold pt-1">
-                                      <span>🥩 {Math.round(rNutrients.protein * rRatio)}g <span className="text-[9px] text-slate-400 font-normal">pro</span></span>
-                                      <span>🍞 {Math.round(rNutrients.carbs * rRatio)}g <span className="text-[9px] text-slate-400 font-normal">carb</span></span>
-                                      <span>💧 {Math.round(rNutrients.fat * rRatio)}g <span className="text-[9px] text-slate-400 font-normal">grassi</span></span>
-                                      <span className="ml-auto text-[10px] font-black text-slate-700">{Math.round(rNutrients.calories * rRatio)} kcal</span>
-                                    </div>
-                                  </div>
+                                  <p
+                                    onClick={() => setSelectedRecipe(recipe)}
+                                    className="cursor-pointer text-sm text-slate-600 leading-snug"
+                                  >
+                                    {recipe.ingredients.slice(0, 3).map(ing => ing.name).join(', ')}
+                                    {recipe.ingredients.length > 3 ? '…' : ''}
+                                  </p>
                                 </div>
                               </div>
                             </div>
@@ -1667,71 +1413,43 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
                     )}
                   </div>
 
-                  {dinnerRecipes.length > 0 && (
-                    <div className="mt-4 pt-3 border-t border-slate-50 flex justify-end">
-                      <button
-                        onClick={() => setSelectedRecipe(dinnerRecipes[0])}
-                        className="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 cursor-pointer"
-                      >
-                        Visualizza ricetta completa &rarr;
-                      </button>
-                    </div>
-                  )}
                 </div>
               </motion.div>
             </AnimatePresence>
 
-            {/* Daily Total Nutrition Quick Card */}
+            {/* Valori nutrizionali: chiusi finché non servono */}
             {(lunchRecipes.length > 0 || dinnerRecipes.length > 0) && (
-              <div className="bg-slate-50 border border-slate-200 rounded-3xl p-5 flex flex-col md:flex-row items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="p-2.5 rounded-2xl bg-indigo-100 text-indigo-700 font-bold flex-shrink-0">
-                    <Info className="w-5 h-5 animate-pulse" />
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-black text-slate-800">Riepilogo Nutrizionale Giornaliero ({activeDay})</h4>
-                    <p className="text-[11px] text-slate-500 font-semibold">Valori stimati totali della giornata calcolati per {targetServings} porzioni famigliari.</p>
-                  </div>
+              <details className="bg-white border border-slate-200 rounded-2xl px-4 py-3">
+                <summary className="cursor-pointer list-none flex items-center justify-between text-sm font-semibold text-slate-700">
+                  <span>Valori nutrizionali del giorno</span>
+                  <span className="text-xs font-medium text-slate-400">{Math.round(totalCal)} kcal ▾</span>
+                </summary>
+                <div className="grid grid-cols-4 gap-2 mt-4">
+                  {[
+                    { label: 'Calorie', value: Math.round(totalCal), unit: 'kcal', color: 'text-slate-800' },
+                    { label: 'Proteine', value: Math.round(totalProt), unit: 'g', color: 'text-red-600' },
+                    { label: 'Carbo', value: Math.round(totalCarbs), unit: 'g', color: 'text-amber-600' },
+                    { label: 'Grassi', value: Math.round(totalFat), unit: 'g', color: 'text-indigo-600' },
+                  ].map(item => (
+                    <div key={item.label} className="bg-slate-50 py-2 rounded-xl text-center">
+                      <span className="block text-[10px] font-semibold text-slate-400 uppercase">{item.label}</span>
+                      <span className={`text-sm font-bold ${item.color}`}>{item.value}{item.unit === 'g' ? 'g' : ''}</span>
+                      {item.unit === 'kcal' && <span className="block text-[10px] text-slate-400">kcal</span>}
+                    </div>
+                  ))}
                 </div>
-                <div className="grid grid-cols-4 gap-2 w-full md:w-auto">
-                  <div className="bg-white py-2 px-3 rounded-2xl border border-slate-150 text-center min-w-[70px]">
-                    <span className="block text-[8px] font-bold text-slate-400 uppercase tracking-wider">Calorie</span>
-                    <span className="text-xs font-black text-slate-800">{Math.round(totalCal)}</span>
-                    <span className="block text-[8px] text-slate-400">kcal</span>
-                  </div>
-                  <div className="bg-white py-2 px-3 rounded-2xl border border-slate-150 text-center min-w-[70px]">
-                    <span className="block text-[8px] font-bold text-slate-400 uppercase tracking-wider font-bold">Proteine</span>
-                    <span className="text-xs font-black text-red-600">{Math.round(totalProt)}g</span>
-                  </div>
-                  <div className="bg-white py-2 px-3 rounded-2xl border border-slate-150 text-center min-w-[70px]">
-                    <span className="block text-[8px] font-bold text-slate-400 uppercase tracking-wider font-bold">Carbo</span>
-                    <span className="text-xs font-black text-amber-600">{Math.round(totalCarbs)}g</span>
-                  </div>
-                  <div className="bg-white py-2 px-3 rounded-2xl border border-slate-150 text-center min-w-[70px]">
-                    <span className="block text-[8px] font-bold text-slate-400 uppercase tracking-wider font-bold">Grassi</span>
-                    <span className="text-xs font-black text-indigo-600">{Math.round(totalFat)}g</span>
-                  </div>
-                </div>
-              </div>
+                <p className="text-xs text-slate-400 mt-3">Calcolati per {targetServings} porzioni.</p>
+              </details>
             )}
             </div>
           </div>
         );
       })()}
 
-      {/* Seasonal info */}
-      <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 flex gap-4">
-        <div className="bg-indigo-100 p-2 rounded-lg h-fit">
-          <CalendarIcon className="text-indigo-600 w-5 h-5" />
-        </div>
-        <div>
-          <h4 className="text-sm font-bold text-indigo-900">Stagionalità: {seasonNames[season]}</h4>
-          <p className="text-xs text-indigo-700 leading-relaxed">
-            Stiamo dando priorità a: {seasonTips[season]}
-            Questi ingredienti sono al massimo del loro sapore e valore nutrizionale.
-          </p>
-        </div>
-      </div>
+      {/* In stagione */}
+      <p className="text-sm text-slate-500 text-center px-4">
+        In stagione, {seasonNames[season].toLowerCase()}: {seasonTips[season]}
+      </p>
 
       {/* Recipe Modal */}
       <AnimatePresence>
