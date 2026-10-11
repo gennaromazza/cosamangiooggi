@@ -1,4 +1,5 @@
 import { PRICES, formatPrice } from '../src/lib/plans';
+import { PAGES, renderGuideLinks } from './landing-pages';
 
 export interface LandingVars {
   siteUrl: string;
@@ -15,5 +16,9 @@ export function fillPlaceholders(text: string, vars: LandingVars): string {
     __PRICE_PRO_MONTH__: formatPrice(PRICES.pro.month),
     __PRICE_PRO_YEAR__: formatPrice(PRICES.pro.year),
   };
+  map.__GUIDE_LINKS__ = renderGuideLinks();
+  map['<!--PAGES-->'] = PAGES.map(
+    (p) => `<url><loc>${vars.siteUrl.replace(/\/$/, '')}/${p.slug}</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>`,
+  ).join('\n  ');
   return Object.entries(map).reduce((out, [key, value]) => out.split(key).join(value), text);
 }

@@ -5,6 +5,7 @@
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fillPlaceholders } from './landing';
+import { PAGES, renderPage } from './landing-pages';
 
 const out = 'landing-dist';
 const vars = {
@@ -16,8 +17,16 @@ rmSync(out, { recursive: true, force: true });
 mkdirSync(join(out, 'fonts'), { recursive: true });
 
 for (const name of readdirSync('landing')) {
+  if (statSync(join('landing', name)).isDirectory()) {
+    cpSync(join('landing', name), join(out, name), { recursive: true });
+    continue;
+  }
   const text = readFileSync(join('landing', name), 'utf8');
   writeFileSync(join(out, name), fillPlaceholders(text, vars));
+}
+// Pagine guida
+for (const page of PAGES) {
+  writeFileSync(join(out, `${page.slug}.html`), renderPage(page, vars.siteUrl.replace(/\/$/, ''), vars.appUrl.replace(/\/$/, '')));
 }
 for (const icon of ['icon-192.png', 'icon-512.png', 'favicon-32.png', 'apple-touch-icon.png']) {
   copyFileSync(join('public', icon), join(out, icon));

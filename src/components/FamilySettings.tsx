@@ -473,7 +473,7 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
                         {hasPersonalRules(member) && (
                           <span className="block text-sm font-semibold text-indigo-700">
                             {[
-                              ...(member.dietaryRestrictions || []).map(d => DIET_OPTIONS.find(o => o.id === d)?.label.replace('Solo ', '')),
+                              ...(member.dietaryRestrictions || []).map(d => ({ vegan: 'Vegano', 'gluten-free': 'Senza glutine', 'lactose-free': 'Senza lattosio' }[d])),
                               ...(member.allergies || []).map(a => `senza ${a.toLowerCase()}`),
                             ].filter(Boolean).join(' · ')}
                           </span>

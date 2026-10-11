@@ -19,6 +19,7 @@ import type { PantryItem, Recipe } from '../types';
 import { readFileSync } from 'node:fs';
 import { isNewer } from './updateCheck';
 import { fillPlaceholders } from '../../scripts/landing';
+import { PAGES, pageText, renderPage } from '../../scripts/landing-pages';
 import { dishSuggestionsLeft, limitsFor, normalizePlan, planName, PRICES, yearlySavingPercent, PLAN_LIMITS } from './plans';
 
 const item = (id: string, name: string, quantity: number, unit: string): PantryItem =>
@@ -268,4 +269,30 @@ test('aggiornamenti: si propone solo una build più recente di quella installata
   assert.equal(isNewer(17, 18), false);
   assert.equal(isNewer(0, 18), false);
   assert.equal(isNewer(Number.NaN, 18), false);
+});
+
+
+test('pagine guida: contenuti veri, titoli unici e link interni validi', () => {
+  const slugs = new Set(PAGES.map((p) => p.slug));
+  assert.equal(slugs.size, PAGES.length, 'indirizzi duplicati');
+  assert.equal(new Set(PAGES.map((p) => p.title)).size, PAGES.length, 'titoli duplicati');
+  assert.equal(new Set(PAGES.map((p) => p.description)).size, PAGES.length, 'descrizioni duplicate');
+  for (const page of PAGES) {
+    const words = pageText(page).split(' ').length;
+    assert.ok(words >= 380, `${page.slug}: solo ${words} parole (contenuto troppo scarno)`);
+    assert.ok(page.title.length >= 30 && page.title.length <= 75, `${page.slug}: titolo di ${page.title.length} caratteri`);
+    assert.ok(page.description.length >= 100 && page.description.length <= 170, `${page.slug}: descrizione di ${page.description.length} caratteri`);
+    assert.ok(page.faq.length >= 3, `${page.slug}: poche domande frequenti`);
+    for (const r of page.related) assert.ok(slugs.has(r), `${page.slug}: guida correlata inesistente ${r}`);
+    const html = renderPage(page, 'https://esempio.web.app', 'https://app.web.app');
+    assert.equal((html.match(/<h1[ >]/g) || []).length, 1, `${page.slug}: serve un solo h1`);
+    assert.ok(html.includes(`<link rel="canonical" href="https://esempio.web.app/${page.slug}">`));
+    for (const m of html.matchAll(/href="\/([a-z0-9-]+)["#]/g)) {
+      if (!['privacy', 'icon-192.png'].includes(m[1])) assert.ok(slugs.has(m[1]), `${page.slug}: link interno rotto /${m[1]}`);
+    }
+    if (page.shot) assert.ok(readFileSync(`landing/img/${page.shot.file}.webp`).length > 1000, `${page.slug}: screenshot mancante`);
+    if (page.health) assert.ok(html.includes('non sostituisce il parere del medico'), `${page.slug}: manca l'avviso di prudenza`);
+  }
+  const sitemap = fillPlaceholders(readFileSync('landing/sitemap.xml', 'utf8'), { siteUrl: 'https://esempio.web.app', appUrl: 'https://app.web.app' });
+  for (const slug of slugs) assert.ok(sitemap.includes(`https://esempio.web.app/${slug}</loc>`), `sitemap senza ${slug}`);
 });

@@ -203,12 +203,12 @@ export default function QuickDishModal({ initialTitle = '', offlineOnly = false,
               <div className="space-y-2">
                 <p className="text-sm font-bold text-slate-700">Ingredienti (per 2 persone)</p>
                 {ingredients.map((ing, index) => (
-                  <div key={index} className="flex items-center gap-2">
+                  <div key={index} className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-100 p-2">
                     <input
                       value={ing.name}
                       onChange={(e) => update(index, { name: e.target.value })}
                       aria-label="Ingrediente"
-                      className="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-xl px-3 h-11 text-base"
+                      className="basis-full bg-slate-50 border border-slate-200 rounded-xl px-3 h-11 text-base"
                     />
                     <input
                       type="number"
@@ -217,13 +217,13 @@ export default function QuickDishModal({ initialTitle = '', offlineOnly = false,
                       value={ing.amount}
                       onChange={(e) => update(index, { amount: Math.max(0, Number(e.target.value)) })}
                       aria-label="Quantità"
-                      className="w-20 shrink-0 bg-slate-50 border border-slate-200 rounded-xl px-2 h-11 text-base"
+                      className="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-xl px-2 h-11 text-base"
                     />
                     <select
                       value={ing.unit}
                       onChange={(e) => update(index, { unit: e.target.value })}
                       aria-label="Unità"
-                      className="w-24 shrink-0 bg-slate-50 border border-slate-200 rounded-xl px-1 h-11 text-sm"
+                      className="w-28 shrink-0 bg-slate-50 border border-slate-200 rounded-xl px-1 h-11 text-sm"
                     >
                       {[...new Set([ing.unit, ...UNITS])].filter(Boolean).map((u) => (
                         <option key={u} value={u}>{u}</option>

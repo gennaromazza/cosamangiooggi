@@ -19,64 +19,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="preload" href="/fonts/fraunces.woff2" as="font" type="font/woff2" crossorigin>
-  <style>
-    @font-face{font-family:"Fraunces";src:url(/fonts/fraunces.woff2) format("woff2");font-weight:100 900;font-display:swap}
-    @font-face{font-family:"Nunito";src:url(/fonts/nunito.woff2) format("woff2");font-weight:200 1000;font-display:swap}
-    :root{--terracotta:#c8440f;--terracotta-dark:#a8360b;--cream:#fbf7f0;--sand:#f3e9db;--ink:#2b1a12;--muted:#6b5a50;--olive:#5d6b2f;--line:#e8dccb}
-    *{box-sizing:border-box}
-    html{scroll-behavior:smooth}
-    body{margin:0;background:var(--cream);color:var(--ink);font-family:"Nunito",system-ui,-apple-system,"Segoe UI",sans-serif;font-size:18px;line-height:1.6}
-    h1,h2,h3{font-family:"Fraunces",Georgia,serif;line-height:1.15;margin:0 0 .5em;font-weight:700}
-    h1{font-size:clamp(2.2rem,6vw,3.6rem)}
-    h2{font-size:clamp(1.7rem,4vw,2.4rem)}
-    h3{font-size:1.25rem}
-    p{margin:0 0 1em}
-    a{color:var(--terracotta-dark)}
-    .wrap{max-width:1040px;margin:0 auto;padding:0 20px}
-    header{position:sticky;top:0;background:rgba(251,247,240,.94);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);z-index:5}
-    .bar{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:64px}
-    .brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--terracotta-dark);font-family:"Fraunces",Georgia,serif;font-weight:700;font-size:1.25rem}
-    .brand img{width:36px;height:36px;border-radius:9px}
-    nav{display:flex;gap:18px;font-size:.95rem;font-weight:600}
-    nav a{text-decoration:none;color:var(--ink)}
-    nav a:hover{color:var(--terracotta)}
-    @media(max-width:640px){nav{display:none}}
-    .hero{padding:56px 20px 48px;display:grid;gap:32px;align-items:center}
-    @media(min-width:860px){.hero{grid-template-columns:1.25fr .75fr}}
-    .lead{font-size:1.2rem;color:var(--muted);max-width:34em}
-    .cta{display:flex;flex-wrap:wrap;gap:12px;margin:28px 0 12px}
-    .btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:56px;padding:0 28px;border-radius:16px;font-weight:800;font-size:1.05rem;text-decoration:none;border:2px solid var(--terracotta);cursor:pointer}
-    .btn-primary{background:var(--terracotta);color:#fff;box-shadow:0 8px 20px rgba(200,68,15,.28)}
-    .btn-primary:hover{background:var(--terracotta-dark)}
-    .btn-ghost{background:transparent;color:var(--terracotta-dark)}
-    .btn-ghost:hover{background:var(--sand)}
-    .small{font-size:.9rem;color:var(--muted)}
-    .hero-art{display:flex;justify-content:center}
-    .hero-art img{width:min(260px,60vw);height:auto;border-radius:56px;box-shadow:0 24px 60px rgba(168,54,11,.28)}
-    section{padding:56px 0}
-    section.alt{background:var(--sand)}
-    .grid{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
-    .card{background:#fff;border:1px solid var(--line);border-radius:22px;padding:24px}
-    .card p{color:var(--muted);margin:0}
-    .emoji{font-size:1.8rem;display:block;margin-bottom:8px}
-    .plans .card.featured{border:2px solid var(--terracotta)}
-    .price{font-family:"Fraunces",Georgia,serif;font-size:2rem;font-weight:700;margin:6px 0}
-    .price small{font-size:.95rem;font-family:"Nunito",sans-serif;font-weight:600;color:var(--muted)}
-    ul.ticks{list-style:none;padding:0;margin:14px 0 0}
-    ul.ticks li{padding-left:28px;position:relative;margin:6px 0;color:var(--ink)}
-    ul.ticks li::before{content:"✓";position:absolute;left:0;color:var(--olive);font-weight:900}
-    ol.steps{counter-reset:s;list-style:none;padding:0;margin:0;display:grid;gap:14px}
-    ol.steps li{counter-increment:s;background:#fff;border:1px solid var(--line);border-radius:18px;padding:18px 20px 18px 66px;position:relative}
-    ol.steps li::before{content:counter(s);position:absolute;left:18px;top:50%;transform:translateY(-50%);width:34px;height:34px;border-radius:50%;background:var(--terracotta);color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center}
-    details{background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px 20px;margin:10px 0}
-    summary{cursor:pointer;font-weight:800}
-    details p{margin:10px 0 0;color:var(--muted)}
-    .note{background:#fff7e6;border:1px solid #f2d9a6;border-radius:16px;padding:16px 20px;font-size:.95rem}
-    footer{border-top:1px solid var(--line);padding:32px 0;color:var(--muted);font-size:.95rem}
-    footer .wrap{display:flex;flex-wrap:wrap;gap:12px 28px;justify-content:space-between}
-    a:focus-visible,.btn:focus-visible,summary:focus-visible{outline:3px solid var(--terracotta);outline-offset:3px;border-radius:12px}
-    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
-  </style>
+  <link rel="stylesheet" href="/site.css">
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -91,7 +34,8 @@
         "url": "__SITE_URL__/",
         "downloadUrl": "__SITE_URL__/download/che-cucino-oggi.apk",
         "image": "__SITE_URL__/icon-512.png",
-        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" }
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" },
+        "screenshot": ["__SITE_URL__/img/menu.webp", "__SITE_URL__/img/spesa.webp", "__SITE_URL__/img/dispensa.webp", "__SITE_URL__/img/famiglia-dieta.webp"]
       },
       {
         "@type": "WebSite",
@@ -134,6 +78,7 @@
       <a class="brand" href="/" aria-label="Che cucino oggi? - pagina iniziale"><img src="/icon-192.png" alt="" width="36" height="36">Che cucino oggi?</a>
       <nav aria-label="Principale">
         <a href="#funzioni">Funzioni</a>
+        <a href="#guide">Guide</a>
         <a href="#piani">Piani</a>
         <a href="#installa">Come installare</a>
         <a href="#domande">Domande</a>
@@ -167,6 +112,32 @@
           <div class="card"><span class="emoji" aria-hidden="true">🥗</span><h3>Diete, allergie e gusti</h3><p>Vegano, senza glutine, senza lattosio, allergie e ingredienti che non piacciono: ognuno ha le sue regole, e il menù le rispetta.</p></div>
           <div class="card"><span class="emoji" aria-hidden="true">🍝</span><h3>I piatti di casa tua</h3><p>Aggiungi le ricette di famiglia: scrivi il nome e l'app riconosce gli ingredienti e capisce se il piatto è adatto a ciascuno.</p></div>
           <div class="card"><span class="emoji" aria-hidden="true">🏷️</span><h3>Offerte e vacanze</h3><p>Scansiona i volantini per risparmiare sulla spesa e pianifica menù e spesa anche fuori casa.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="schermate">
+      <div class="wrap">
+        <h2>Così funziona, schermata per schermata</h2>
+        <p class="lead">Ecco com'è fatta l'app: pochi tocchi per il menù, la spesa e la dispensa.</p>
+        <div class="shots">
+          <figure><img src="/img/menu.webp" width="560" height="1212" loading="lazy" alt="Menù della settimana con pranzi e cene"><figcaption>Il menù della settimana</figcaption></figure>
+          <figure><img src="/img/menu-alternative.webp" width="560" height="1212" loading="lazy" alt="Piatto alternativo per una persona con dieta diversa"><figcaption>Alternative per chi ha esigenze diverse</figcaption></figure>
+          <figure><img src="/img/spesa.webp" width="560" height="1212" loading="lazy" alt="Lista della spesa divisa per reparto"><figcaption>La spesa, per reparto</figcaption></figure>
+          <figure><img src="/img/dispensa.webp" width="560" height="1212" loading="lazy" alt="Dispensa con prodotti e quantità"><figcaption>La dispensa</figcaption></figure>
+          <figure><img src="/img/famiglia-dieta.webp" width="560" height="1212" loading="lazy" alt="Dieta e allergie per ogni persona"><figcaption>Diete e allergie, per persona</figcaption></figure>
+          <figure><img src="/img/piatto-nuovo.webp" width="560" height="1212" loading="lazy" alt="Aggiungere un piatto di famiglia con ingredienti riconosciuti"><figcaption>I piatti di casa tua</figcaption></figure>
+          <figure><img src="/img/ricette.webp" width="560" height="1212" loading="lazy" alt="Elenco di oltre 300 ricette di stagione"><figcaption>Oltre 300 ricette di stagione</figcaption></figure>
+        </div>
+      </div>
+    </section>
+
+    <section id="guide" class="alt">
+      <div class="wrap">
+        <h2>Guide per chi cucina per una famiglia</h2>
+        <p>Consigli pratici su menù, spesa, dispensa, diete e allergie: letti anche senza usare l'app.</p>
+        <div class="guide-grid">
+          __GUIDE_LINKS__
         </div>
       </div>
     </section>
