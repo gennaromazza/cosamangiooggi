@@ -14,6 +14,7 @@ import { auth, db, functions } from '../lib/firebase';
 import { planName } from '../lib/plans';
 import { remindersAvailable, setSundayReminder, sundayReminderEnabled } from '../lib/reminders';
 import type { UserProfile } from '../types';
+import { syncSelfMemberName } from '../lib/selfMember';
 
 interface AccountSettingsProps {
   user: any;
@@ -131,6 +132,7 @@ export default function AccountSettings({
         await updateDoc(doc(db, 'users', user.uid), { name: clean });
         onProfileUpdate({ ...profile, name: clean });
       }
+      await syncSelfMemberName(user.uid, clean).catch((e) => console.error('Persona collegata non aggiornata:', e));
       setNameNotice({ ok: true, text: 'Nome aggiornato.' });
     } catch (error) {
       console.error('Impossibile aggiornare il nome:', error);

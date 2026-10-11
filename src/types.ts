@@ -11,6 +11,12 @@ export interface FamilyMember {
   dietaryRestrictions?: DietaryRestriction[];
   /** Allergie o ingredienti da evitare assolutamente solo per questa persona */
   allergies?: string[];
+  /** È la persona collegata all'account: il suo nome e quello dell'account restano uguali */
+  isSelf?: boolean;
+  /** Invito per compilare da solo: lo scrive il server (il link, la scadenza, la risposta) */
+  inviteStatus?: 'sent' | 'answered' | 'revoked';
+  inviteExpiresAt?: number;
+  inviteAnsweredAt?: number;
 }
 
 export interface UserProfile {
@@ -77,9 +83,20 @@ export interface Recipe {
   };
 }
 
+/** Pasto pensato per mangiare tutti insieme: come è stato trovato e a quanti piace */
+export interface TogetherInfo {
+  /** all: piace a tutti · neutral: piatto semplice per tutti · majority: piace alla maggioranza, alternativa per gli altri */
+  mode: 'all' | 'neutral' | 'majority';
+  /** Persone per cui il piatto va bene così com'è */
+  fits: number;
+  total: number;
+}
+
 export interface DayPlan {
   lunchIds: string[];
   dinnerIds: string[];
+  lunchTogether?: TogetherInfo;
+  dinnerTogether?: TogetherInfo;
   /** Alternative per chi ha una dieta o un'allergia personale: id persona → id ricetta */
   lunchAlt?: Record<string, string>;
   dinnerAlt?: Record<string, string>;

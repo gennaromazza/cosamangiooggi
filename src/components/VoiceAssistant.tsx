@@ -58,6 +58,7 @@ export default function VoiceAssistant({
   const [allRecipes, setAllRecipes] = useState<Recipe[]>(INITIAL_RECIPES);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [familyCount, setFamilyCount] = useState(2);
+  const [memberList, setMemberList] = useState<{ id: string; name: string; allergies: string[] }[]>([]);
 
   // Active cooking overlay states
   const [cookingRecipe, setCookingRecipe] = useState<Recipe | null>(null);
@@ -103,6 +104,7 @@ export default function VoiceAssistant({
     const unsubMembers = onSnapshot(qMembers, (snapshot) => {
       const count = snapshot.docs.length || 2;
       setFamilyCount(count);
+      setMemberList(snapshot.docs.map(d => ({ id: d.id, name: String(d.data().name || ''), allergies: (d.data().allergies as string[]) || [] })));
     }, (error) => {
       console.error(error);
     });
@@ -218,7 +220,7 @@ export default function VoiceAssistant({
     };
 
     recognitionRef.current = recognition;
-  }, [allRecipes, profile, activeTab, cookingRecipe, currentStep]);
+  }, [allRecipes, profile, memberList, activeTab, cookingRecipe, currentStep]);
 
   useEffect(() => {
     window.dispatchEvent(new CustomEvent('voice-assistant-listening-change', { detail: { isListening } }));
@@ -407,9 +409,44 @@ export default function VoiceAssistant({
       }
     }
 
-    // 6. EXCLUDE ALIMENTO (ALLERGY/EXCLUSION) COMMAND
+    // 6. ESCLUSIONI: "escludi/evita X" vale per tutta la famiglia, "allergia a X [per Nome]" per una persona sola
     if (cmd.includes("escludi") || cmd.includes("allergia a") || cmd.includes("evita") || cmd.includes("allergico a")) {
+      const personal = cmd.includes("allergia a") || cmd.includes("allergico a");
       const rawIng = extractVoiceArgument(cmd, ["escludi", "allergia a", "allergico a", "evita"]);
+
+      if (personal && rawIng) {
+        // Chi è? Il nome detto nel comando; se a tavola c'è una persona sola, è lei
+        const words = rawIng.split(' ');
+        const named = memberList.find(m => words.includes(m.name.trim().split(' ')[0].toLowerCase()));
+        const target = named || (memberList.length === 1 ? memberList[0] : undefined);
+        if (!target) {
+          speakFeedback(memberList.length === 0
+            ? "Aggiungi prima le persone a tavola nella sezione Famiglia."
+            : `Per chi? Dì, per esempio: allergia a ${rawIng} per ${memberList[0].name.split(' ')[0]}. Per tutta la famiglia dì: escludi ${rawIng}.`);
+          return;
+        }
+        const first = target.name.trim().split(' ')[0].toLowerCase();
+        const food = words.filter(w => w !== first && w !== 'per').join(' ').trim();
+        if (!food) {
+          speakFeedback("Non ho capito a cosa.");
+          return;
+        }
+        const allergen = food.charAt(0).toUpperCase() + food.slice(1);
+        if (target.allergies.some(a => a.toLowerCase() === allergen.toLowerCase())) {
+          speakFeedback(`${allergen} è già tra le allergie di ${target.name}.`);
+          return;
+        }
+        const path = `users/${userId}/familyMembers`;
+        try {
+          await updateDoc(doc(db, path, target.id), { allergies: [...target.allergies, allergen] });
+          speakFeedback(`Ho aggiunto ${allergen} alle allergie di ${target.name}. Il menù preparerà un piatto alternativo per ${target.name} quando serve.`);
+          setActiveTab('family');
+        } catch (e) {
+          console.error("Error writing allergy:", e);
+          speakFeedback("Errore nel salvare l'allergia.");
+        }
+        return;
+      }
 
       if (rawIng && profile) {
         const ingName = rawIng.charAt(0).toUpperCase() + rawIng.slice(1);
@@ -419,7 +456,7 @@ export default function VoiceAssistant({
           const path = `users/${userId}`;
           try {
             await updateDoc(doc(db, path), { excludedIngredients: updated });
-            speakFeedback(`Ho aggiunto ${ingName} alle tue esclusioni alimentari. I prossimi menu eviteranno questo ingrediente.`);
+            speakFeedback(`Ho escluso ${ingName} per tutta la famiglia. I prossimi menu eviteranno questo ingrediente.`);
             setActiveTab('family');
           } catch (e) {
             console.error("Error writing exclusion:", e);
@@ -445,7 +482,7 @@ export default function VoiceAssistant({
     }
 
     // Unrecognized command fallback
-    speakFeedback("Non ho capito bene il comando. Puoi dire: aggiungi uova alla spesa, escludi farina, cerca riso o apri dispensa.");
+    speakFeedback("Non ho capito bene il comando. Puoi dire: aggiungi uova alla spesa, escludi farina per tutti, allergia a arachidi per Luca, cerca riso o apri dispensa.");
   };
 
   return (

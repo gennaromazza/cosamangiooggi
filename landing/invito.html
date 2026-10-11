@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dicci cosa mangi | Che cucino oggi?</title>
+  <meta name="description" content="Compila in un minuto allergie, gusti e piatti preferiti: il menù della tua famiglia terrà conto di te.">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+  <style>
+    @font-face{font-family:"Fraunces";src:url(/fonts/fraunces.woff2) format("woff2");font-weight:100 900;font-display:swap}
+    @font-face{font-family:"Nunito";src:url(/fonts/nunito.woff2) format("woff2");font-weight:200 1000;font-display:swap}
+    *{box-sizing:border-box}
+    body{margin:0;background:#fbf7f0;color:#2b1a12;font-family:"Nunito",system-ui,sans-serif;font-size:17px;line-height:1.55}
+    main{max-width:560px;margin:0 auto;padding:24px 18px 96px}
+    h1,h2{font-family:"Fraunces",Georgia,serif;line-height:1.2;margin:0 0 8px}
+    h1{font-size:2rem}h2{font-size:1.3rem;margin-top:30px}
+    p{margin:0 0 12px}
+    .logo{display:flex;align-items:center;gap:10px;font-family:"Fraunces",Georgia,serif;font-weight:700;color:#c8440f;margin-bottom:18px}
+    .logo img{width:40px;height:40px;border-radius:10px}
+    .card{background:#fff;border:1px solid #f0e6d8;border-radius:20px;padding:18px;margin-top:14px}
+    .hint{font-size:.9rem;color:#6b5a50}
+    .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+    .chip{border:1px solid #e3d6c4;background:#fff;border-radius:999px;padding:9px 14px;font:inherit;font-weight:700;color:#4a3a30;cursor:pointer;min-height:42px}
+    .chip[aria-pressed="true"]{background:#c8440f;border-color:#c8440f;color:#fff}
+    .chip.no[aria-pressed="true"]{background:#2b1a12;border-color:#2b1a12}
+    .chip.warn[aria-pressed="true"]{background:#b91c1c;border-color:#b91c1c}
+    .add{display:flex;gap:8px;margin-top:10px}
+    .add input{flex:1;min-width:0;border:1px solid #e3d6c4;border-radius:14px;padding:11px 14px;font:inherit;background:#fff}
+    .add button,.btn{border:0;border-radius:14px;background:#c8440f;color:#fff;font:inherit;font-weight:800;padding:12px 18px;cursor:pointer;min-height:46px}
+    .btn{width:100%;font-size:1.05rem;min-height:54px;margin-top:22px}
+    .btn[disabled]{opacity:.5;cursor:default}
+    .dish{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid #f4ece0}
+    .dish:first-of-type{border-top:0}
+    .dish .name{flex:1;min-width:0}
+    .dish .name b{display:block;font-size:1rem}
+    .dish .name span{font-size:.82rem;color:#6b5a50}
+    .dish button{width:46px;height:46px;border-radius:14px;border:1px solid #e3d6c4;background:#fff;font-size:1.3rem;cursor:pointer}
+    .dish button[aria-pressed="true"].up{background:#c8440f;border-color:#c8440f}
+    .dish button[aria-pressed="true"].down{background:#2b1a12;border-color:#2b1a12}
+    .consent{display:flex;gap:12px;align-items:flex-start;font-size:.95rem}
+    .consent input{width:24px;height:24px;margin-top:2px;accent-color:#c8440f;flex:none}
+    .msg{border-radius:16px;padding:14px 16px;margin-top:16px}
+    .err{background:#fff4ed;border:1px solid #ffd6bd;color:#7a2a08}
+    .ok{background:#ecfdf3;border:1px solid #b7ebcb;color:#14532d}
+    .hidden{display:none}
+    a{color:#a8360b}
+  </style>
+</head>
+<body>
+<main>
+  <div class="logo"><img src="/icon-192.png" alt="" width="40" height="40"> Che cucino oggi?</div>
+
+  <div id="loading"><p>Un attimo…</p></div>
+  <div id="problem" class="msg err hidden" role="alert"></div>
+
+  <form id="form" class="hidden" novalidate>
+    <h1 id="title">Dicci cosa mangi</h1>
+    <p id="intro"></p>
+
+    <div class="card consent">
+      <input type="checkbox" id="consent" required>
+      <label for="consent">Acconsento al trattamento dei dati che inserisco, <b>comprese allergie e intolleranze</b>, da parte di Che cucino oggi? per preparare il menù di questa famiglia. Posso chiedere a chi mi ha invitato di correggerli o cancellarli. <a href="/privacy" target="_blank" rel="noopener">Informativa</a>.</label>
+    </div>
+
+    <h2>Allergie e intolleranze</h2>
+    <p class="hint">Cosa non devi mai mangiare. Se manca, aggiungilo.</p>
+    <div class="chips" id="allergies"></div>
+    <div class="add"><input id="allergies-new" type="text" maxlength="40" placeholder="Altra allergia" aria-label="Altra allergia"><button type="button" data-add="allergies">Aggiungi</button></div>
+
+    <h2>Come mangi?</h2>
+    <div class="chips" id="diets"></div>
+
+    <h2>Cosa non mangi volentieri</h2>
+    <div class="chips" id="disliked"></div>
+    <div class="add"><input id="disliked-new" type="text" maxlength="40" placeholder="Altro ingrediente" aria-label="Altro ingrediente non gradito"><button type="button" data-add="disliked">Aggiungi</button></div>
+
+    <h2>Cosa ami</h2>
+    <div class="chips" id="liked"></div>
+    <div class="add"><input id="liked-new" type="text" maxlength="40" placeholder="Altro ingrediente" aria-label="Altro ingrediente che ami"><button type="button" data-add="liked">Aggiungi</button></div>
+
+    <h2>Questi piatti ti piacciono?</h2>
+    <p class="hint">Tocca 👍 se ti piace, 👎 se no. Se non lo conosci, lascia stare.</p>
+    <div class="card" id="dishes"></div>
+
+    <div id="result" class="msg hidden" role="status"></div>
+    <button class="btn" id="send" type="submit" disabled>Invia le mie risposte</button>
+    <p class="hint" style="margin-top:12px">Puoi tornare su questo link e cambiare le risposte finché non scade.</p>
+  </form>
+</main>
+
+<script>
+(function () {
+  var API = 'https://europe-west1-gen-lang-client-0532460534.cloudfunctions.net';
+  var ALLERGENS = ['Arachidi', 'Frutta a guscio', 'Glutine', 'Latte', 'Uova', 'Pesce', 'Crostacei', 'Soia', 'Sedano', 'Senape', 'Sesamo', 'Solfiti'];
+  var DIETS = [['vegan', '🌱 Vegano'], ['gluten-free', '🌾 Senza glutine'], ['lactose-free', '🥛 Senza lattosio']];
+  var INGREDIENTS = ['Pomodoro', 'Pesce', 'Manzo', 'Pollo', 'Maiale', 'Pasta', 'Riso', 'Uova', 'Formaggi', 'Verdure', 'Legumi', 'Cipolla', 'Aglio', 'Broccoli', 'Peperoni', 'Melanzane', 'Spinaci', 'Funghi', 'Crostacei'];
+
+  // Il codice del link sta dopo il # : non viene inviato ai server né registrato
+  var token = (location.hash || '').replace(/^#/, '');
+  var state = { allergies: [], diets: [], disliked: [], liked: [], meals: {} };
+  var $ = function (id) { return document.getElementById(id); };
+
+  function problem(text) {
+    $('loading').className = 'hidden';
+    $('form').className = 'hidden';
+    var box = $('problem');
+    box.textContent = text;
+    box.className = 'msg err';
+  }
+
+  function toggle(list, value) {
+    var key = value.toLowerCase();
+    var i = list.findIndex(function (x) { return x.toLowerCase() === key; });
+    if (i >= 0) list.splice(i, 1); else list.push(value);
+  }
+
+  function chips(id, options, list, cls) {
+    var box = $(id);
+    var all = options.slice();
+    list.forEach(function (x) { if (!all.some(function (o) { return o.toLowerCase() === x.toLowerCase(); })) all.unshift(x); });
+    box.innerHTML = '';
+    all.forEach(function (name) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chip ' + cls;
+      b.textContent = name;
+      b.setAttribute('aria-pressed', list.some(function (x) { return x.toLowerCase() === name.toLowerCase(); }) ? 'true' : 'false');
+      b.onclick = function () { toggle(list, name); chips(id, options, list, cls); };
+      box.appendChild(b);
+    });
+  }
+
+  function diets() {
+    var box = $('diets');
+    box.innerHTML = '';
+    DIETS.forEach(function (d) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chip';
+      b.textContent = d[1];
+      b.setAttribute('aria-pressed', state.diets.indexOf(d[0]) >= 0 ? 'true' : 'false');
+      b.onclick = function () { var i = state.diets.indexOf(d[0]); if (i >= 0) state.diets.splice(i, 1); else state.diets.push(d[0]); diets(); };
+      box.appendChild(b);
+    });
+  }
+
+  function dishes(list) {
+    var box = $('dishes');
+    box.innerHTML = '';
+    list.forEach(function (d) {
+      var row = document.createElement('div');
+      row.className = 'dish';
+      var name = document.createElement('div');
+      name.className = 'name';
+      name.innerHTML = '<b></b><span></span>';
+      name.firstChild.textContent = d.title.replace(/\s*\(.*\)$/, '');
+      name.lastChild.textContent = d.ingredients.join(' · ');
+      var down = document.createElement('button');
+      var up = document.createElement('button');
+      down.type = up.type = 'button';
+      down.className = 'down'; up.className = 'up';
+      down.textContent = '👎'; up.textContent = '👍';
+      down.setAttribute('aria-label', 'Non mi piace: ' + d.title);
+      up.setAttribute('aria-label', 'Mi piace: ' + d.title);
+      function paint() {
+        up.setAttribute('aria-pressed', state.meals[d.id] === 'like' ? 'true' : 'false');
+        down.setAttribute('aria-pressed', state.meals[d.id] === 'dislike' ? 'true' : 'false');
+      }
+      up.onclick = function () { state.meals[d.id] = state.meals[d.id] === 'like' ? undefined : 'like'; paint(); };
+      down.onclick = function () { state.meals[d.id] = state.meals[d.id] === 'dislike' ? undefined : 'dislike'; paint(); };
+      paint();
+      row.appendChild(name); row.appendChild(down); row.appendChild(up);
+      box.appendChild(row);
+    });
+  }
+
+  function wireAdd(key, options, listName, cls) {
+    document.querySelector('[data-add="' + key + '"]').onclick = function () {
+      var input = $(key + '-new');
+      var value = input.value.trim().slice(0, 40);
+      if (value.length < 2) return;
+      value = value.charAt(0).toUpperCase() + value.slice(1);
+      if (!state[listName].some(function (x) { return x.toLowerCase() === value.toLowerCase(); })) state[listName].push(value);
+      input.value = '';
+      chips(key, options, state[listName], cls);
+    };
+  }
+
+  function post(path, body) {
+    return fetch(API + '/' + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function (r) { return r.json().catch(function () { return { ok: false }; }).then(function (j) { j.status = r.status; return j; }); });
+  }
+
+  if (!/^[A-Za-z0-9_-]{32}$/.test(token)) {
+    problem('Questo link non è completo. Apri di nuovo il link che hai ricevuto, oppure chiedi un nuovo invito.');
+    return;
+  }
+
+  post('getMemberInvite', { t: token }).then(function (j) {
+    if (!j.ok) { problem(j.error || 'Questo link non è valido. Chiedi un nuovo invito.'); return; }
+    $('loading').className = 'hidden';
+    $('form').className = '';
+    $('title').textContent = 'Ciao ' + j.memberName + ', dicci cosa mangi';
+    $('intro').textContent = (j.ownerName ? j.ownerName + ' vuole' : 'Chi ti ha invitato vuole') +
+      ' preparare menù che piacciano anche a te. Ci vuole un minuto.';
+    chips('allergies', ALLERGENS, state.allergies, 'warn');
+    diets();
+    chips('disliked', INGREDIENTS, state.disliked, 'no');
+    chips('liked', INGREDIENTS, state.liked, '');
+    wireAdd('allergies', ALLERGENS, 'allergies', 'warn');
+    wireAdd('disliked', INGREDIENTS, 'disliked', 'no');
+    wireAdd('liked', INGREDIENTS, 'liked', '');
+    dishes(j.dishes || []);
+  }).catch(function () {
+    problem('Non riesco a collegarmi. Controlla la connessione e riprova.');
+  });
+
+  $('consent').onchange = function () { $('send').disabled = !$('consent').checked; };
+
+  $('form').onsubmit = function (e) {
+    e.preventDefault();
+    if (!$('consent').checked) return;
+    var send = $('send');
+    send.disabled = true;
+    send.textContent = 'Invio…';
+    var liked = [], disliked = [];
+    Object.keys(state.meals).forEach(function (id) {
+      if (state.meals[id] === 'like') liked.push(id);
+      if (state.meals[id] === 'dislike') disliked.push(id);
+    });
+    post('submitMemberInvite', {
+      t: token, consent: true,
+      allergies: state.allergies, dietaryRestrictions: state.diets,
+      dislikedIngredients: state.disliked, likedIngredients: state.liked,
+      likedMeals: liked, dislikedMeals: disliked
+    }).then(function (j) {
+      var box = $('result');
+      if (j.ok) {
+        box.className = 'msg ok';
+        box.textContent = 'Grazie! Le tue risposte sono state inviate. Puoi chiudere questa pagina.';
+      } else {
+        box.className = 'msg err';
+        box.textContent = j.error || 'Non è stato possibile inviare. Riprova.';
+      }
+      send.textContent = 'Invia di nuovo le risposte';
+      send.disabled = !$('consent').checked;
+    }).catch(function () {
+      var box = $('result');
+      box.className = 'msg err';
+      box.textContent = 'Non riesco a collegarmi. Controlla la connessione e riprova.';
+      send.textContent = 'Invia le mie risposte';
+      send.disabled = false;
+    });
+  };
+})();
+</script>
+</body>
+</html>

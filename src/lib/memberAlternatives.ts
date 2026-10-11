@@ -9,12 +9,59 @@ export const hasPersonalRules = (member: FamilyMember): boolean =>
 export const fitsMember = (recipe: Recipe, member: FamilyMember): boolean =>
   satisfiesDiet(recipe, member.dietaryRestrictions || []) && !hitsExclusion(recipe, member.allergies || []);
 
-const isMain = (recipe: Recipe) => recipe.category !== 'side' && recipe.category !== 'dessert';
+export const isMain = (recipe: Recipe) => recipe.category !== 'side' && recipe.category !== 'dessert';
 
-/** Persone per cui il pasto (i piatti principali) non va bene e serve un'alternativa. Contorni esclusi. */
+/** Ingredienti che contano davvero in un piatto: titolo e primi tre ingredienti (non il soffritto o la spolverata). */
+export const hitsMainIngredient = (recipe: Recipe, ingredients: string[]): boolean =>
+  ingredients.length > 0 && hitsExclusion({ ...recipe, ingredients: recipe.ingredients.slice(0, 3) }, ingredients);
+
+/** La persona non gradisce questo piatto: lo ha indicato lui stesso o contiene un suo ingrediente non gradito (tra i principali). */
+export const dislikesDish = (recipe: Recipe, member: FamilyMember): boolean =>
+  (member.dislikedMeals || []).includes(recipe.id) || hitsMainIngredient(recipe, member.dislikedIngredients || []);
+
+/** Il piatto va bene così com'è per questa persona: rispetta dieta e allergie e non lo gradisce meno. */
+export const happyWith = (recipe: Recipe, member: FamilyMember): boolean => fitsMember(recipe, member) && !dislikesDish(recipe, member);
+
+/**
+ * Persone per cui il pasto (i piatti principali) non va bene e serve un'alternativa: chi ha una dieta o
+ * un'allergia che il piatto non rispetta, e chi non lo gradisce (piatto o ingrediente principale non graditi).
+ * Contorni esclusi.
+ */
 export function membersNeedingAlternative(mains: Recipe[], members: FamilyMember[]): FamilyMember[] {
   const dishes = mains.filter(isMain);
-  return members.filter((member) => hasPersonalRules(member) && dishes.some((recipe) => !fitsMember(recipe, member)));
+  return members.filter((member) => dishes.some((recipe) => !happyWith(recipe, member)));
+}
+
+/**
+ * Cosa si toglie dal menù di tutti: un piatto o un ingrediente non gradito si esclude per tutti solo se lo evita
+ * almeno metà delle persone. Se lo evita una minoranza resta nel menù e quella persona riceve un'alternativa.
+ */
+export function dislikeConsensus(
+  members: FamilyMember[],
+  threshold = 0.5,
+): { excludedMealIds: Set<string>; excludedIngredients: string[] } {
+  const total = members.length;
+  const excludedMealIds = new Set<string>();
+  const excludedIngredients: string[] = [];
+  if (total === 0) return { excludedMealIds, excludedIngredients };
+
+  const meals = new Map<string, number>();
+  const ingredients = new Map<string, { name: string; count: number }>();
+  for (const member of members) {
+    for (const id of new Set(member.dislikedMeals || [])) meals.set(id, (meals.get(id) || 0) + 1);
+    const seen = new Set<string>();
+    for (const name of member.dislikedIngredients || []) {
+      const key = name.trim().toLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      const entry = ingredients.get(key) || { name: name.trim(), count: 0 };
+      entry.count += 1;
+      ingredients.set(key, entry);
+    }
+  }
+  meals.forEach((count, id) => count / total >= threshold && excludedMealIds.add(id));
+  ingredients.forEach(({ name, count }) => count / total >= threshold && excludedIngredients.push(name));
+  return { excludedMealIds, excludedIngredients };
 }
 
 /**
@@ -56,8 +103,9 @@ export function pickAlternatives(args: {
 /**
  * Quante persone mangiano ogni piatto del piano. Chi ha un'alternativa mangia quella (1 porzione),
  * gli altri mangiano il piatto di tutti: serve a spesa e dispensa per non comprare di troppo.
+ * Con `memberIds` si ignorano le alternative di chi non è più a tavola.
  */
-export function planMeals(plan: WeeklyPlan, servings: number): { recipeId: string; people: number }[] {
+export function planMeals(plan: WeeklyPlan, servings: number, memberIds?: Set<string>): { recipeId: string; people: number }[] {
   const people = new Map<string, number>();
   const add = (id: string, count: number) => people.set(id, (people.get(id) || 0) + count);
   for (const day of Object.values(plan.days)) {
@@ -66,7 +114,8 @@ export function planMeals(plan: WeeklyPlan, servings: number): { recipeId: strin
       [day.dinnerIds, day.dinnerAlt],
     ];
     for (const [ids, alt] of slots) {
-      const altIds = Object.values(alt || {});
+      // Le alternative di persone non più a tavola non contano
+      const altIds = Object.entries(alt || {}).filter(([memberId]) => !memberIds || memberIds.has(memberId)).map(([, recipeId]) => recipeId);
       const forEveryoneElse = Math.max(servings - altIds.length, 0);
       (ids || []).forEach((id) => add(id, forEveryoneElse));
       altIds.forEach((id) => add(id, 1));

@@ -67,9 +67,9 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
         const customRecipes = savedCustomStr ? JSON.parse(savedCustomStr) as Recipe[] : [];
         const allRecipes = [...INITIAL_RECIPES, ...customRecipes];
         // Porzioni = persone a tavola (come nel menù); senza persone indicate, 2
-        let localMembers = 0;
-        try { localMembers = (JSON.parse(localStorage.getItem(`members_${userId}`) || '[]') as unknown[]).length; } catch { /* dati non validi */ }
-        const targetServings = localMembers || 2;
+        let localMemberIds = new Set<string>();
+        try { localMemberIds = new Set((JSON.parse(localStorage.getItem(`members_${userId}`) || '[]') as { id: string }[]).map(m => m.id)); } catch { /* dati non validi */ }
+        const targetServings = localMemberIds.size || 2;
 
         const savedPantryStr = localStorage.getItem(`pantry_${userId}`);
         const pantry = savedPantryStr ? JSON.parse(savedPantryStr) as PantryItem[] : [];
@@ -85,7 +85,7 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
 
         const rawRequirements: { name: string; amount: number; unit: string }[] = [];
         // Chi ha un'alternativa mangia quella: si compra per le porzioni reali di ogni piatto
-        planMeals(activePlan, targetServings).forEach(({ recipeId, people }) => {
+        planMeals(activePlan, targetServings, localMemberIds).forEach(({ recipeId, people }) => {
           const recipe = allRecipes.find(r => r.id === recipeId);
           if (!recipe) return;
           const originalServings = recipe.servings || 2;
@@ -131,6 +131,7 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
         const membersPath = `users/${userId}/familyMembers`;
         const membersSnapshot = await getDocs(collection(db, membersPath));
         const targetServings = membersSnapshot.docs.length || 2;
+        const memberIds = new Set(membersSnapshot.docs.map(d => d.id));
 
         // 4. Real-time Pantry Listener
         const pantryPath = `users/${userId}/pantry`;
@@ -147,7 +148,7 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
           // 5. Extract all ingredients from the plan
           const rawRequirements: { name: string; amount: number; unit: string }[] = [];
           
-          planMeals(activePlan, targetServings).forEach(({ recipeId, people }) => {
+          planMeals(activePlan, targetServings, memberIds).forEach(({ recipeId, people }) => {
             const recipe = allRecipes.find(r => r.id === recipeId);
             if (!recipe) return;
             const ratio = people / (recipe.servings || 2);
