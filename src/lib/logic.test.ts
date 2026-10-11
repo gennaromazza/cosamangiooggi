@@ -1,4 +1,6 @@
 import { getSupermarketDepartment } from './departments';
+import { fitsMember, membersNeedingAlternative, pickAlternatives, planMeals } from './memberAlternatives';
+import type { FamilyMember, WeeklyPlan } from '../types';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -122,4 +124,80 @@ test('reparti del supermercato: conservati prima dei freschi, parole intere', ()
   for (const [name, expected] of cases) {
     assert.equal(getSupermarketDepartment(name), expected, name);
   }
+});
+
+
+// ---- Alternative per persona -------------------------------------------------
+
+const recipe = (id: string, tags: string[], extra: Partial<Recipe> = {}): Recipe =>
+  ({
+    id,
+    title: id,
+    ingredients: [{ name: 'Acqua', amount: 1, unit: 'l' }],
+    instructions: [],
+    tags,
+    season: 'all',
+    isWHOCompliant: true,
+    category: 'lunch',
+    difficulty: 'easy',
+    timeMin: 20,
+    servings: 2,
+    hasCarbs: true,
+    hasProtein: true,
+    hasVeg: true,
+    ...extra,
+  }) as Recipe;
+
+const person = (id: string, extra: Partial<FamilyMember> = {}): FamilyMember => ({
+  id,
+  name: id,
+  likedIngredients: [],
+  dislikedIngredients: [],
+  ...extra,
+});
+
+test('alternative: serve solo a chi ha regole proprie e il piatto non va bene', () => {
+  const carne = recipe('carne', []);
+  const lenticchie = recipe('lenticchie', ['vegan']);
+  const vegana = person('giulia', { dietaryRestrictions: ['vegan'] });
+  const libero = person('marco');
+  assert.deepEqual(membersNeedingAlternative([carne], [vegana, libero]).map((m) => m.id), ['giulia']);
+  assert.deepEqual(membersNeedingAlternative([lenticchie], [vegana, libero]), []);
+  assert.equal(fitsMember(lenticchie, vegana), true);
+  assert.equal(fitsMember(carne, vegana), false);
+});
+
+test('alternative: allergie personali e contorni ignorati', () => {
+  const pasta = recipe('pasta', [], { ingredients: [{ name: 'Gamberi', amount: 100, unit: 'g' }] });
+  const contorno = recipe('pane', [], { category: 'side' });
+  const allergica = person('anna', { allergies: ['Gamberi'] });
+  assert.equal(membersNeedingAlternative([pasta], [allergica]).length, 1);
+  assert.equal(membersNeedingAlternative([contorno], [allergica]).length, 0);
+});
+
+test('alternative: scelta valida, senza ripetizioni e senza inventare', () => {
+  const carne = recipe('carne', []);
+  const a = recipe('a', ['vegan']);
+  const b = recipe('b', ['vegan']);
+  const vegana = person('giulia', { dietaryRestrictions: ['vegan'] });
+  const used = new Map<string, Set<string>>();
+  const first = pickAlternatives({ mains: [carne], members: [vegana], pool: [carne, a, b], used, random: () => 0 });
+  const second = pickAlternatives({ mains: [carne], members: [vegana], pool: [carne, a, b], used, random: () => 0 });
+  assert.ok(['a', 'b'].includes(first.giulia));
+  assert.notEqual(first.giulia, second.giulia);
+  // nessun piatto adatto: nessuna alternativa
+  assert.deepEqual(pickAlternatives({ mains: [carne], members: [vegana], pool: [carne] }), {});
+});
+
+test('alternative: la spesa conta le porzioni di ognuno', () => {
+  const plan: WeeklyPlan = {
+    id: 'current',
+    startDate: '2026-01-01',
+    days: {
+      Lunedì: { lunchIds: ['carne'], dinnerIds: ['zuppa'], lunchAlt: { giulia: 'lenticchie' } },
+      Martedì: { lunchIds: ['zuppa'], dinnerIds: [] },
+    },
+  };
+  const result = Object.fromEntries(planMeals(plan, 4).map((x) => [x.recipeId, x.people]));
+  assert.deepEqual(result, { carne: 3, lenticchie: 1, zuppa: 8 });
 });

@@ -10,6 +10,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { getRawIngredientNames, scaleIngredientAmount } from '../lib/utils';
 import { checkIngredientMatch, isStaple, calculateMissingFromPantry, findPantryDuplicate } from '../lib/pantrySync';
 import { limitsFor } from '../lib/plans';
+import { planMeals } from '../lib/memberAlternatives';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -83,26 +84,21 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
         }
 
         const rawRequirements: { name: string; amount: number; unit: string }[] = [];
-        Object.values(activePlan.days).forEach(day => {
-          const allRecipeIds = [...(day.lunchIds || []), ...(day.dinnerIds || [])];
-          allRecipeIds.forEach(recipeId => {
-            const recipe = allRecipes.find(r => r.id === recipeId);
-            if (recipe) {
-              const originalServings = recipe.servings || 2;
-              const ratio = targetServings / originalServings;
-              recipe.ingredients.forEach(ing => {
-                if (isStaple(ing.name)) return;
-                const rawNames = getRawIngredientNames(ing.name);
-                rawNames.forEach(name => {
-                  if (isStaple(name)) return;
-                  rawRequirements.push({
-                    name,
-                    amount: scaleIngredientAmount(ing.amount, originalServings, targetServings),
-                    unit: ing.unit
-                  });
-                });
+        // Chi ha un'alternativa mangia quella: si compra per le porzioni reali di ogni piatto
+        planMeals(activePlan, targetServings).forEach(({ recipeId, people }) => {
+          const recipe = allRecipes.find(r => r.id === recipeId);
+          if (!recipe) return;
+          const originalServings = recipe.servings || 2;
+          recipe.ingredients.forEach(ing => {
+            if (isStaple(ing.name)) return;
+            getRawIngredientNames(ing.name).forEach(name => {
+              if (isStaple(name)) return;
+              rawRequirements.push({
+                name,
+                amount: scaleIngredientAmount(ing.amount, originalServings, people),
+                unit: ing.unit
               });
-            }
+            });
           });
         });
 
@@ -151,27 +147,16 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
           // 5. Extract all ingredients from the plan
           const rawRequirements: { name: string; amount: number; unit: string }[] = [];
           
-          Object.values(activePlan.days).forEach(day => {
-            const allRecipeIds = [...(day.lunchIds || []), ...(day.dinnerIds || [])];
-            allRecipeIds.forEach(recipeId => {
-              const recipe = allRecipes.find(r => r.id === recipeId);
-              if (recipe) {
-                const originalServings = recipe.servings || 2;
-                const ratio = targetServings / originalServings;
-
-                recipe.ingredients.forEach(ing => {
-                  if (isStaple(ing.name)) return;
-                  const rawNames = getRawIngredientNames(ing.name);
-                  rawNames.forEach(name => {
-                    if (isStaple(name)) return;
-                    rawRequirements.push({
-                      name,
-                      amount: ing.amount * ratio,
-                      unit: ing.unit
-                    });
-                  });
-                });
-              }
+          planMeals(activePlan, targetServings).forEach(({ recipeId, people }) => {
+            const recipe = allRecipes.find(r => r.id === recipeId);
+            if (!recipe) return;
+            const ratio = people / (recipe.servings || 2);
+            recipe.ingredients.forEach(ing => {
+              if (isStaple(ing.name)) return;
+              getRawIngredientNames(ing.name).forEach(name => {
+                if (isStaple(name)) return;
+                rawRequirements.push({ name, amount: ing.amount * ratio, unit: ing.unit });
+              });
             });
           });
 

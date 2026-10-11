@@ -7,8 +7,10 @@ import { Browser } from '@capacitor/browser';
 import { collection, query, onSnapshot, addDoc, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firebaseUtils';
 import { FamilyMember, DietaryRestriction, UserProfile, Recipe } from '../types';
-import { Plus, Trash2, ChevronDown, X } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, X, Search } from 'lucide-react';
 import { INITIAL_RECIPES } from '../data/recipes';
+import IngredientPicker from './IngredientPicker';
+import { hasPersonalRules } from '../lib/memberAlternatives';
 
 interface Props {
   userId: string;
@@ -33,7 +35,7 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
   const [newMemberName, setNewMemberName] = useState('');
   const [showLimitWarning, setShowLimitWarning] = useState(false);
   const [openMemberId, setOpenMemberId] = useState<string | null>(null);
-  const [memberTab, setMemberTab] = useState<'like' | 'dislike' | 'meals'>('dislike');
+  const [memberTab, setMemberTab] = useState<'like' | 'dislike' | 'meals' | 'diet'>('dislike');
 
   const allRecipes = [...INITIAL_RECIPES, ...customRecipes];
 
@@ -147,6 +149,7 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
   };
 
   const [newAllergy, setNewAllergy] = useState('');
+  const [mealSearch, setMealSearch] = useState('');
 
   const addAllergy = async () => {
     if (!profile || !newAllergy.trim()) return;
@@ -268,6 +271,44 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
       onProfileUpdate(updatedProfile);
     }
     localStorage.setItem(`profile_${userId}`, JSON.stringify(updatedProfile));
+  };
+
+  const mealResults = (() => {
+    const term = mealSearch.trim().toLowerCase();
+    return term ? allRecipes.filter(r => r.title.toLowerCase().includes(term)) : allRecipes;
+  })();
+
+  const ALLERGEN_OPTIONS = ['Arachidi', 'Frutta a guscio', 'Glutine', 'Latte', 'Uova', 'Pesce', 'Crostacei', 'Soia', 'Sedano', 'Senape', 'Sesamo', 'Solfiti'];
+
+  // Salva solo i campi indicati di una persona (account locale: sul dispositivo; altrimenti nel database)
+  const patchMember = async (id: string, patch: Partial<FamilyMember>) => {
+    if (userId === 'demo-family-user' || userId.startsWith('local-')) {
+      const updatedMembers = members.map(m => m.id === id ? { ...m, ...patch } : m);
+      setMembers(updatedMembers);
+      localStorage.setItem(`members_${userId}`, JSON.stringify(updatedMembers));
+      return;
+    }
+    const path = `users/${userId}/familyMembers`;
+    try {
+      await updateDoc(doc(db, path, id), patch as Record<string, unknown>);
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, path);
+    }
+  };
+
+  const toggleMemberDiet = (id: string, diet: DietaryRestriction) => {
+    const member = members.find(m => m.id === id);
+    if (!member) return;
+    const current = member.dietaryRestrictions || [];
+    patchMember(id, { dietaryRestrictions: current.includes(diet) ? current.filter(d => d !== diet) : [...current, diet] });
+  };
+
+  const toggleMemberAllergy = (id: string, value: string) => {
+    const member = members.find(m => m.id === id);
+    if (!member) return;
+    const current = member.allergies || [];
+    const exists = current.some(a => a.toLowerCase() === value.toLowerCase());
+    patchMember(id, { allergies: exists ? current.filter(a => a.toLowerCase() !== value.toLowerCase()) : [...current, value] });
   };
 
   const updatePreferences = async (id: string, field: 'likedIngredients' | 'dislikedIngredients' | 'likedMeals' | 'dislikedMeals', value: string) => {
@@ -398,6 +439,14 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
                         <span className="block text-sm text-slate-500">
                           {likes + dislikes === 0 ? 'Nessun gusto indicato' : `${likes} piace · ${dislikes} da evitare`}
                         </span>
+                        {hasPersonalRules(member) && (
+                          <span className="block text-sm font-semibold text-indigo-700">
+                            {[
+                              ...(member.dietaryRestrictions || []).map(d => DIET_OPTIONS.find(o => o.id === d)?.label.replace('Solo ', '')),
+                              ...(member.allergies || []).map(a => `senza ${a.toLowerCase()}`),
+                            ].filter(Boolean).join(' · ')}
+                          </span>
+                        )}
                       </span>
                       <ChevronDown className={`w-5 h-5 text-slate-400 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
                     </button>
@@ -417,6 +466,7 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
                           ['dislike', 'Non mangia'],
                           ['like', 'Ama'],
                           ['meals', 'Piatti'],
+                          ['diet', 'Dieta'],
                         ] as const).map(([id, label]) => (
                           <button
                             key={id}
@@ -432,61 +482,83 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
                       </div>
 
                       {memberTab === 'dislike' && (
-                        <div>
-                          <p className="text-sm text-slate-600 mb-3">Tocca gli ingredienti che non deve trovare nel piatto.</p>
-                          <div className="flex flex-wrap gap-2">
-                            {COMMON_INGREDIENTS.map(ing => {
-                              const on = member.dislikedIngredients?.includes(ing);
-                              return (
-                                <button
-                                  key={ing}
-                                  type="button"
-                                  aria-pressed={!!on}
-                                  onClick={() => updatePreferences(member.id, 'dislikedIngredients', ing)}
-                                  className={`px-3.5 h-10 rounded-full border text-sm font-medium ${
-                                    on ? 'bg-slate-800 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-700'
-                                  }`}
-                                >
-                                  {ing}
-                                </button>
-                              );
-                            })}
-                          </div>
+                        <div className="space-y-3">
+                          <p className="text-sm text-slate-600">Cerca o tocca gli ingredienti che non deve trovare nel piatto.</p>
+                          <IngredientPicker
+                            options={COMMON_INGREDIENTS}
+                            selected={member.dislikedIngredients || []}
+                            onToggle={(ing) => updatePreferences(member.id, 'dislikedIngredients', ing)}
+                            activeClass="bg-slate-800 border-slate-800 text-white"
+                          />
                         </div>
                       )}
 
                       {memberTab === 'like' && (
-                        <div>
-                          <p className="text-sm text-slate-600 mb-3">Tocca gli ingredienti che ama: li useremo più spesso.</p>
-                          <div className="flex flex-wrap gap-2">
-                            {COMMON_INGREDIENTS.map(ing => {
-                              const on = member.likedIngredients?.includes(ing);
-                              const blocked = member.dislikedIngredients?.includes(ing);
-                              return (
-                                <button
-                                  key={ing}
-                                  type="button"
-                                  disabled={blocked}
-                                  aria-pressed={!!on}
-                                  onClick={() => updatePreferences(member.id, 'likedIngredients', ing)}
-                                  className={`px-3.5 h-10 rounded-full border text-sm font-medium ${
-                                    on
-                                      ? 'bg-pink-600 border-pink-600 text-white'
-                                      : blocked
-                                      ? 'bg-slate-100 border-slate-200 text-slate-300 line-through cursor-not-allowed'
-                                      : 'bg-white border-slate-200 text-slate-700'
-                                  }`}
-                                >
-                                  {ing}
-                                </button>
-                              );
-                            })}
+                        <div className="space-y-3">
+                          <p className="text-sm text-slate-600">Cerca o tocca gli ingredienti che ama: li useremo più spesso.</p>
+                          <IngredientPicker
+                            options={COMMON_INGREDIENTS}
+                            selected={member.likedIngredients || []}
+                            blocked={member.dislikedIngredients || []}
+                            onToggle={(ing) => updatePreferences(member.id, 'likedIngredients', ing)}
+                            activeClass="bg-pink-600 border-pink-600 text-white"
+                          />
+                        </div>
+                      )}
+
+                      {memberTab === 'diet' && (
+                        <div className="space-y-5">
+                          <p className="text-sm text-slate-600 leading-relaxed">
+                            Solo per {member.name}. Quando il piatto di tutti non va bene, il menù prepara per {member.name} un piatto alternativo.
+                          </p>
+                          <div>
+                            <p className="text-sm font-semibold text-slate-800 mb-2">Come mangia?</p>
+                            <div className="flex flex-wrap gap-2">
+                              {DIET_OPTIONS.map(diet => {
+                                const on = member.dietaryRestrictions?.includes(diet.id);
+                                return (
+                                  <button
+                                    key={diet.id}
+                                    type="button"
+                                    aria-pressed={!!on}
+                                    onClick={() => toggleMemberDiet(member.id, diet.id)}
+                                    className={`px-4 h-11 rounded-full border text-sm font-semibold flex items-center gap-2 ${
+                                      on ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-200 text-slate-700'
+                                    }`}
+                                  >
+                                    <span>{diet.emoji}</span>
+                                    {diet.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-slate-800">Allergie o intolleranze</p>
+                            <p className="text-sm text-slate-500 mt-0.5 mb-3">Cosa non deve mai mangiare. Cerca o aggiungi quello che manca.</p>
+                            <IngredientPicker
+                              options={ALLERGEN_OPTIONS}
+                              selected={member.allergies || []}
+                              onToggle={(value) => toggleMemberAllergy(member.id, value)}
+                              activeClass="bg-red-600 border-red-600 text-white"
+                              placeholder="Cerca o aggiungi un'allergia"
+                            />
                           </div>
                         </div>
                       )}
 
                       {memberTab === 'meals' && (
                         <div className="space-y-5">
+                          <div className="relative">
+                            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                            <input
+                              type="search"
+                              value={mealSearch}
+                              onChange={(e) => setMealSearch(e.target.value)}
+                              placeholder="Cerca un piatto"
+                              className="w-full pl-10 pr-3 h-12 bg-white border border-slate-200 rounded-2xl text-base focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                            />
+                          </div>
                           {([
                             { field: 'likedMeals', title: 'Piatti che ama', onClass: 'bg-emerald-600 border-emerald-600 text-white', blockedField: 'dislikedMeals' },
                             { field: 'dislikedMeals', title: 'Piatti da evitare', onClass: 'bg-slate-800 border-slate-800 text-white', blockedField: null },
@@ -494,7 +566,10 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
                             <div key={group.field}>
                               <p className="text-sm font-semibold text-slate-800 mb-2">{group.title}</p>
                               <div className="max-h-48 overflow-y-auto p-2.5 bg-white border border-slate-200 rounded-2xl flex flex-wrap gap-2">
-                                {allRecipes.map(recipe => {
+                                {mealResults.length === 0 && (
+                                  <p className="text-sm text-slate-500 px-1 py-1">Nessun piatto con questo nome.</p>
+                                )}
+                                {mealResults.map(recipe => {
                                   const on = (member[group.field] || []).includes(recipe.id);
                                   const blocked = group.blockedField ? (member[group.blockedField] || []).includes(recipe.id) : false;
                                   return (
@@ -530,7 +605,9 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
       <div className="bg-white rounded-3xl border border-slate-200 p-5 space-y-5">
         <div>
           <h3 className="text-xl font-semibold text-slate-900">Regole per tutti</h3>
-          <p className="text-sm text-slate-500 mt-1">Valgono per ogni persona a tavola e per ogni menù.</p>
+          <p className="text-sm text-slate-500 mt-1">
+            Valgono per ogni persona a tavola e per ogni menù. Una regola solo per una persona? Aprila dalla sua scheda, in «Dieta».
+          </p>
         </div>
 
         <div>
