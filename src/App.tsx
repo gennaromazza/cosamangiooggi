@@ -46,7 +46,7 @@ import UpdateBanner from './components/UpdateBanner';
 import PWAInstallPrompt from './components/PWAInstallPrompt';
 import { auth, db, functions } from './lib/firebase';
 import { httpsCallable } from 'firebase/functions';
-import { onAuthStateChanged, signInWithPopup, signInWithCredential, GoogleAuthProvider, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
+import { onAuthStateChanged, signInWithPopup, signInWithCredential, GoogleAuthProvider, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, sendPasswordResetEmail } from 'firebase/auth';
 import { doc, onSnapshot, collection } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from './lib/firebaseUtils';
 import { UserProfile } from './types';
@@ -61,6 +61,7 @@ export default function App() {
   const [loginError, setLoginError] = useState<string | null>(null);
   // Motivo tecnico dell'ultimo errore di accesso: serve a capire cosa non va (es. impronta non registrata)
   const [loginDetail, setLoginDetail] = useState<string | null>(null);
+  const [loginNotice, setLoginNotice] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [voiceSearchQuery, setVoiceSearchQuery] = useState('');
   const [voiceIsListening, setVoiceIsListening] = useState(false);
@@ -305,6 +306,7 @@ export default function App() {
 
     setIsLoggingIn(true);
     setLoginError(null);
+    setLoginNotice(null);
 
     try {
       if (loginMethod === 'signin') {
@@ -325,7 +327,7 @@ export default function App() {
         error.code === 'auth/wrong-password' || 
         error.code === 'auth/user-not-found'
       ) {
-        message = "Credenziali non valide. Riprova o registrati.";
+        message = "Email o password non corrette. Riprova, tocca «Password dimenticata?» oppure registrati.";
       } else if (error.code === 'auth/email-already-in-use') {
         message = "Questa email è già registrata. Effettua l'accesso.";
       } else if (error.code === 'auth/weak-password') {
@@ -336,6 +338,34 @@ export default function App() {
         message = "L'accesso con email non è ancora attivo. Usa «Accedi con Google» oppure riprova più tardi.";
       }
       setLoginError(message);
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    const email = emailInput.trim();
+    setLoginNotice(null);
+    setLoginDetail(null);
+    if (!email) {
+      setLoginError("Scrivi qui sopra la tua email, poi tocca di nuovo «Password dimenticata?».");
+      return;
+    }
+    setLoginError(null);
+    setIsLoggingIn(true);
+    try {
+      auth.languageCode = 'it';
+      await sendPasswordResetEmail(auth, email);
+      setLoginNotice(`Se «${email}» è registrata, ti abbiamo scritto un link per scegliere una nuova password. Controlla anche la posta indesiderata.`);
+    } catch (error: any) {
+      if (error.code === 'auth/invalid-email') {
+        setLoginError("Indirizzo email non valido.");
+      } else if (error.code === 'auth/too-many-requests') {
+        setLoginError("Troppi tentativi. Aspetta qualche minuto e riprova.");
+      } else {
+        // Per non rivelare quali email esistono, anche 'utente non trovato' mostra lo stesso messaggio.
+        setLoginNotice(`Se «${email}» è registrata, ti abbiamo scritto un link per scegliere una nuova password. Controlla anche la posta indesiderata.`);
+      }
     } finally {
       setIsLoggingIn(false);
     }
@@ -462,6 +492,7 @@ export default function App() {
               onClick={() => {
                 setLoginMethod('signin');
                 setLoginError(null);
+                setLoginNotice(null);
               }}
               className={`flex-1 pb-3 text-sm font-bold border-b-2 transition-all ${
                 loginMethod === 'signin'
@@ -475,6 +506,7 @@ export default function App() {
               onClick={() => {
                 setLoginMethod('signup');
                 setLoginError(null);
+                setLoginNotice(null);
               }}
               className={`flex-1 pb-3 text-sm font-bold border-b-2 transition-all ${
                 loginMethod === 'signup'
@@ -485,6 +517,12 @@ export default function App() {
               Registrati
             </button>
           </div>
+
+          {loginNotice && (
+            <div role="status" className="mb-4 p-4 bg-emerald-50 text-emerald-900 rounded-2xl border border-emerald-200 text-sm leading-relaxed">
+              {loginNotice}
+            </div>
+          )}
 
           {loginError && (
             <div role="alert" className="mb-4 p-4 bg-amber-50 text-amber-900 rounded-2xl border border-amber-200 flex items-start gap-2.5">
@@ -542,6 +580,16 @@ export default function App() {
                 required
                 minLength={6}
               />
+              {loginMethod === 'signin' && (
+                <button
+                  type="button"
+                  onClick={handleForgotPassword}
+                  disabled={isLoggingIn}
+                  className="mt-2 text-xs font-semibold text-indigo-600 hover:text-indigo-700 underline underline-offset-2 cursor-pointer disabled:opacity-60"
+                >
+                  Password dimenticata?
+                </button>
+              )}
             </div>
 
             <button
