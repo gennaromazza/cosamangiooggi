@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   ShieldAlert,
   Users,
@@ -11,7 +11,7 @@ import {
   Heart,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { addDoc, collection, deleteDoc, doc, updateDoc } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, doc, getDocs, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import Logo from './Logo';
 import { DietaryRestriction, FamilyMember, UserProfile } from '../types';
@@ -54,7 +54,10 @@ export default function WelcomeTour({ user, profile, onNavigate, onProfileUpdate
   const isLocal = isDemo || !!user?.uid?.startsWith('local-');
   // L'account demo ha dati d'esempio già pronti: gli mostriamo solo la visita guidata
   const interactive = !isDemo;
-  const firstName = (profile?.name || user?.displayName || '').trim().split(' ')[0];
+  // Il nome mostrato è quello della persona; 'Nuova Famiglia spesa' è solo il segnaposto del profilo
+  const profileName = profile?.name && profile.name !== 'Nuova Famiglia spesa' ? profile.name : '';
+  const firstName = (user?.displayName || profileName || '').trim().split(' ')[0];
+  const seededFor = useRef<string | null>(null);
 
   useEffect(() => {
     if (!user || !profile) return;
@@ -88,6 +91,45 @@ export default function WelcomeTour({ user, profile, onNavigate, onProfileUpdate
     window.addEventListener('open-welcome-tour', open);
     return () => window.removeEventListener('open-welcome-tour', open);
   }, []);
+
+  // All'apertura: mostra chi c'è già a tavola e, se non c'è nessuno, aggiunge la persona che si è appena registrata
+  useEffect(() => {
+    if (!isOpen || !interactive || !user || seededFor.current === user.uid) return;
+    seededFor.current = user.uid;
+    let cancelled = false;
+    (async () => {
+      try {
+        let existing: { id: string; name: string }[];
+        if (isLocal) {
+          existing = readLocal<FamilyMember[]>(`members_${user.uid}`, []).map((m) => ({ id: m.id, name: m.name }));
+        } else {
+          const snap = await getDocs(collection(db, `users/${user.uid}/familyMembers`));
+          existing = snap.docs.map((d) => ({ id: d.id, name: String(d.data().name || '') }));
+        }
+        if (cancelled) return;
+        if (existing.length > 0 || !firstName) {
+          setMembers(existing);
+          return;
+        }
+        const blank = { likedIngredients: [], dislikedIngredients: [], likedMeals: [], dislikedMeals: [] };
+        if (isLocal) {
+          const created: FamilyMember = { id: Date.now().toString(), name: firstName, ...blank };
+          localStorage.setItem(`members_${user.uid}`, JSON.stringify([created]));
+          setMembers([{ id: created.id, name: firstName }]);
+        } else {
+          const ref = await addDoc(collection(db, `users/${user.uid}/familyMembers`), { name: firstName, ...blank });
+          if (!cancelled) setMembers([{ id: ref.id, name: firstName }]);
+        }
+      } catch (e) {
+        console.error('Impossibile caricare le persone a tavola:', e);
+        seededFor.current = null;
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, interactive, user?.uid]);
 
   // Impedisce lo scroll della pagina sotto la guida
   useEffect(() => {
@@ -262,7 +304,9 @@ export default function WelcomeTour({ user, profile, onNavigate, onProfileUpdate
       </div>
       <h2 className="text-3xl font-semibold text-slate-900 mb-2">Chi siede a tavola?</h2>
       <p className="text-slate-600 leading-relaxed mb-6">
-        Aggiungi le persone per cui cucini: il menù terrà conto dei loro gusti.
+        {members.length > 0 && firstName && members.some((m) => m.name === firstName)
+          ? `Ho già aggiunto te, ${firstName}. Aggiungi anche gli altri: il menù terrà conto dei gusti di tutti.`
+          : 'Aggiungi le persone per cui cucini: il menù terrà conto dei loro gusti.'}
       </p>
       <div className="flex gap-2">
         <input

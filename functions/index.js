@@ -217,7 +217,42 @@ exports.syncAdminClaim = onCall({ region: REGION }, async (request) => {
   return { admin: shouldBeAdmin };
 });
 
-// Eliminazione di un account (solo amministratori): abbonamento, dati e accesso
+// Eliminazione di un account: abbonamento, dati e accesso
+async function eraseAccount(targetUid, actor) {
+  const snap = await userRef(targetUid).get();
+  const data = snap.exists ? snap.data() : {};
+
+  // Prima l'abbonamento: se non si riesce a chiudere, non si elimina nulla (nessun addebito orfano)
+  if (data.stripeSubscriptionId) {
+    const stripe = new Stripe(STRIPE_SECRET_KEY.value());
+    try {
+      await stripe.subscriptions.cancel(data.stripeSubscriptionId);
+    } catch (err) {
+      if (!(err && err.code === 'resource_missing')) {
+        console.error('Chiusura abbonamento non riuscita', err);
+        throw new HttpsError('internal', 'Non riesco a chiudere l’abbonamento su Stripe: account non eliminato.');
+      }
+    }
+  }
+
+  await db.recursiveDelete(userRef(targetUid));
+  try {
+    await getAuth().deleteUser(targetUid);
+  } catch (err) {
+    if (!(err && err.code === 'auth/user-not-found')) throw new HttpsError('internal', 'Dati eliminati ma non l’accesso: riprova.');
+  }
+
+  await db.collection('admin_audit_logs').add({
+    adminId: actor.uid,
+    adminEmail: actor.email || 'unknown',
+    action: actor.self ? 'DELETE_OWN_ACCOUNT' : 'DELETE_ACCOUNT',
+    targetUserId: targetUid,
+    targetUserEmail: data.email || '',
+    timestamp: FieldValue.serverTimestamp(),
+    details: data.stripeSubscriptionId ? 'Account eliminato e abbonamento chiuso' : 'Account eliminato',
+  });
+}
+
 exports.deleteUserAccount = onCall(
   { region: REGION, secrets: [STRIPE_SECRET_KEY], timeoutSeconds: 120 },
   async (request) => {
@@ -226,39 +261,20 @@ exports.deleteUserAccount = onCall(
     const targetUid = request.data && request.data.uid;
     if (typeof targetUid !== 'string' || !targetUid) throw new HttpsError('invalid-argument', 'Utente non valido.');
     if (targetUid === adminUid) throw new HttpsError('failed-precondition', 'Non puoi eliminare il tuo account da qui.');
+    await eraseAccount(targetUid, { uid: adminUid, email: request.auth.token.email, self: false });
+    return { ok: true };
+  }
+);
 
-    const snap = await userRef(targetUid).get();
-    const data = snap.exists ? snap.data() : {};
-
-    // Prima l'abbonamento: se non si riesce a chiudere, non si elimina nulla (nessun addebito orfano)
-    if (data.stripeSubscriptionId) {
-      const stripe = new Stripe(STRIPE_SECRET_KEY.value());
-      try {
-        await stripe.subscriptions.cancel(data.stripeSubscriptionId);
-      } catch (err) {
-        if (!(err && err.code === 'resource_missing')) {
-          console.error('Chiusura abbonamento non riuscita', err);
-          throw new HttpsError('internal', 'Non riesco a chiudere l’abbonamento su Stripe: account non eliminato.');
-        }
-      }
+// Ognuno può eliminare il proprio account (dalla schermata "Il mio account")
+exports.deleteMyAccount = onCall(
+  { region: REGION, secrets: [STRIPE_SECRET_KEY], timeoutSeconds: 120 },
+  async (request) => {
+    const uid = requireAuth(request);
+    if (request.auth.token.admin === true) {
+      throw new HttpsError('failed-precondition', 'Un amministratore non può eliminare il proprio account da qui.');
     }
-
-    await db.recursiveDelete(userRef(targetUid));
-    try {
-      await getAuth().deleteUser(targetUid);
-    } catch (err) {
-      if (!(err && err.code === 'auth/user-not-found')) throw new HttpsError('internal', 'Dati eliminati ma non l’accesso: riprova.');
-    }
-
-    await db.collection('admin_audit_logs').add({
-      adminId: adminUid,
-      adminEmail: request.auth.token.email || 'unknown',
-      action: 'DELETE_ACCOUNT',
-      targetUserId: targetUid,
-      targetUserEmail: data.email || '',
-      timestamp: FieldValue.serverTimestamp(),
-      details: data.stripeSubscriptionId ? 'Account eliminato e abbonamento chiuso' : 'Account eliminato',
-    });
+    await eraseAccount(uid, { uid, email: request.auth.token.email, self: true });
     return { ok: true };
   }
 );

@@ -67,6 +67,7 @@ const ACTION_LABELS: Record<string, string> = {
   PASSWORD_RESET: 'Email di reset inviata',
   GIFT_PLAN: 'Piano regalato',
   DELETE_ACCOUNT: 'Account eliminato',
+  DELETE_OWN_ACCOUNT: 'Account eliminato dall’utente',
 };
 
 const currentMonth = () => new Date().toISOString().slice(0, 7);
