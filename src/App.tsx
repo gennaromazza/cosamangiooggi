@@ -22,6 +22,7 @@ import {
   Sun
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import Logo from './components/Logo';
 import MealPlanner from './components/MealPlanner';
 import VacationPlanner from './components/VacationPlanner';
 import Pantry from './components/Pantry';
@@ -417,9 +418,7 @@ export default function App() {
       <div className="min-h-dvh bg-slate-50 flex items-center justify-center p-4">
         <div className="max-w-md w-full bg-white rounded-3xl shadow-xl p-8 border border-slate-100">
           <div className="text-center">
-            <div className="bg-indigo-600 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg rotate-3 overflow-hidden">
-               <Utensils className="text-white w-8 h-8" />
-            </div>
+            <Logo className="w-20 h-20 mx-auto mb-6 drop-shadow-lg" />
             <h1 className="text-4xl font-semibold text-slate-900 mb-2">Che cucino oggi?</h1>
             <p className="text-slate-500 mb-6 text-sm leading-relaxed">
               Il menù della settimana, pensato per la tua famiglia. Tu scegli cosa mangiare, a spesa e dispensa pensiamo noi.
@@ -629,9 +628,7 @@ export default function App() {
       <header className="bg-white border-b border-slate-200 sticky top-0 z-30 pt-[env(safe-area-inset-top)]">
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
-            <div className="bg-indigo-600 p-2 rounded-lg shrink-0">
-              <Utensils className="text-white w-6 h-6" />
-            </div>
+            <Logo className="w-10 h-10 shrink-0" />
             <h1 className="text-lg sm:text-xl font-bold whitespace-nowrap bg-gradient-to-r from-indigo-600 to-violet-600 bg-clip-text text-transparent">
               Che cucino oggi?
             </h1>
