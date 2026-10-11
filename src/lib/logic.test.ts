@@ -1,6 +1,8 @@
 import { getSupermarketDepartment } from './departments';
 import { inferDishInfo, parseIngredientText } from './dishInference';
 import { fitsMember, membersNeedingAlternative, pickAlternatives, planMeals } from './memberAlternatives';
+import { hasAnyPreference, membersWithoutPreferences, pantryItemFor, PANTRY_STARTERS } from './onboarding';
+import { findPlanIssues, issuesKey, rebuildAffectedMeals } from './planCompatibility';
 import type { FamilyMember, WeeklyPlan } from '../types';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -295,4 +297,116 @@ test('pagine guida: contenuti veri, titoli unici e link interni validi', () => {
   }
   const sitemap = fillPlaceholders(readFileSync('landing/sitemap.xml', 'utf8'), { siteUrl: 'https://esempio.web.app', appUrl: 'https://app.web.app' });
   for (const slug of slugs) assert.ok(sitemap.includes(`https://esempio.web.app/${slug}</loc>`), `sitemap senza ${slug}`);
+});
+
+
+// ---- Guida iniziale e modifiche successive ----------------------------------------
+
+const persona = (id: string, extra: Partial<FamilyMember> = {}): FamilyMember =>
+  ({ id, name: id, likedIngredients: [], dislikedIngredients: [], likedMeals: [], dislikedMeals: [], ...extra } as FamilyMember);
+
+test('guida iniziale: chi non ha indicato nulla viene segnalato, chi ha indicato qualcosa no', () => {
+  const vuota = persona('anna');
+  const conGusti = persona('luca', { dislikedIngredients: ['Cipolla'] });
+  const conAllergia = persona('sara', { allergies: ['Arachidi'] });
+  const conDieta = persona('gino', { dietaryRestrictions: ['vegan'] });
+  assert.equal(hasAnyPreference(vuota), false);
+  for (const m of [conGusti, conAllergia, conDieta]) assert.equal(hasAnyPreference(m), true);
+  assert.deepEqual(membersWithoutPreferences([vuota, conGusti, conAllergia, conDieta]).map((m) => m.id), ['anna']);
+});
+
+test('guida iniziale: dispensa di partenza con quantità sensate e nomi noti', () => {
+  assert.equal(new Set(PANTRY_STARTERS.map((p) => p.name.toLowerCase())).size, PANTRY_STARTERS.length);
+  assert.deepEqual(pantryItemFor('pasta'), { name: 'Pasta', quantity: 500, unit: 'g', category: 'Pasta e Cereali' });
+  assert.deepEqual(pantryItemFor('Zenzero'), { name: 'Zenzero', quantity: 1, unit: 'pz', category: 'Altro' });
+});
+
+const carne = recipe('carne', []);
+const veg1 = recipe('veg1', ['vegan', 'gluten-free']);
+const veg2 = recipe('veg2', ['vegan', 'gluten-free']);
+const pesce = recipe('pesce', ['gluten-free']);
+const tutte = [carne, veg1, veg2, pesce];
+const settimana = (lunch: string[], lunchAlt?: Record<string, string>): WeeklyPlan => ({
+  id: 'current',
+  startDate: '2026-01-01',
+  days: { Monday: { lunchIds: lunch, dinnerIds: [], ...(lunchAlt ? { lunchAlt } : {}) } },
+});
+
+test('menù già creato: nessun avviso se le regole non sono cambiate', () => {
+  const anna = persona('anna', { dietaryRestrictions: ['vegan'] });
+  const plan = settimana(['carne'], { anna: 'veg1' });
+  assert.deepEqual(findPlanIssues({ plan, recipes: tutte, rules: { dietaryRestrictions: [], excludedIngredients: [] }, members: [anna] }), []);
+});
+
+test('menù già creato: una dieta aggiunta dopo senza alternativa viene segnalata', () => {
+  const anna = persona('anna', { dietaryRestrictions: ['vegan'] });
+  const plan = settimana(['carne']);
+  const issues = findPlanIssues({ plan, recipes: tutte, rules: null, members: [anna] });
+  assert.equal(issues.length, 1);
+  assert.deepEqual([issues[0].kind, issues[0].memberId, issues[0].slot], ['member', 'anna', 'lunch']);
+});
+
+test('menù già creato: una regola di tutta la famiglia violata viene segnalata, i gusti no', () => {
+  const plan = settimana(['carne']);
+  const celiaci = { dietaryRestrictions: ['gluten-free' as const], excludedIngredients: [] };
+  const issues = findPlanIssues({ plan, recipes: tutte, rules: celiaci, members: [] });
+  assert.deepEqual(issues.map((i) => [i.kind, i.recipeId]), [['family', 'carne']]);
+  // piatto non gradito: è una preferenza, il menù resta valido
+  const luca = persona('luca', { dislikedMeals: ['carne'] });
+  assert.deepEqual(findPlanIssues({ plan, recipes: tutte, rules: null, members: [luca] }), []);
+});
+
+test('menù già creato: le alternative di chi non c\'è più si segnalano e si tolgono', () => {
+  const plan = settimana(['veg1'], { fantasma: 'veg2' });
+  const issues = findPlanIssues({ plan, recipes: tutte, rules: null, members: [persona('anna')] });
+  assert.deepEqual(issues.map((i) => i.kind), ['orphan']);
+  const fatto = rebuildAffectedMeals({ plan, issues, recipes: tutte, pool: tutte, members: [persona('anna')], random: () => 0 });
+  assert.equal(fatto.plan.days.Monday.lunchAlt, undefined);
+  assert.deepEqual(findPlanIssues({ plan: fatto.plan, recipes: tutte, rules: null, members: [persona('anna')] }), []);
+});
+
+test('ricostruzione: sostituisce solo i piatti non più adatti e rifà le alternative', () => {
+  const celiaci = { dietaryRestrictions: ['gluten-free' as const], excludedIngredients: [] };
+  const anna = persona('anna', { dietaryRestrictions: ['vegan'] });
+  const plan: WeeklyPlan = {
+    id: 'current',
+    startDate: '2026-01-01',
+    days: {
+      Monday: { lunchIds: ['carne'], dinnerIds: ['veg1'] },
+      Tuesday: { lunchIds: ['pesce'], dinnerIds: [] },
+    },
+  };
+  const issues = findPlanIssues({ plan, recipes: tutte, rules: celiaci, members: [anna] });
+  const pool = tutte.filter((r) => (r.tags || []).includes('gluten-free'));
+  const out = rebuildAffectedMeals({ plan, issues, recipes: tutte, pool, members: [anna], random: () => 0 });
+  // il pranzo del lunedì cambia piatto, il resto della settimana resta com'era
+  assert.notEqual(out.plan.days.Monday.lunchIds[0], 'carne');
+  assert.deepEqual(out.plan.days.Monday.dinnerIds, ['veg1']);
+  // martedì il piatto resta lo stesso ma Anna, che era senza alternativa, ora ne ha una vegana
+  assert.deepEqual(out.plan.days.Tuesday.lunchIds, ['pesce']);
+  assert.deepEqual(out.plan.days.Tuesday.lunchAlt, { anna: 'veg1' });
+  assert.equal(out.replaced, 1);
+  // il piano originale non viene modificato e dopo la ricostruzione non restano problemi
+  assert.deepEqual(plan.days.Monday.lunchIds, ['carne']);
+  assert.deepEqual(findPlanIssues({ plan: out.plan, recipes: tutte, rules: celiaci, members: [anna] }), []);
+});
+
+test('ricostruzione: se non c\'è un piatto adatto lo dice invece di inventare', () => {
+  const solo = [carne];
+  const celiaci = { dietaryRestrictions: ['vegan' as const], excludedIngredients: [] };
+  const plan = settimana(['carne']);
+  const issues = findPlanIssues({ plan, recipes: solo, rules: celiaci, members: [] });
+  const out = rebuildAffectedMeals({ plan, issues, recipes: solo, pool: [], members: [], random: () => 0 });
+  assert.equal(out.replaced, 0);
+  assert.equal(findPlanIssues({ plan: out.plan, recipes: solo, rules: celiaci, members: [] }).length, 1);
+});
+
+test('"Lascia così": l\'impronta cambia solo se cambiano i problemi', () => {
+  const anna = persona('anna', { dietaryRestrictions: ['vegan'] });
+  const plan = settimana(['carne']);
+  const a = issuesKey(findPlanIssues({ plan, recipes: tutte, rules: null, members: [anna] }));
+  const b = issuesKey(findPlanIssues({ plan, recipes: tutte, rules: null, members: [anna] }));
+  const c = issuesKey(findPlanIssues({ plan, recipes: tutte, rules: { dietaryRestrictions: ['gluten-free'], excludedIngredients: [] }, members: [anna] }));
+  assert.equal(a, b);
+  assert.notEqual(a, c);
 });

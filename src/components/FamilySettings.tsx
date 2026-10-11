@@ -7,7 +7,7 @@ import { Browser } from '@capacitor/browser';
 import { collection, query, onSnapshot, addDoc, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firebaseUtils';
 import { FamilyMember, DietaryRestriction, UserProfile, Recipe } from '../types';
-import { Plus, Trash2, ChevronDown, X, Search } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, X, Search, Pencil } from 'lucide-react';
 import { INITIAL_RECIPES } from '../data/recipes';
 import IngredientPicker from './IngredientPicker';
 import QuickDishModal from './QuickDishModal';
@@ -20,9 +20,11 @@ interface Props {
   onNavigateToPantry?: () => void;
   onNavigateToPlanner?: () => void;
   onNavigateToBusiness?: () => void;
+  /** Mostra solo le preferenze di questa persona (usato dalla guida iniziale) */
+  onlyMemberId?: string;
 }
 
-export default function FamilySettings({ userId, profile: propProfile, onProfileUpdate, onNavigateToPantry, onNavigateToPlanner, onNavigateToBusiness }: Props) {
+export default function FamilySettings({ userId, profile: propProfile, onProfileUpdate, onNavigateToPantry, onNavigateToPlanner, onNavigateToBusiness, onlyMemberId }: Props) {
   const [members, setMembers] = useState<FamilyMember[]>([]);
   const [profile, setProfile] = useState<UserProfile | null>(propProfile || null);
 
@@ -36,6 +38,8 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
   const [newMemberName, setNewMemberName] = useState('');
   const [showLimitWarning, setShowLimitWarning] = useState(false);
   const [openMemberId, setOpenMemberId] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
   const [memberTab, setMemberTab] = useState<'like' | 'dislike' | 'meals' | 'diet'>('dislike');
 
   const allRecipes = [...INITIAL_RECIPES, ...customRecipes];
@@ -327,6 +331,16 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
     }
   };
 
+  // Cambia il nome di una persona (anche quella riconosciuta dal login)
+  const renameMember = async (id: string) => {
+    const name = renameValue.trim();
+    setRenamingId(null);
+    if (!name) return;
+    const current = members.find(m => m.id === id);
+    if (!current || current.name === name) return;
+    await patchMember(id, { name });
+  };
+
   const toggleMemberDiet = (id: string, diet: DietaryRestriction) => {
     const member = members.find(m => m.id === id);
     if (!member) return;
@@ -399,98 +413,8 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
     { id: 'lactose-free', emoji: '🥛', label: 'Solo senza lattosio' },
   ] as const;
 
-  return (
-    <div className="space-y-5">
-      <div>
-        <h2 className="text-3xl font-semibold text-slate-900">La famiglia</h2>
-        <p className="text-slate-600 mt-1">Chi mangia a tavola e cosa evitare.</p>
-      </div>
-
-      {/* A tavola */}
-      <div className="bg-white rounded-3xl border border-slate-200 p-5 space-y-4">
-        <div className="flex items-baseline justify-between gap-3">
-          <h3 className="text-xl font-semibold text-slate-900">A tavola</h3>
-          <span className="text-sm text-slate-500">
-            {members.length}
-            {Number.isFinite(limitsFor(profile?.plan).maxMembers) ? ` di ${limitsFor(profile?.plan).maxMembers}` : ''}
-          </span>
-        </div>
-
-        <div className="flex gap-2">
-          <input
-            type="text"
-            placeholder="Aggiungi una persona (es. Luca)"
-            value={newMemberName}
-            onChange={(e) => {
-              setNewMemberName(e.target.value);
-              if (showLimitWarning) setShowLimitWarning(false);
-            }}
-            onKeyDown={(e) => e.key === 'Enter' && addMember()}
-            className="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-2xl px-4 h-12 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          />
-          <button
-            onClick={addMember}
-            aria-label="Aggiungi persona"
-            className="shrink-0 h-12 w-12 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl flex items-center justify-center"
-          >
-            <Plus className="w-5 h-5" />
-          </button>
-        </div>
-
-        {showLimitWarning && (
-          <p className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-2xl p-3">
-            Il piano gratuito comprende fino a <strong>{limitsFor(profile?.plan).maxMembers} persone</strong>. Con il piano Famiglia non hai limiti.
-            {onNavigateToBusiness && (
-              <button onClick={onNavigateToBusiness} className="ml-1 font-bold underline underline-offset-4">Scopri i piani</button>
-            )}
-          </p>
-        )}
-
-        {members.length === 0 ? (
-          <p className="text-slate-500 py-4 text-center">Aggiungi chi mangia con te: il menù terrà conto dei suoi gusti.</p>
-        ) : (
-          <div className="divide-y divide-slate-100 border border-slate-100 rounded-2xl overflow-hidden">
-            {members.map(member => {
-              const open = openMemberId === member.id;
-              const dislikes = (member.dislikedIngredients?.length || 0) + (member.dislikedMeals?.length || 0);
-              const likes = (member.likedIngredients?.length || 0) + (member.likedMeals?.length || 0);
-              return (
-                <div key={member.id}>
-                  <div className="flex items-center">
-                    <button
-                      onClick={() => setOpenMemberId(open ? null : member.id)}
-                      aria-expanded={open}
-                      className="flex-1 min-w-0 flex items-center gap-3 px-4 py-4 text-left active:bg-slate-50"
-                    >
-                      <span className="w-11 h-11 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center shrink-0">
-                        {member.name.charAt(0).toUpperCase()}
-                      </span>
-                      <span className="flex-1 min-w-0">
-                        <span className="block font-semibold text-slate-900 truncate">{member.name}</span>
-                        <span className="block text-sm text-slate-500">
-                          {likes + dislikes === 0 ? 'Nessun gusto indicato' : `${likes} piace · ${dislikes} da evitare`}
-                        </span>
-                        {hasPersonalRules(member) && (
-                          <span className="block text-sm font-semibold text-indigo-700">
-                            {[
-                              ...(member.dietaryRestrictions || []).map(d => ({ vegan: 'Vegano', 'gluten-free': 'Senza glutine', 'lactose-free': 'Senza lattosio' }[d])),
-                              ...(member.allergies || []).map(a => `senza ${a.toLowerCase()}`),
-                            ].filter(Boolean).join(' · ')}
-                          </span>
-                        )}
-                      </span>
-                      <ChevronDown className={`w-5 h-5 text-slate-400 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
-                    </button>
-                    <button
-                      onClick={() => deleteMember(member.id)}
-                      aria-label={`Rimuovi ${member.name}`}
-                      className="shrink-0 w-11 h-11 mr-2 rounded-full flex items-center justify-center text-slate-300 hover:text-red-500"
-                    >
-                      <Trash2 className="w-5 h-5" />
-                    </button>
-                  </div>
-
-                  {open && (
+  // Le schede di una persona (Non mangia / Ama / Piatti / Dieta): usate qui e nella guida iniziale
+  const renderMemberPanel = (member: FamilyMember) => (
                     <div className="px-4 pb-5 space-y-4 bg-slate-50/60">
                       <div className="flex bg-slate-100 p-1 rounded-2xl" role="group" aria-label="Gusti di questa persona">
                         {([
@@ -631,7 +555,150 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
                         </div>
                       )}
                     </div>
-                  )}
+  );
+
+  if (onlyMemberId) {
+    const person = members.find(m => m.id === onlyMemberId);
+    if (!person) return null;
+    return (
+      <div>
+        {renderMemberPanel(person)}
+        {dishFor && (
+          <QuickDishModal
+            initialTitle={mealSearch.trim()}
+            offlineOnly={userId === 'demo-family-user' || userId.startsWith('local-')}
+            aiLeft={dishSuggestionsLeft(profile?.plan, profile?.dishUsage)}
+            isPro={normalizePlan(profile?.plan) === 'pro'}
+            onUpgrade={onNavigateToBusiness ? () => { setDishFor(null); onNavigateToBusiness(); } : undefined}
+            onSave={(recipe) => saveQuickDish(dishFor, recipe)}
+            onClose={() => setDishFor(null)}
+          />
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-3xl font-semibold text-slate-900">La famiglia</h2>
+        <p className="text-slate-600 mt-1">Chi mangia a tavola e cosa evitare.</p>
+      </div>
+
+      {/* A tavola */}
+      <div className="bg-white rounded-3xl border border-slate-200 p-5 space-y-4">
+        <div className="flex items-baseline justify-between gap-3">
+          <h3 className="text-xl font-semibold text-slate-900">A tavola</h3>
+          <span className="text-sm text-slate-500">
+            {members.length}
+            {Number.isFinite(limitsFor(profile?.plan).maxMembers) ? ` di ${limitsFor(profile?.plan).maxMembers}` : ''}
+          </span>
+        </div>
+
+        <div className="flex gap-2">
+          <input
+            type="text"
+            placeholder="Aggiungi una persona (es. Luca)"
+            value={newMemberName}
+            onChange={(e) => {
+              setNewMemberName(e.target.value);
+              if (showLimitWarning) setShowLimitWarning(false);
+            }}
+            onKeyDown={(e) => e.key === 'Enter' && addMember()}
+            className="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-2xl px-4 h-12 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+          <button
+            onClick={addMember}
+            aria-label="Aggiungi persona"
+            className="shrink-0 h-12 w-12 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl flex items-center justify-center"
+          >
+            <Plus className="w-5 h-5" />
+          </button>
+        </div>
+
+        {showLimitWarning && (
+          <p className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-2xl p-3">
+            Il piano gratuito comprende fino a <strong>{limitsFor(profile?.plan).maxMembers} persone</strong>. Con il piano Famiglia non hai limiti.
+            {onNavigateToBusiness && (
+              <button onClick={onNavigateToBusiness} className="ml-1 font-bold underline underline-offset-4">Scopri i piani</button>
+            )}
+          </p>
+        )}
+
+        {members.length === 0 ? (
+          <p className="text-slate-500 py-4 text-center">Aggiungi chi mangia con te: il menù terrà conto dei suoi gusti.</p>
+        ) : (
+          <div className="divide-y divide-slate-100 border border-slate-100 rounded-2xl overflow-hidden">
+            {members.map(member => {
+              const open = openMemberId === member.id;
+              const dislikes = (member.dislikedIngredients?.length || 0) + (member.dislikedMeals?.length || 0);
+              const likes = (member.likedIngredients?.length || 0) + (member.likedMeals?.length || 0);
+              return (
+                <div key={member.id}>
+                  <div className="flex items-center">
+                    {renamingId === member.id ? (
+                      <form
+                        onSubmit={(e) => { e.preventDefault(); renameMember(member.id); }}
+                        className="flex-1 min-w-0 flex items-center gap-2 px-4 py-3"
+                      >
+                        <input
+                          autoFocus
+                          value={renameValue}
+                          onChange={(e) => setRenameValue(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Escape' && setRenamingId(null)}
+                          aria-label={`Nome di ${member.name}`}
+                          maxLength={40}
+                          className="flex-1 min-w-0 h-11 bg-white border border-slate-200 rounded-xl px-3 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                        <button type="submit" aria-label="Salva il nome" className="shrink-0 h-11 px-4 rounded-xl bg-indigo-600 text-white font-bold">
+                          Salva
+                        </button>
+                      </form>
+                    ) : (
+                    <button
+                      onClick={() => setOpenMemberId(open ? null : member.id)}
+                      aria-expanded={open}
+                      className="flex-1 min-w-0 flex items-center gap-3 px-4 py-4 text-left active:bg-slate-50"
+                    >
+                      <span className="w-11 h-11 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center shrink-0">
+                        {member.name.charAt(0).toUpperCase()}
+                      </span>
+                      <span className="flex-1 min-w-0">
+                        <span className="block font-semibold text-slate-900 truncate">{member.name}</span>
+                        <span className="block text-sm text-slate-500">
+                          {likes + dislikes === 0 ? 'Nessun gusto indicato' : `${likes} piace · ${dislikes} da evitare`}
+                        </span>
+                        {hasPersonalRules(member) && (
+                          <span className="block text-sm font-semibold text-indigo-700">
+                            {[
+                              ...(member.dietaryRestrictions || []).map(d => ({ vegan: 'Vegano', 'gluten-free': 'Senza glutine', 'lactose-free': 'Senza lattosio' }[d])),
+                              ...(member.allergies || []).map(a => `senza ${a.toLowerCase()}`),
+                            ].filter(Boolean).join(' · ')}
+                          </span>
+                        )}
+                      </span>
+                      <ChevronDown className={`w-5 h-5 text-slate-400 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+                    </button>
+                    )}
+                    {renamingId !== member.id && (
+                      <button
+                        onClick={() => { setRenamingId(member.id); setRenameValue(member.name); }}
+                        aria-label={`Cambia il nome di ${member.name}`}
+                        className="shrink-0 w-11 h-11 rounded-full flex items-center justify-center text-slate-300 hover:text-indigo-600"
+                      >
+                        <Pencil className="w-5 h-5" />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => deleteMember(member.id)}
+                      aria-label={`Rimuovi ${member.name}`}
+                      className="shrink-0 w-11 h-11 mr-2 rounded-full flex items-center justify-center text-slate-300 hover:text-red-500"
+                    >
+                      <Trash2 className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  {open && renderMemberPanel(member)}
                 </div>
               );
             })}

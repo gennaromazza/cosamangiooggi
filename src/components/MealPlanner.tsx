@@ -10,6 +10,7 @@ import { calculateNutrients } from '../lib/nutritionUtils';
 import { Calendar as CalendarIcon, RefreshCcw, Save, Trash2, ChevronLeft, ChevronRight, X, Clock, Gauge, UtensilsCrossed, ChefHat, Info, Tag, Sparkles, Users, Heart, ShoppingCart, Check, AlertTriangle, Package, SlidersHorizontal } from 'lucide-react';
 import { getCurrentSeason, scaleIngredientAmount, getRawIngredientNames } from '../lib/utils';
 import { checkIngredientMatch, isStaple, calculateMissingFromPantry } from '../lib/pantrySync';
+import { findPlanIssues, issuesKey, rebuildAffectedMeals } from '../lib/planCompatibility';
 import { hitsExclusion, satisfiesDiet } from '../lib/dietFilters';
 import TipCard from './TipCard';
 import { motion, AnimatePresence } from 'motion/react';
@@ -1010,6 +1011,69 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
 
   const generateNow = () => generatePlan(true, familyMembers.length === 0);
 
+  // Ricette valide per tutta la famiglia (stagione, dieta e allergie comuni): da qui si scelgono sostituti e alternative
+  const familyPool = () => recipes.filter(r =>
+    (r.season === season || r.season === 'all' || favorites.includes(r.id)) &&
+    satisfiesDiet(r, profile?.dietaryRestrictions || []) &&
+    !hitsExclusion(r, profile?.excludedIngredients || [])
+  );
+
+  // Il menù già creato non cambia da solo: se le regole di adesso non lo rispettano più, lo segnaliamo
+  const planIssues = useMemo(
+    () => findPlanIssues({ plan: currentPlan, recipes, rules: profile, members: familyMembers }),
+    [currentPlan, recipes, profile, familyMembers]
+  );
+  const planIssuesKey = issuesKey(planIssues);
+  const [dismissedIssuesKey, setDismissedIssuesKey] = useState(() => {
+    try {
+      return localStorage.getItem(`plan_issues_dismissed_${userId}`) || '';
+    } catch {
+      return '';
+    }
+  });
+  const [rebuildNotice, setRebuildNotice] = useState<{ text: string; tone: 'ok' | 'warn' } | null>(null);
+  const [isRebuilding, setIsRebuilding] = useState(false);
+  const showIssues = planIssues.length > 0 && planIssuesKey !== dismissedIssuesKey && !isGenerating;
+
+  const dismissIssues = () => {
+    setDismissedIssuesKey(planIssuesKey);
+    try {
+      localStorage.setItem(`plan_issues_dismissed_${userId}`, planIssuesKey);
+    } catch {
+      /* storage non disponibile */
+    }
+  };
+
+  const rebuildAffected = async () => {
+    if (!currentPlan || planIssues.length === 0) return;
+    setIsRebuilding(true);
+    try {
+      const result = rebuildAffectedMeals({ plan: currentPlan, issues: planIssues, recipes, pool: familyPool(), members: familyMembers });
+      await savePlan(result.plan);
+      const left = findPlanIssues({ plan: result.plan, recipes, rules: profile, members: familyMembers }).length;
+      setRebuildNotice(
+        left === 0
+          ? { text: `Fatto: ${result.replaced > 0 ? `${result.replaced} ${result.replaced === 1 ? 'piatto sostituito' : 'piatti sostituiti'} e ` : ''}alternative aggiornate. Il resto della settimana è rimasto com'era.`, tone: 'ok' }
+          : { text: `Ho sistemato quello che si poteva. Per ${left} ${left === 1 ? 'caso' : 'casi'} non ho trovato un piatto adatto: controlla le regole in Famiglia.`, tone: 'warn' }
+      );
+    } finally {
+      setIsRebuilding(false);
+    }
+  };
+
+  const issueSummary = (() => {
+    const familySlots = new Set(planIssues.filter(i => i.kind === 'family').map(i => `${i.day}:${i.slot}`)).size;
+    const names = [...new Set(planIssues.filter(i => i.kind === 'member').map(i => i.memberId))]
+      .map(id => familyMembers.find(m => m.id === id)?.name)
+      .filter(Boolean) as string[];
+    const parts: string[] = [];
+    if (familySlots > 0) parts.push(`${familySlots} ${familySlots === 1 ? 'pasto non rispetta' : 'pasti non rispettano'} più le regole di tutta la famiglia`);
+    if (names.length > 0) parts.push(`manca un piatto adatto per ${names.join(', ')}`);
+    if (planIssues.some(i => i.kind === 'orphan')) parts.push('restano piatti alternativi di persone che non sono più a tavola');
+    return parts.join('; ');
+  })();
+
+
   // Dopo la guida iniziale il primo menù parte da solo: niente schermata vuota da interpretare
   const generateRef = useRef(generateNow);
   generateRef.current = generateNow;
@@ -1082,6 +1146,44 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
           </button>
         </div>
       </div>
+
+      {/* Preferenze cambiate: il menù già creato non si modifica da solo, quindi lo diciamo */}
+      {currentPlan && showIssues && (
+        <div role="alert" className="bg-amber-50 border border-amber-200 rounded-2xl p-4 space-y-3">
+          <p className="font-semibold text-amber-900">Le preferenze sono cambiate: il menù non è più allineato.</p>
+          <p className="text-sm text-amber-900 leading-relaxed">Con le regole di adesso: {issueSummary}.</p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={rebuildAffected}
+              disabled={isRebuilding || isGenerating}
+              className="h-11 px-4 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold disabled:opacity-60"
+            >
+              {isRebuilding ? 'Sistemo…' : 'Sistema solo questi pasti'}
+            </button>
+            <button
+              onClick={generateNow}
+              disabled={isRebuilding || isGenerating}
+              className="h-11 px-4 rounded-xl border border-amber-300 bg-white text-amber-900 font-bold disabled:opacity-60"
+            >
+              Crea di nuovo tutto
+            </button>
+            <button onClick={dismissIssues} className="h-11 px-3 text-sm font-semibold text-amber-800 underline underline-offset-4">
+              Lascia così
+            </button>
+          </div>
+        </div>
+      )}
+      {rebuildNotice && !showIssues && (
+        <div
+          role="status"
+          className={`rounded-2xl p-4 text-sm flex items-start justify-between gap-3 border ${
+            rebuildNotice.tone === 'ok' ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-amber-50 border-amber-200 text-amber-900'
+          }`}
+        >
+          <span className="leading-relaxed">{rebuildNotice.text}</span>
+          <button onClick={() => setRebuildNotice(null)} aria-label="Chiudi" className="shrink-0 font-bold">×</button>
+        </div>
+      )}
 
       {/* Opzioni: nascoste finché non servono */}
       {showOptions && (

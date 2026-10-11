@@ -9,7 +9,7 @@ export const hasPersonalRules = (member: FamilyMember): boolean =>
 export const fitsMember = (recipe: Recipe, member: FamilyMember): boolean =>
   satisfiesDiet(recipe, member.dietaryRestrictions || []) && !hitsExclusion(recipe, member.allergies || []);
 
-const isMain = (recipe: Recipe) => recipe.category !== 'side' && recipe.category !== 'dessert';
+export const isMain = (recipe: Recipe) => recipe.category !== 'side' && recipe.category !== 'dessert';
 
 /** Persone per cui il pasto (i piatti principali) non va bene e serve un'alternativa. Contorni esclusi. */
 export function membersNeedingAlternative(mains: Recipe[], members: FamilyMember[]): FamilyMember[] {
