@@ -1,1295 +1,461 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { FormEvent, ReactNode } from 'react';
 import {
-  Coins,
-  Cpu,
-  DollarSign,
-  Filter,
+  ChevronDown,
+  ExternalLink,
+  Gift,
   History,
-  Mail,
+  KeyRound,
   Search,
   ShieldAlert,
   ShieldCheck,
-  Smartphone,
-  Trash2,
-  TrendingUp,
-  UserPlus,
-  X,
 } from 'lucide-react';
 import {
-  collection,
-  deleteDoc,
-  doc,
-  onSnapshot,
-  serverTimestamp,
-  setDoc,
-  updateDoc,
-  query,
-  limit,
-  orderBy,
   addDoc,
-  runTransaction,
+  collection,
+  doc,
+  limit,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  updateDoc,
 } from 'firebase/firestore';
-import { sendPasswordResetEmail, onAuthStateChanged } from 'firebase/auth';
-import type { User } from 'firebase/auth';
+import { sendPasswordResetEmail } from 'firebase/auth';
 import { auth, db } from '../lib/firebase';
-import type { UserProfile } from '../types';
-import { PRICES } from '../lib/plans';
+import { PLAN_NAMES, normalizePlan } from '../lib/plans';
+import type { PlanId } from '../lib/plans';
 
-type Plan = 'free' | 'smart' | 'pro';
-type AlertType = 'success' | 'info' | 'error';
-type UserOverride = Pick<Partial<UserProfile>, 'plan' | 'isAdmin' | 'isSuspended'>;
+const USERS_LIMIT = 150;
 
-export interface AuditLog {
+interface AdminUser {
   id: string;
-  adminId: string;
-  adminEmail: string;
+  name: string;
+  email: string;
+  plan: PlanId;
+  suspended: boolean;
+  /** Abbonamento gestito da Stripe (il piano cambia solo da lì) */
+  hasSubscription: boolean;
+  renews: boolean;
+  flyerScans: number;
+  createdAt: string | null;
+}
+
+interface AuditEntry {
+  id: string;
   action: string;
-  targetUserId: string;
+  adminEmail: string;
   targetUserEmail: string;
-  timestamp: string;
   details: string;
+  timestamp: string;
 }
 
-const MOCK_FAMILIES = [
-  {
-    id: 'mock_1',
-    name: 'Famiglia Rossi',
-    email: 'rossi.famiglia@outlook.it',
-    plan: 'pro',
-    isAdmin: false,
-    isSuspended: false,
-    createdAt: '2026-04-12T10:00:00Z',
-    aiInteractionsThisMonth: 3,
-    dietaryRestrictions: [],
-    excludedIngredients: [],
-  },
-  {
-    id: 'mock_2',
-    name: 'Elena e Matteo Bianchi',
-    email: 'elena.bianchi@gmail.com',
-    plan: 'smart',
-    isAdmin: false,
-    isSuspended: false,
-    createdAt: '2026-05-01T15:30:00Z',
-    aiInteractionsThisMonth: 0,
-    dietaryRestrictions: [],
-    excludedIngredients: [],
-  },
-  {
-    id: 'mock_3',
-    name: 'Famiglia Ricci',
-    email: 'ricci.spesa90@gmail.com',
-    plan: 'free',
-    isAdmin: false,
-    isSuspended: false,
-    createdAt: '2026-05-18T09:12:00Z',
-    aiInteractionsThisMonth: 1,
-    dietaryRestrictions: [],
-    excludedIngredients: [],
-  },
-  {
-    id: 'mock_4',
-    name: 'Marco Esposito',
-    email: 'marco.esposito@unina.it',
-    plan: 'pro',
-    isAdmin: false,
-    isSuspended: true,
-    createdAt: '2026-03-24T18:45:00Z',
-    aiInteractionsThisMonth: 4,
-    dietaryRestrictions: [],
-    excludedIngredients: [],
-  },
-  {
-    id: 'mock_5',
-    name: 'Famiglia Moretti (6 persone)',
-    email: 'infofamigliamoretti@libero.it',
-    plan: 'pro',
-    isAdmin: false,
-    isSuspended: false,
-    createdAt: '2026-06-02T11:20:00Z',
-    aiInteractionsThisMonth: 2,
-    dietaryRestrictions: [],
-    excludedIngredients: [],
-  },
-  {
-    id: 'mock_6',
-    name: 'Giuseppe Verdi',
-    email: 'peppe.verdi@gmail.com',
-    plan: 'smart',
-    isAdmin: false,
-    isSuspended: false,
-    createdAt: '2026-06-10T22:15:00Z',
-    aiInteractionsThisMonth: 0,
-    dietaryRestrictions: [],
-    excludedIngredients: [],
-  },
-  {
-    id: 'mock_7',
-    name: 'Famiglia Ferrari',
-    email: 'ferrari.casa@gmail.com',
-    plan: 'free',
-    isAdmin: false,
-    isSuspended: false,
-    createdAt: '2026-06-11T08:05:00Z',
-    aiInteractionsThisMonth: 0,
-    dietaryRestrictions: [],
-    excludedIngredients: [],
-  },
-  {
-    id: 'mock_8',
-    name: 'Admin Di Bellucci',
-    email: 'debora.dibellucci12@gmail.com',
-    plan: 'pro',
-    isAdmin: true,
-    isSuspended: false,
-    createdAt: '2026-01-15T14:00:00Z',
-    aiInteractionsThisMonth: 12,
-    dietaryRestrictions: [],
-    excludedIngredients: [],
-  },
-] as UserProfile[];
+type Filter = 'all' | PlanId | 'suspended';
 
-function normalizeEmail(value: string): string {
-  return value.trim().toLowerCase();
-}
+const FILTERS: { id: Filter; label: string }[] = [
+  { id: 'all', label: 'Tutti' },
+  { id: 'smart', label: PLAN_NAMES.smart },
+  { id: 'pro', label: PLAN_NAMES.pro },
+  { id: 'free', label: PLAN_NAMES.free },
+  { id: 'suspended', label: 'Sospesi' },
+];
 
-function createProfileId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return `profile_${crypto.randomUUID()}`;
-  }
+const ACTION_LABELS: Record<string, string> = {
+  SUSPEND_USER: 'Account sospeso',
+  REACTIVE_USER: 'Account riattivato',
+  PASSWORD_RESET: 'Email di reset inviata',
+  GIFT_PLAN: 'Piano regalato',
+};
 
-  return `profile_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
-}
+const currentMonth = () => new Date().toISOString().slice(0, 7);
 
-function normalizeUser(id: string, data: any): UserProfile {
+function toAdminUser(id: string, data: Record<string, any>): AdminUser {
+  const created = data.createdAt;
+  const aiUsage = data.aiUsage;
   return {
-    id: String(id),
+    id,
     name: typeof data.name === 'string' ? data.name : '',
     email: typeof data.email === 'string' ? data.email : '',
-    plan: (data.plan === 'smart' || data.plan === 'pro' || data.plan === 'free') ? data.plan : 'free',
-    isAdmin: Boolean(data.isAdmin),
-    isSuspended: Boolean(data.isSuspended),
-    aiInteractionsThisMonth: typeof data.aiInteractionsThisMonth === 'number' ? data.aiInteractionsThisMonth : 0,
-    dietaryRestrictions: Array.isArray(data.dietaryRestrictions) ? data.dietaryRestrictions : [],
-    excludedIngredients: Array.isArray(data.excludedIngredients) ? data.excludedIngredients : [],
-    createdAt: data.createdAt 
-      ? (typeof data.createdAt.toDate === 'function' 
-          ? data.createdAt.toDate().toISOString() 
-          : String(data.createdAt)) 
-      : undefined,
-  } as UserProfile;
+    plan: normalizePlan(data.plan),
+    suspended: data.isSuspended === true,
+    hasSubscription: typeof data.stripeSubscriptionId === 'string' && data.stripeSubscriptionId !== '',
+    renews: data.autoRenew === true,
+    flyerScans: aiUsage && aiUsage.month === currentMonth() ? Number(aiUsage.flyerScans) || 0 : 0,
+    createdAt: created
+      ? typeof created.toDate === 'function'
+        ? created.toDate().toISOString()
+        : String(created)
+      : null,
+  };
 }
 
+const formatDate = (iso: string | null) => {
+  if (!iso) return '—';
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleDateString('it-IT');
+};
+
+const formatDateTime = (iso: string) => {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime())
+    ? ''
+    : date.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+};
+
+const PLAN_BADGE: Record<PlanId, string> = {
+  free: 'bg-slate-100 text-slate-600',
+  smart: 'bg-emerald-50 text-emerald-700',
+  pro: 'bg-purple-50 text-purple-700',
+};
+
 export default function AdminDashboard() {
-  const [realUsers, setRealUsers] = useState<UserProfile[]>([]);
-  const [currentAdminUser, setCurrentAdminUser] = useState<User | null>(null);
-  const [includeSimulated, setIncludeSimulated] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [filterPlan, setFilterPlan] = useState<'all' | Plan>('all');
-  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'suspended' | 'admin'>('all');
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
-  const [mockOverrides, setMockOverrides] = useState<Record<string, UserOverride>>({});
-  const [deletedMockIds, setDeletedMockIds] = useState<Set<string>>(() => new Set());
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [logs, setLogs] = useState<AuditEntry[]>([]);
+  const [showLogs, setShowLogs] = useState(false);
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<Filter>('all');
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
-  const [alertMessage, setAlertMessage] = useState<{ type: AlertType; text: string } | null>(null);
-  const [isLoadingUsers, setIsLoadingUsers] = useState(true);
-  const [usersError, setUsersError] = useState<string | null>(null);
-  
-  // Set tracking concurrent transactions/actions to resolve race conditions
-  const [pendingActions, setPendingActions] = useState<Set<string>>(() => new Set());
+  const me = auth.currentUser;
 
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
-  const [isLoadingLogs, setIsLoadingLogs] = useState(true);
-
-  const [showAddNewUser, setShowAddNewUser] = useState(false);
-  const [newUserName, setNewUserName] = useState('');
-  const [newUserEmail, setNewUserEmail] = useState('');
-  const [newUserPlan, setNewUserPlan] = useState<Plan>('free');
-
-  // Track currently authenticated admin
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (usr) => {
-      setCurrentAdminUser(usr);
-    });
-    return unsubscribe;
-  }, []);
-
-  const startAction = (key: string) => {
-    setPendingActions((prev) => {
-      const next = new Set(prev);
-      next.add(key);
-      return next;
-    });
-  };
-
-  const endAction = (key: string) => {
-    setPendingActions((prev) => {
-      const next = new Set(prev);
-      next.delete(key);
-      return next;
-    });
-  };
-
-  const isActionPending = (key: string) => pendingActions.has(key);
-  const isAnyActionPending = pendingActions.size > 0;
-
-  // Real-time Users query bounded to 150 documents to prevent malicious scaling costs
-  useEffect(() => {
-    const qUsers = query(collection(db, 'users'), limit(150));
-    const unsubscribe = onSnapshot(
-      qUsers,
-      (snapshot) => {
-        const users = snapshot.docs.map((snapshotDoc) => {
-          const rawData = { ...snapshotDoc.data(), id: snapshotDoc.id };
-          const normalized = normalizeUser(snapshotDoc.id, rawData);
-          return {
-            ...normalized,
-            id: snapshotDoc.id,
-          };
-        });
-
-        setRealUsers(users);
-        setUsersError(null);
-        setIsLoadingUsers(false);
+    return onSnapshot(
+      query(collection(db, 'users'), limit(USERS_LIMIT)),
+      (snap) => {
+        setUsers(snap.docs.map((d) => toAdminUser(d.id, d.data())));
+        setLoadError(false);
+        setLoading(false);
       },
       (error) => {
         console.error('Errore nel caricamento degli utenti:', error);
-        setUsersError('Non è stato possibile caricare gli utenti da Firestore (accesso negato o timeout).');
-        setIsLoadingUsers(false);
+        setLoadError(true);
+        setLoading(false);
       },
     );
-
-    return unsubscribe;
   }, []);
 
-  // Real-time administrator audit log subscription
   useEffect(() => {
-    const qLogs = query(
-      collection(db, 'admin_audit_logs'),
-      orderBy('timestamp', 'desc'),
-      limit(15),
-    );
-    const unsubscribe = onSnapshot(
-      qLogs,
-      (snapshot) => {
-        const logs = snapshot.docs.map((docSnap) => {
-          const data = docSnap.data();
-          const ts = data.timestamp;
-          let timestampStr = '';
-          if (ts) {
-            if (typeof ts.toDate === 'function') {
-              timestampStr = ts.toDate().toISOString();
-            } else {
-              timestampStr = String(ts);
-            }
-          }
-          return {
-            id: docSnap.id,
-            adminId: String(data.adminId || ''),
-            adminEmail: String(data.adminEmail || ''),
-            action: String(data.action || ''),
-            targetUserId: String(data.targetUserId || ''),
-            targetUserEmail: String(data.targetUserEmail || ''),
-            timestamp: timestampStr,
-            details: String(data.details || ''),
-          } as AuditLog;
-        });
-        setAuditLogs(logs);
-        setIsLoadingLogs(false);
+    return onSnapshot(
+      query(collection(db, 'admin_audit_logs'), orderBy('timestamp', 'desc'), limit(15)),
+      (snap) => {
+        setLogs(
+          snap.docs.map((d) => {
+            const data = d.data();
+            const ts = data.timestamp;
+            return {
+              id: d.id,
+              action: String(data.action || ''),
+              adminEmail: String(data.adminEmail || ''),
+              targetUserEmail: String(data.targetUserEmail || ''),
+              details: String(data.details || ''),
+              timestamp: ts && typeof ts.toDate === 'function' ? ts.toDate().toISOString() : '',
+            };
+          }),
+        );
       },
-      (error) => {
-        console.error('Errore nel caricamento dei log di audit:', error);
-        setIsLoadingLogs(false);
-      },
+      (error) => console.error('Errore nel caricamento del registro:', error),
     );
-
-    return unsubscribe;
   }, []);
 
-  // Write audit log entry to database helper
-  const logAdminAction = async (action: string, targetId: string, targetEmail: string, details: string) => {
+  // Il proprio account non conta nelle statistiche e non può essere modificato da qui
+  const people = useMemo(() => users.filter((u) => u.id !== me?.uid), [users, me?.uid]);
+
+  const counts = useMemo(
+    () => ({
+      total: people.length,
+      smart: people.filter((u) => u.plan === 'smart').length,
+      pro: people.filter((u) => u.plan === 'pro').length,
+      free: people.filter((u) => u.plan === 'free').length,
+      suspended: people.filter((u) => u.suspended).length,
+    }),
+    [people],
+  );
+
+  const visible = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return people
+      .filter((u) => {
+        if (filter === 'suspended' && !u.suspended) return false;
+        if ((filter === 'free' || filter === 'smart' || filter === 'pro') && u.plan !== filter) return false;
+        if (!term) return true;
+        return u.name.toLowerCase().includes(term) || u.email.toLowerCase().includes(term);
+      })
+      .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
+  }, [people, search, filter]);
+
+  const writeLog = async (action: string, user: AdminUser, details: string) => {
     try {
       await addDoc(collection(db, 'admin_audit_logs'), {
-        adminId: currentAdminUser?.uid || 'unknown_admin',
-        adminEmail: currentAdminUser?.email || 'admin@example.com',
+        adminId: me?.uid || 'unknown',
+        adminEmail: me?.email || 'unknown',
         action,
-        targetUserId: targetId,
-        targetUserEmail: targetEmail,
+        targetUserId: user.id,
+        targetUserEmail: user.email,
         timestamp: serverTimestamp(),
         details,
       });
-    } catch (e) {
-      console.error('Errore durante la scrittura del log di audit:', e);
+    } catch (error) {
+      console.error('Errore durante la scrittura del registro:', error);
     }
-  };;
+  };
 
-  const mergedUsers = useMemo(() => {
-    const merged = [...realUsers];
-
-    if (!includeSimulated) {
-      return merged;
+  const run = async (key: string, user: AdminUser, task: () => Promise<string>) => {
+    if (busy) return;
+    setBusy(key);
+    setMessage(null);
+    try {
+      const text = await task();
+      setMessage({ ok: true, text });
+    } catch (error: any) {
+      console.error('Azione amministratore non riuscita:', error);
+      setMessage({ ok: false, text: `Non riuscito: ${error?.message || error}` });
+    } finally {
+      setBusy(null);
     }
+  };
 
-    const existingEmails = new Set(
-      realUsers.map((user) => normalizeEmail(user.email ?? '')).filter(Boolean),
-    );
-
-    for (const mockUser of MOCK_FAMILIES) {
-      if (deletedMockIds.has(mockUser.id)) continue;
-      if (existingEmails.has(normalizeEmail(mockUser.email ?? ''))) continue;
-      if (realUsers.some((user) => user.id === mockUser.id)) continue;
-
-      merged.push({
-        ...mockUser,
-        ...(mockOverrides[mockUser.id] ?? {}),
-      });
-    }
-
-    return merged;
-  }, [deletedMockIds, includeSimulated, mockOverrides, realUsers]);
-
-  const filteredUsers = useMemo(() => {
-    const normalizedSearch = searchTerm.trim().toLowerCase();
-
-    return mergedUsers.filter((user) => {
-      const matchesSearch =
-        !normalizedSearch ||
-        (user.name ?? '').toLowerCase().includes(normalizedSearch) ||
-        (user.email ?? '').toLowerCase().includes(normalizedSearch);
-
-      const matchesPlan = filterPlan === 'all' || user.plan === filterPlan;
-
-      const matchesStatus =
-        filterStatus === 'all' ||
-        (filterStatus === 'active' && !user.isSuspended) ||
-        (filterStatus === 'suspended' && Boolean(user.isSuspended)) ||
-        (filterStatus === 'admin' && Boolean(user.isAdmin));
-
-      return matchesSearch && matchesPlan && matchesStatus;
+  const toggleSuspension = (user: AdminUser) =>
+    run(`suspend:${user.id}`, user, async () => {
+      const next = !user.suspended;
+      await updateDoc(doc(db, 'users', user.id), { isSuspended: next });
+      await writeLog(next ? 'SUSPEND_USER' : 'REACTIVE_USER', user, next ? 'Account sospeso' : 'Account riattivato');
+      return next ? 'Account sospeso: non potrà più usare l’app.' : 'Account riattivato.';
     });
-  }, [filterPlan, filterStatus, mergedUsers, searchTerm]);
 
-  const selectedUser = useMemo(
-    () => mergedUsers.find((user) => user.id === selectedUserId) ?? null,
-    [mergedUsers, selectedUserId],
-  );
+  const sendReset = (user: AdminUser) =>
+    run(`reset:${user.id}`, user, async () => {
+      if (!user.email) throw new Error('Questo account non ha un’email.');
+      await sendPasswordResetEmail(auth, user.email);
+      await writeLog('PASSWORD_RESET', user, `Email di reset inviata a ${user.email}`);
+      return `Email di reset inviata a ${user.email}.`;
+    });
 
-  useEffect(() => {
-    if (selectedUserId && !selectedUser) {
-      setSelectedUserId(null);
-    }
-  }, [selectedUser, selectedUserId]);
-
-  // Le metriche usano esclusivamente utenti reali. Ricerca, filtri e demo non devono alterare i totali.
-  const stats = useMemo(() => {
-    const productionUsers = realUsers.filter((user) => !user.isAdmin);
-    const billableUsers = productionUsers.filter((user) => !user.isSuspended);
-
-    const totalUsers = productionUsers.length;
-    const standardUsers = billableUsers.filter((user) => user.plan === 'smart').length;
-    const proUsers = billableUsers.filter((user) => user.plan === 'pro').length;
-    const freeUsers = billableUsers.filter((user) => user.plan === 'free' || !user.plan).length;
-    const suspendedUsers = productionUsers.filter((user) => user.isSuspended).length;
-
-    const mrr = standardUsers * PRICES.smart.month + proUsers * PRICES.pro.month;
-    const serverHostingCost = 15 + Math.max(0, totalUsers - 10) * 0.01;
-    const firestoreCost = totalUsers * 0.00018;
-    const geminiApiCost = productionUsers.reduce(
-      (total, user) => total + (user.aiInteractionsThisMonth ?? 0) * 0.0025,
-      0,
-    );
-    const maintenanceCost = 20 + totalUsers * 0.001;
-    const totalCost = serverHostingCost + firestoreCost + geminiApiCost + maintenanceCost;
-    const netProfit = mrr - totalCost;
-    const margin = mrr > 0 ? (netProfit / mrr) * 100 : 0;
-
-    return {
-      totalUsers,
-      standardUsers,
-      proUsers,
-      freeUsers,
-      suspendedUsers,
-      mrr,
-      serverHostingCost,
-      firestoreCost,
-      geminiApiCost,
-      maintenanceCost,
-      totalCost,
-      netProfit,
-      margin,
-    };
-  }, [realUsers]);
-
-  const runSecureToggle = async (
-    userId: string,
-    fieldName: 'plan' | 'isAdmin' | 'isSuspended',
-    newValue: any,
-    auditAction: string,
-    successMsg: string,
-    targetUser: UserProfile
-  ) => {
-    if (userId.startsWith('mock_')) {
-      const patch = { [fieldName]: newValue };
-      setMockOverrides((previous) => ({
-        ...previous,
-        [userId]: { ...previous[userId], ...patch },
-      }));
-      setAlertMessage({ type: 'info', text: `[SIMULATO] ${successMsg}` });
-      await logAdminAction(auditAction + ' [SIMULATO]', userId, targetUser.email || '', `Valore simulato modificato in: ${newValue}`);
-      return;
-    }
-
-    const actionKey = `update:${userId}`;
-    startAction(actionKey);
-
-    try {
-      const userRef = doc(db, 'users', userId);
-      await runTransaction(db, async (transaction) => {
-        const userDoc = await transaction.get(userRef);
-        if (!userDoc.exists()) {
-          throw new Error("L'utente non esiste nel database.");
-        }
-        transaction.update(userRef, { [fieldName]: newValue });
-      });
-
-      setAlertMessage({ type: 'success', text: successMsg });
-      await logAdminAction(auditAction, userId, targetUser.email || '', `Modificato campo '${fieldName}' in '${newValue}'`);
-    } catch (error: any) {
-      console.error('Errore durante transazione aggiornamento profilo:', error);
-      setAlertMessage({ type: 'error', text: `Aggiornamento non riuscito: ${error.message || error}` });
-    } finally {
-      endAction(actionKey);
-    }
-  };
-
-  const handleUpdateUserPlan = async (userId: string, plan: Plan) => {
-    const userToUpdate = mergedUsers.find(u => u.id === userId);
-    if (!userToUpdate) return;
-    await runSecureToggle(
-      userId,
-      'plan',
-      plan,
-      'UPDATE_PLAN',
-      `Piano aggiornato a ${plan.toUpperCase()}.`,
-      userToUpdate
-    );
-  };
-
-  const handleToggleAdminStatus = async (user: UserProfile) => {
-    const isSelf = user.id === currentAdminUser?.uid || 
-      (user.email && currentAdminUser?.email && normalizeEmail(user.email) === normalizeEmail(currentAdminUser.email));
-    
-    if (isSelf) {
-      setAlertMessage({
-        type: 'error',
-        text: 'Non puoi rimuovere o modificare i privilegi amministrativi dal tuo stesso account.',
-      });
-      return;
-    }
-
-    await runSecureToggle(
-      user.id,
-      'isAdmin',
-      !user.isAdmin,
-      user.isAdmin ? 'REVOKE_ADMIN' : 'GRANT_ADMIN',
-      `Privilegi amministrativi ${!user.isAdmin ? 'abilitati' : 'rimossi'}.`,
-      user
-    );
-  };
-
-  const handleToggleSuspension = async (user: UserProfile) => {
-    const isSelf = user.id === currentAdminUser?.uid || 
-      (user.email && currentAdminUser?.email && normalizeEmail(user.email) === normalizeEmail(currentAdminUser.email));
-
-    if (isSelf) {
-      setAlertMessage({ type: 'error', text: 'Non puoi sospendere il tuo stesso account.' });
-      return;
-    }
-
-    await runSecureToggle(
-      user.id,
-      'isSuspended',
-      !user.isSuspended,
-      !user.isSuspended ? 'SUSPEND_USER' : 'REACTIVE_USER',
-      `Account ${!user.isSuspended ? 'sospeso' : 'riattivato'}.`,
-      user
-    );
-  };
-
-  const handleSendPasswordReset = async (user: UserProfile) => {
-    if (user.id.startsWith('mock_')) {
-      setAlertMessage({
-        type: 'info',
-        text: '[SIMULATO] Nessuna email è stata realmente inviata.',
-      });
-      return;
-    }
-
-    const email = normalizeEmail(user.email ?? '');
-    if (!email) {
-      setAlertMessage({ type: 'error', text: 'Questo profilo non contiene un indirizzo email.' });
-      return;
-    }
-
-    const actionKey = `reset:${user.id}`;
-    startAction(actionKey);
-
-    try {
-      await sendPasswordResetEmail(auth, email);
-      setAlertMessage({
-        type: 'success',
-        text: `Email ufficiale di reimpostazione inviata a ${email}.`,
-      });
-      await logAdminAction('PASSWORD_RESET', user.id, email, `Inviata email di reset a ${email}`);
-    } catch (error: any) {
-      console.error('Errore durante l’invio del reset password:', error);
-      let errorMsg = 'Invio non riuscito.';
-      if (error.code === 'auth/user-not-found') {
-        errorMsg = `L'utente con email ${email} non esiste in Firebase Authentication (deve effettuare il primo accesso/registrazione con questa email tramite login o Google).`;
-      } else {
-        errorMsg = `Errore di Firebase Auth: ${error.message || error}`;
-      }
-      setAlertMessage({
-        type: 'error',
-        text: errorMsg,
-      });
-    } finally {
-      endAction(actionKey);
-    }
-  };
-
-  const handleCreateProfile = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
-    if (isLoadingUsers || usersError) {
-      setAlertMessage({
-        type: 'error',
-        text: 'Creazione non consentita durante il caricamento o se sono presenti errori di connessione.',
-      });
-      return;
-    }
-
-    const name = newUserName.trim();
-    const email = normalizeEmail(newUserEmail);
-
-    if (!name || !email) {
-      setAlertMessage({ type: 'error', text: 'Nome ed email sono obbligatori.' });
-      return;
-    }
-
-    const duplicatedEmail = realUsers.some(
-      (user) => normalizeEmail(user.email ?? '') === email,
-    );
-
-    if (duplicatedEmail) {
-      setAlertMessage({ type: 'error', text: 'Esiste già un profilo nel database con questa email.' });
-      return;
-    }
-
-    const actionKey = 'create-profile';
-    startAction(actionKey);
-
-    try {
-      const profileId = createProfileId();
-      const newUserDoc = {
-        name,
-        email,
-        plan: newUserPlan,
-        isAdmin: false,
-        isSuspended: false,
-        dietaryRestrictions: [],
-        excludedIngredients: [],
-        aiInteractionsThisMonth: 0,
-        createdAt: serverTimestamp(),
-      };
-
-      await setDoc(doc(db, 'users', profileId), newUserDoc);
-
-      setNewUserName('');
-      setNewUserEmail('');
-      setNewUserPlan('free');
-      setShowAddNewUser(false);
-      setAlertMessage({
-        type: 'info',
-        text: `Profilo “${name}” creato con ID: ${profileId}. Nota: L'utente dovrà eseguire l'accesso per attivare le credenziali di Authentication.`,
-      });
-      await logAdminAction('CREATE_PROFILE', profileId, email, `Creato profilo con piano ${newUserPlan.toUpperCase()}`);
-    } catch (error: any) {
-      console.error('Errore durante la creazione del profilo:', error);
-      setAlertMessage({ type: 'error', text: `Creazione del profilo non riuscita: ${error.message || error}` });
-    } finally {
-      endAction(actionKey);
-    }
-  };
-
-  const handleDeleteUser = async (user: UserProfile) => {
-    if (user.id.startsWith('mock_')) {
-      setDeletedMockIds((previous) => {
-        const next = new Set(previous);
-        next.add(user.id);
-        return next;
-      });
-      setSelectedUserId(null);
-      setAlertMessage({ type: 'info', text: '[SIMULATO] Utente demo rimosso dalla sessione.' });
-      return;
-    }
-
-    const isSelf = user.id === currentAdminUser?.uid || 
-      (user.email && currentAdminUser?.email && normalizeEmail(user.email) === normalizeEmail(currentAdminUser.email));
-
-    if (isSelf) {
-      setAlertMessage({ type: 'error', text: 'Non puoi eliminare il tuo stesso profilo.' });
-      return;
-    }
-
-    const confirmed = window.confirm(
-      `Sei sicuro di voler eliminare definitivamente il profilo Firestore di "${user.name}" (ID: ${user.id})?\n\n` +
-      'ATTENZIONE: Questa azione elimina SOLO il profilo Firestore originario. Sottocollezioni di ricette, piani settimanali o preferenze e le credenziali di Firebase Authentication (se l\'utente ha già effettuato l\'accesso) continueranno ad esistere. Dovranno essere rimosse manualmente dall\'amministrazione di sistema.'
-    );
-    if (!confirmed) return;
-
-    const actionKey = `delete:${user.id}`;
-    startAction(actionKey);
-
-    try {
-      await deleteDoc(doc(db, 'users', user.id));
-      setSelectedUserId(null);
-      setAlertMessage({
-        type: 'info',
-        text: 'Profilo Firestore eliminato con successo dall’anagrafica.',
-      });
-      await logAdminAction('DELETE_PROFILE', user.id, user.email || '', `Eliminato profilo di ${user.name}`);
-    } catch (error: any) {
-      console.error('Errore durante l’eliminazione del profilo:', error);
-      setAlertMessage({ type: 'error', text: `Eliminazione fallita: ${error.message || error}` });
-    } finally {
-      endAction(actionKey);
-    }
-  };
+  const giftPlan = (user: AdminUser, plan: PlanId) =>
+    run(`plan:${user.id}`, user, async () => {
+      await updateDoc(doc(db, 'users', user.id), { plan });
+      await writeLog('GIFT_PLAN', user, `Piano impostato a mano: ${PLAN_NAMES[plan]}`);
+      return `Piano ${PLAN_NAMES[plan]} assegnato.`;
+    });
 
   return (
-    <div className="space-y-8 pb-24">
-      <div className="relative overflow-hidden rounded-3xl border border-slate-800 bg-slate-900 p-8 text-white shadow-xl">
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-red-500/10 to-indigo-500/10 opacity-40" />
-        <div className="relative z-10 flex flex-col justify-between gap-4 md:flex-row md:items-center">
-          <div className="max-w-xl">
-            <span className="rounded-full border border-red-500/30 bg-red-500/20 px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-red-400">
-              Super Admin Console
-            </span>
-            <h1 className="mt-3 text-3xl font-extrabold tracking-tight">
-              Pannello Controllo Amministratore
-            </h1>
-            <p className="mt-2 text-xs leading-relaxed text-slate-400">
-              Gestisci i profili Firestore, i piani e gli stati degli utenti. Le metriche escludono demo,
-              amministratori e filtri della tabella.
-            </p>
-          </div>
-
-          <div className="flex shrink-0 items-center justify-between gap-4 rounded-2xl border border-slate-700/60 bg-slate-800/80 p-4 backdrop-blur-sm">
-            <div>
-              <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-300">
-                Utenti di prova
-              </span>
-              <span className="text-xs text-slate-400">Mostra simulazioni</span>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={includeSimulated}
-              aria-label="Mostra utenti simulati"
-              onClick={() => setIncludeSimulated((value) => !value)}
-              className={`h-6 w-12 cursor-pointer rounded-full p-0.5 transition-colors ${
-                includeSimulated ? 'bg-indigo-600' : 'bg-slate-600'
-              }`}
-            >
-              <span
-                className={`block h-5 w-5 rounded-full bg-white shadow-md transition-transform ${
-                  includeSimulated ? 'translate-x-6' : 'translate-x-0'
-                }`}
-              />
-            </button>
-          </div>
+    <div className="space-y-5 pb-24 max-w-3xl mx-auto">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="font-display text-3xl text-slate-900">Gestione</h1>
+          <p className="text-sm text-slate-500 mt-1">Chi usa l’app e che piano ha.</p>
         </div>
+        <a
+          href="https://dashboard.stripe.com/subscriptions"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2.5 rounded-2xl bg-indigo-600 text-white text-sm font-bold hover:bg-indigo-700 active:scale-95 transition-all"
+        >
+          Incassi su Stripe <ExternalLink className="w-4 h-4" />
+        </a>
       </div>
 
-      {alertMessage && (
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: 'Persone', value: counts.total },
+          { label: PLAN_NAMES.smart, value: counts.smart },
+          { label: PLAN_NAMES.pro, value: counts.pro },
+          { label: PLAN_NAMES.free, value: counts.free },
+        ].map((card) => (
+          <div key={card.label} className="bg-white border border-slate-200 rounded-2xl p-4">
+            <div className="text-3xl font-display text-slate-900">{loading ? '…' : card.value}</div>
+            <div className="text-sm text-slate-500">{card.label}</div>
+          </div>
+        ))}
+      </div>
+      <p className="text-xs text-slate-500 -mt-2">
+        Gli incassi reali e i rimborsi sono su Stripe: qui vedi solo i piani attivi sugli account.
+      </p>
+
+      <div className="relative">
+        <Search className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Cerca per nome o email"
+          className="w-full pl-12 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-indigo-300"
+        />
+      </div>
+
+      <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+        {FILTERS.map((f) => (
+          <button
+            key={f.id}
+            onClick={() => setFilter(f.id)}
+            className={`shrink-0 px-4 py-2 rounded-full text-sm font-semibold border transition-colors cursor-pointer ${
+              filter === f.id
+                ? 'bg-indigo-600 text-white border-indigo-600'
+                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+            }`}
+          >
+            {f.label}
+            {f.id === 'suspended' && counts.suspended > 0 ? ` (${counts.suspended})` : ''}
+          </button>
+        ))}
+      </div>
+
+      {message && (
         <div
-          className={`flex items-center justify-between rounded-2xl border p-4 text-xs font-semibold shadow-sm ${
-            alertMessage.type === 'success'
-              ? 'border-emerald-100 bg-emerald-50 text-emerald-800'
-              : alertMessage.type === 'info'
-                ? 'border-sky-100 bg-sky-50 text-sky-800'
-                : 'border-rose-100 bg-rose-50 text-rose-800'
+          role="status"
+          className={`rounded-2xl px-4 py-3 text-sm font-semibold ${
+            message.ok ? 'bg-emerald-50 text-emerald-800 border border-emerald-100' : 'bg-red-50 text-red-700 border border-red-100'
           }`}
         >
-          <span>{alertMessage.text}</span>
-          <button
-            type="button"
-            aria-label="Chiudi messaggio"
-            onClick={() => setAlertMessage(null)}
-            className="cursor-pointer rounded-full p-1 hover:bg-black/5"
-          >
-            <X size={14} />
-          </button>
+          {message.text}
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-4">
-        <MetricCard
-          label="Ricavi teorici dai piani (MRR)"
-          value={`€${stats.mrr.toFixed(2)}`}
-          detail={`Smart: ${stats.standardUsers} • Pro: ${stats.proUsers}`}
-          icon={<TrendingUp className="h-4 w-4" />}
-          iconClassName="bg-indigo-50 text-indigo-600"
-          isLoading={isLoadingUsers}
-        />
-        <MetricCard
-          label="Costo Gemini stimato"
-          value={`€${stats.geminiApiCost.toFixed(3)}`}
-          detail="Basato sulle interazioni registrate"
-          icon={<Cpu className="h-4 w-4" />}
-          iconClassName="bg-purple-50 text-purple-600"
-          isLoading={isLoadingUsers}
-        />
-        <MetricCard
-          label="Costi cloud totali"
-          value={`€${stats.totalCost.toFixed(2)}`}
-          detail={`Hosting: €${stats.serverHostingCost.toFixed(2)} • DB: €${stats.firestoreCost.toFixed(2)}`}
-          icon={<Coins className="h-4 w-4" />}
-          iconClassName="bg-rose-50 text-rose-600"
-          isLoading={isLoadingUsers}
-        />
-        <MetricCard
-          label="Margine utile"
-          value={`${stats.netProfit >= 0 ? '+' : ''}€${stats.netProfit.toFixed(2)}`}
-          detail={`Margine operativo: ${stats.margin.toFixed(1)}%`}
-          icon={<DollarSign className="h-4 w-4" />}
-          iconClassName={
-            stats.netProfit >= 0 ? 'bg-indigo-100 text-indigo-600' : 'bg-rose-100 text-rose-600'
-          }
-          isLoading={isLoadingUsers}
-        />
-      </div>
-
-      <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
-        <div className="space-y-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm lg:col-span-8">
-          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-            <div>
-              <h2 className="text-base font-extrabold text-slate-900">Anagrafica Famiglie & Clienti</h2>
-              <p className="mt-0.5 text-[11px] text-slate-500">
-                Ricerca e gestisci i profili salvati nella raccolta users.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowAddNewUser((value) => !value)}
-              className="flex cursor-pointer items-center gap-1.5 rounded-xl bg-slate-900 px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-slate-800 active:scale-95"
-            >
-              <UserPlus className="h-4 w-4" />
-              Crea profilo
-            </button>
-          </div>
-
-          {showAddNewUser && (
-            <form
-              onSubmit={handleCreateProfile}
-              className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-5"
-            >
-              <h3 className="text-xs font-bold uppercase text-slate-900">Nuovo profilo Firestore</h3>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                <label className="space-y-1">
-                  <span className="block text-[10px] font-bold uppercase text-slate-500">Nome famiglia</span>
-                  <input
-                    required
-                    type="text"
-                    value={newUserName}
-                    onChange={(event) => setNewUserName(event.target.value)}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-indigo-200"
-                  />
-                </label>
-                <label className="space-y-1">
-                  <span className="block text-[10px] font-bold uppercase text-slate-500">Email</span>
-                  <input
-                    required
-                    type="email"
-                    value={newUserEmail}
-                    onChange={(event) => setNewUserEmail(event.target.value)}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-indigo-200"
-                  />
-                </label>
-                <label className="space-y-1">
-                  <span className="block text-[10px] font-bold uppercase text-slate-500">Piano</span>
-                  <select
-                    value={newUserPlan}
-                    onChange={(event) => setNewUserPlan(event.target.value as Plan)}
-                    className="w-full cursor-pointer rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-indigo-200"
-                  >
-                    <option value="free">Famiglia Free</option>
-                    <option value="smart">Famiglia (€3,99)</option>
-                    <option value="pro">Chef IA (€6,99)</option>
-                  </select>
-                </label>
-              </div>
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowAddNewUser(false)}
-                  className="cursor-pointer rounded-xl px-3.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-200"
-                >
-                  Annulla
-                </button>
-                <button
-                  type="submit"
-                  disabled={isActionPending('create-profile')}
-                  className="cursor-pointer rounded-xl bg-indigo-600 px-4 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {isActionPending('create-profile') ? 'Salvataggio…' : 'Salva profilo'}
-                </button>
-              </div>
-            </form>
-          )}
-
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div className="relative">
-              <Search className="absolute left-3.5 top-3 h-4 w-4 text-slate-400" />
-              <input
-                type="search"
-                placeholder="Cerca per nome o email…"
-                value={searchTerm}
-                onChange={(event) => setSearchTerm(event.target.value)}
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-4 text-xs outline-none transition focus:bg-white focus:ring-2 focus:ring-indigo-200"
-              />
-            </div>
-
-            <label className="flex items-center gap-1.5 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-1">
-              <Filter className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-              <select
-                value={filterPlan}
-                onChange={(event) => setFilterPlan(event.target.value as 'all' | Plan)}
-                className="w-full cursor-pointer border-none bg-slate-50 text-xs text-slate-600 outline-none"
-              >
-                <option value="all">Tutti i piani</option>
-                <option value="free">Free</option>
-                <option value="smart">Smart</option>
-                <option value="pro">Pro</option>
-              </select>
-            </label>
-
-            <label className="flex items-center gap-1.5 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-1">
-              <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-              <select
-                value={filterStatus}
-                onChange={(event) =>
-                  setFilterStatus(event.target.value as 'all' | 'active' | 'suspended' | 'admin')
-                }
-                className="w-full cursor-pointer border-none bg-slate-50 text-xs text-slate-600 outline-none"
-              >
-                <option value="all">Tutti gli stati</option>
-                <option value="active">Attivi</option>
-                <option value="suspended">Sospesi</option>
-                <option value="admin">Amministratori</option>
-              </select>
-            </label>
-          </div>
-
-          {usersError && (
-            <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
-              {usersError}
-            </div>
-          )}
-
-          <div className="overflow-x-auto rounded-2xl border border-slate-100">
-            <table className="w-full border-collapse text-left">
-              <thead>
-                <tr className="border-b border-slate-100 bg-slate-50 text-[10px] font-black uppercase tracking-wider text-slate-400">
-                  <th className="px-4 py-3">Nome</th>
-                  <th className="px-4 py-3">Email</th>
-                  <th className="px-4 py-3">Piano</th>
-                  <th className="px-4 py-3">Stato</th>
-                  <th className="px-4 py-3 text-right">Azioni</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-xs">
-                {isLoadingUsers ? (
-                  <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
-                      Caricamento utenti…
-                    </td>
-                  </tr>
-                ) : filteredUsers.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
-                      Nessun utente corrisponde ai filtri selezionati.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredUsers.map((user) => {
-                    const isMock = user.id.startsWith('mock_');
-                    return (
-                      <tr
-                        key={user.id}
-                        className={`cursor-pointer transition hover:bg-slate-50/70 ${
-                          selectedUserId === user.id ? 'bg-indigo-50/40' : ''
-                        }`}
-                        onClick={() => setSelectedUserId(user.id)}
-                      >
-                        <td className="px-4 py-3.5 font-bold text-slate-900">
-                          <div className="flex items-center gap-2">
-                            <span>{user.name || 'Senza nome'}</span>
-                            {isMock && (
-                              <span className="rounded border border-slate-200 bg-slate-100 px-1.5 py-0.5 text-[8px] font-black uppercase text-slate-400">
-                                Demo
-                              </span>
-                            )}
-                            {user.isAdmin && (
-                              <span className="rounded border border-red-200 bg-red-100 px-1.5 py-0.5 text-[8px] font-black uppercase text-red-600">
-                                Admin
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3.5 font-mono text-[11px] text-slate-500">
-                          {user.email || 'Nessuna email'}
-                        </td>
-                        <td className="px-4 py-3.5">
-                          <PlanBadge plan={user.plan as Plan | undefined} />
-                        </td>
-                        <td className="px-4 py-3.5">
-                          <span
-                            className={`inline-flex items-center gap-1 text-[10px] font-semibold ${
-                              user.isSuspended ? 'text-red-600' : 'text-emerald-600'
-                            }`}
-                          >
-                            <span
-                              className={`h-1.5 w-1.5 rounded-full ${
-                                user.isSuspended ? 'bg-red-500' : 'bg-emerald-500'
-                              }`}
-                            />
-                            {user.isSuspended ? 'Sospeso' : 'Attivo'}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3.5 text-right">
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setSelectedUserId(user.id);
-                            }}
-                            className="cursor-pointer rounded-lg p-1 text-[11px] font-bold text-indigo-600 hover:bg-slate-100 hover:text-indigo-800"
-                          >
-                            Ispeziona →
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+      {loadError ? (
+        <div className="bg-red-50 border border-red-100 text-red-700 rounded-2xl p-5 text-sm">
+          Non riesco a leggere gli utenti. Esci e rientra con l’account amministratore: se continua, controlla che la
+          tua email sia in <strong>ADMIN_EMAILS</strong> e che le funzioni siano state pubblicate.
         </div>
-
-        <div className="space-y-6 lg:col-span-4">
-          {selectedUser ? (
-            <div className="sticky top-24 space-y-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="flex items-start justify-between">
-                <div>
-                  <span className="block text-[9px] font-bold uppercase tracking-widest text-slate-400">
-                    Dettaglio utente
+      ) : loading ? (
+        <div className="text-center text-slate-500 py-10">Caricamento…</div>
+      ) : visible.length === 0 ? (
+        <div className="text-center text-slate-500 py-10 bg-white border border-slate-200 rounded-2xl">
+          {people.length === 0 ? 'Ancora nessun utente registrato.' : 'Nessun risultato.'}
+        </div>
+      ) : (
+        <ul className="space-y-2">
+          {visible.map((user) => {
+            const open = openId === user.id;
+            return (
+              <li key={user.id} className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+                <button
+                  onClick={() => setOpenId(open ? null : user.id)}
+                  aria-expanded={open}
+                  className="w-full flex items-center gap-3 p-4 text-left cursor-pointer"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="font-bold text-slate-900 truncate">{user.name || user.email || 'Senza nome'}</div>
+                    {user.name && user.email && <div className="text-sm text-slate-500 truncate">{user.email}</div>}
+                  </div>
+                  {user.suspended && (
+                    <span className="shrink-0 text-xs font-bold px-2.5 py-1 rounded-full bg-red-50 text-red-700">
+                      Sospeso
+                    </span>
+                  )}
+                  <span className={`shrink-0 text-xs font-bold px-2.5 py-1 rounded-full ${PLAN_BADGE[user.plan]}`}>
+                    {PLAN_NAMES[user.plan]}
                   </span>
-                  <h3 className="mt-1 text-base font-extrabold text-slate-900">
-                    {selectedUser.name || 'Senza nome'}
-                  </h3>
-                  <p className="mt-0.5 text-[10px] font-mono text-slate-400">
-                    {selectedUser.email || 'Nessuna email'}
-                  </p>
+                  <ChevronDown className={`w-5 h-5 text-slate-400 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+                </button>
+
+                {open && (
+                  <div className="border-t border-slate-100 p-4 space-y-4 bg-slate-50/60">
+                    <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                      <dt className="text-slate-500">Iscritto dal</dt>
+                      <dd className="text-slate-900 font-semibold">{formatDate(user.createdAt)}</dd>
+                      <dt className="text-slate-500">Abbonamento</dt>
+                      <dd className="text-slate-900 font-semibold">
+                        {user.hasSubscription ? (user.renews ? 'Attivo, si rinnova' : 'Attivo, scade a fine periodo') : 'Nessuno'}
+                      </dd>
+                      {user.plan === 'pro' && (
+                        <>
+                          <dt className="text-slate-500">Volantini questo mese</dt>
+                          <dd className="text-slate-900 font-semibold">{user.flyerScans}</dd>
+                        </>
+                      )}
+                    </dl>
+
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => toggleSuspension(user)}
+                        disabled={busy !== null}
+                        className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold border transition-colors disabled:opacity-50 cursor-pointer ${
+                          user.suspended
+                            ? 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700'
+                            : 'bg-white text-red-700 border-red-200 hover:bg-red-50'
+                        }`}
+                      >
+                        {user.suspended ? <ShieldCheck className="w-4 h-4" /> : <ShieldAlert className="w-4 h-4" />}
+                        {user.suspended ? 'Riattiva account' : 'Sospendi account'}
+                      </button>
+                      {user.email && (
+                        <button
+                          onClick={() => sendReset(user)}
+                          disabled={busy !== null}
+                          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50 cursor-pointer"
+                        >
+                          <KeyRound className="w-4 h-4" /> Email per cambiare password
+                        </button>
+                      )}
+                    </div>
+
+                    {user.hasSubscription ? (
+                      <p className="text-xs text-slate-500">
+                        Il piano di questa persona è gestito da Stripe: per cambiarlo o rimborsarla usa la dashboard di
+                        Stripe.
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2 text-sm font-bold text-slate-700">
+                          <Gift className="w-4 h-4" /> Regala un piano
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {(['free', 'smart', 'pro'] as PlanId[]).map((plan) => (
+                            <button
+                              key={plan}
+                              onClick={() => giftPlan(user, plan)}
+                              disabled={busy !== null || user.plan === plan}
+                              className={`px-4 py-2 rounded-xl text-sm font-semibold border transition-colors disabled:opacity-50 cursor-pointer ${
+                                user.plan === plan
+                                  ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                              }`}
+                            >
+                              {PLAN_NAMES[plan]}
+                            </button>
+                          ))}
+                        </div>
+                        <p className="text-xs text-slate-500">Non passa da Stripe: nessun addebito e nessuna scadenza.</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {users.length >= USERS_LIMIT && (
+        <p className="text-xs text-slate-500">Sono mostrati i primi {USERS_LIMIT} account: usa la ricerca per trovare gli altri.</p>
+      )}
+
+      <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+        <button
+          onClick={() => setShowLogs((v) => !v)}
+          aria-expanded={showLogs}
+          className="w-full flex items-center gap-3 p-4 text-left cursor-pointer"
+        >
+          <History className="w-5 h-5 text-slate-500" />
+          <span className="flex-1 font-bold text-slate-900">Ultime azioni</span>
+          <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform ${showLogs ? 'rotate-180' : ''}`} />
+        </button>
+        {showLogs && (
+          <ul className="border-t border-slate-100 divide-y divide-slate-100">
+            {logs.length === 0 && <li className="p-4 text-sm text-slate-500">Nessuna azione registrata.</li>}
+            {logs.map((log) => (
+              <li key={log.id} className="p-4 text-sm">
+                <div className="font-semibold text-slate-900">{ACTION_LABELS[log.action] || log.action}</div>
+                <div className="text-slate-500">
+                  {log.targetUserEmail || 'utente'} · {log.adminEmail} · {formatDateTime(log.timestamp)}
                 </div>
-                <button
-                  type="button"
-                  aria-label="Chiudi dettaglio"
-                  onClick={() => setSelectedUserId(null)}
-                  className="cursor-pointer rounded-full p-1 text-slate-400 hover:bg-slate-100"
-                >
-                  <X size={16} />
-                </button>
-              </div>
-
-              <div className="space-y-2">
-                <span className="block text-[10px] font-black uppercase tracking-widest text-slate-500">
-                  Piano
-                </span>
-                <div className="grid grid-cols-3 gap-2">
-                  {(['free', 'smart', 'pro'] as const).map((plan) => (
-                    <button
-                      key={plan}
-                      type="button"
-                      disabled={isActionPending(`update:${selectedUser.id}`)}
-                      onClick={() => handleUpdateUserPlan(selectedUser.id, plan)}
-                      className={`cursor-pointer rounded-xl border px-1 py-2 text-center text-[10px] font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                        selectedUser.plan === plan
-                          ? 'border-indigo-600 bg-indigo-600 text-white shadow-sm'
-                          : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                      }`}
-                    >
-                      {plan.toUpperCase()}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 p-3">
-                <div>
-                  <span className="block text-xs font-bold text-slate-800">Privilegi amministrativi</span>
-                  <span className="text-[10px] text-slate-400">Campo profilo Firestore</span>
-                </div>
-                <button
-                  type="button"
-                  disabled={isActionPending(`update:${selectedUser.id}`)}
-                  onClick={() => handleToggleAdminStatus(selectedUser)}
-                  className={`cursor-pointer rounded-xl border px-3 py-1.5 text-[10px] font-bold disabled:cursor-not-allowed disabled:opacity-60 ${
-                    selectedUser.isAdmin
-                      ? 'border-red-200 bg-red-100 text-red-700'
-                      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
-                  }`}
-                >
-                  {selectedUser.isAdmin ? 'Rimuovi admin' : 'Fai amministratore'}
-                </button>
-              </div>
-
-              <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 p-3">
-                <div>
-                  <span className="block text-xs font-bold text-slate-800">Stato sospensione</span>
-                  <span className="text-[10px] text-slate-400">Deve essere applicato anche dalle regole dell’app</span>
-                </div>
-                <button
-                  type="button"
-                  disabled={isActionPending(`update:${selectedUser.id}`)}
-                  onClick={() => handleToggleSuspension(selectedUser)}
-                  className={`cursor-pointer rounded-xl border px-3 py-1.5 text-[10px] font-bold disabled:cursor-not-allowed disabled:opacity-60 ${
-                    selectedUser.isSuspended
-                      ? 'border-emerald-200 bg-emerald-100 text-emerald-700'
-                      : 'border-rose-200 bg-rose-100 text-rose-700 hover:bg-rose-50'
-                  }`}
-                >
-                  {selectedUser.isSuspended ? 'Riattiva' : 'Sospendi'}
-                </button>
-              </div>
-
-              <div className="space-y-3">
-                <span className="block text-[10px] font-black uppercase tracking-widest text-slate-500">
-                  Credenziali & sicurezza
-                </span>
-                <button
-                  type="button"
-                  disabled={isActionPending(`reset:${selectedUser.id}`)}
-                  onClick={() => handleSendPasswordReset(selectedUser)}
-                  className="flex w-full cursor-pointer items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-left text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <Mail className="h-4 w-4 shrink-0 text-indigo-500" />
-                  {isActionPending(`reset:${selectedUser.id}`)
-                    ? 'Invio in corso…'
-                    : 'Invia email reset password'}
-                </button>
-
-                <button
-                  type="button"
-                  disabled={isActionPending(`delete:${selectedUser.id}`)}
-                  onClick={() => handleDeleteUser(selectedUser)}
-                  className="flex w-full cursor-pointer items-center gap-2 rounded-xl border border-rose-100 bg-rose-50 px-3 py-2 text-left text-xs font-bold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <Trash2 className="h-4 w-4 shrink-0 text-rose-500" />
-                  {selectedUser.id.startsWith('mock_') ? 'Rimuovi demo' : 'Elimina profilo Firestore'}
-                </button>
-              </div>
-
-              <div className="rounded-2xl border border-indigo-100/50 bg-indigo-50/50 p-3 text-[10px] leading-relaxed text-indigo-950">
-                <span className="mb-1 flex items-center gap-1 font-bold">
-                  <Smartphone className="h-3 w-3 text-indigo-600" />
-                  Informazioni profilo
-                </span>
-                <p>
-                  ID: <code className="rounded bg-indigo-100 px-1 py-0.5 font-mono">{selectedUser.id}</code>
-                </p>
-                <p className="mt-1">
-                  Interazioni IA: <strong>{selectedUser.aiInteractionsThisMonth ?? 0} / mese</strong>
-                </p>
-                <p className="mt-1">
-                  Costo API stimato:{' '}
-                  <strong>
-                    €{((selectedUser.aiInteractionsThisMonth ?? 0) * 0.0025).toFixed(4)}
-                  </strong>
-                </p>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-3 rounded-3xl border-2 border-dashed border-slate-200 bg-slate-100/60 p-8 py-16 text-center">
-              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-200 text-slate-500">
-                <ShieldCheck className="h-6 w-6" />
-              </div>
-              <div>
-                <h3 className="text-xs font-bold text-slate-800">Pannello ispezione</h3>
-                <p className="mt-0.5 text-[11px] text-slate-400">
-                  Seleziona un utente dalla tabella per gestire il profilo.
-                </p>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Registro delle Attività Amministrative in tempo reale */}
-      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex items-center gap-2 mb-4">
-          <History className="h-5 w-5 text-indigo-600 font-bold" />
-          <div>
-            <h2 className="text-base font-extrabold text-slate-900">Registro delle Attività Amministrative</h2>
-            <p className="text-[11px] text-slate-500">
-              Tracciamento in tempo reale degli eventi di audit e delle modifiche effettuate dagli amministratori.
-            </p>
-          </div>
-        </div>
-
-        {isLoadingLogs ? (
-          <div className="py-8 text-center text-xs text-slate-400 font-medium">Caricamento registro di audit...</div>
-        ) : auditLogs.length === 0 ? (
-          <div className="py-12 border-2 border-dashed border-slate-100 rounded-2xl text-center text-xs text-slate-400 font-medium">
-            Nessun evento salvato nel log di audit di Firestore.
-          </div>
-        ) : (
-          <div className="overflow-x-auto rounded-2xl border border-slate-150">
-            <table className="w-full border-collapse text-left text-xs bg-white">
-              <thead>
-                <tr className="border-b border-slate-100 bg-slate-50 text-[10px] font-black uppercase text-slate-400">
-                  <th className="px-4 py-2.5">Data & Ora</th>
-                  <th className="px-4 py-2.5">Amministratore</th>
-                  <th className="px-4 py-2.5">Azione</th>
-                  <th className="px-4 py-2.5">Target Email</th>
-                  <th className="px-4 py-2.5">Dettagli Evento</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 font-medium">
-                {auditLogs.map((log) => {
-                  let actionBadgeColor = 'bg-slate-100 text-slate-600 border-slate-200';
-                  if (log.action.includes('GRANT_ADMIN')) {
-                    actionBadgeColor = 'bg-red-50 text-red-700 border-red-200';
-                  } else if (log.action.includes('REVOKE_ADMIN')) {
-                    actionBadgeColor = 'bg-amber-50 text-amber-700 border-amber-200';
-                  } else if (log.action.includes('SUSPEND')) {
-                    actionBadgeColor = 'bg-rose-50 text-rose-700 border-rose-200';
-                  } else if (log.action.includes('REACTIVE')) {
-                    actionBadgeColor = 'bg-emerald-50 text-emerald-700 border-emerald-200';
-                  } else if (log.action.includes('CREATE_PROFILE')) {
-                    actionBadgeColor = 'bg-indigo-50 text-indigo-700 border-indigo-200';
-                  } else if (log.action.includes('DELETE_PROFILE')) {
-                    actionBadgeColor = 'bg-rose-100 text-rose-800 border-rose-300';
-                  } else if (log.action.includes('PASSWORD_RESET')) {
-                    actionBadgeColor = 'bg-sky-50 text-sky-700 border-sky-200';
-                  } else if (log.action.includes('UPDATE_PLAN')) {
-                    actionBadgeColor = 'bg-purple-50 text-purple-700 border-purple-200';
-                  }
-
-                  return (
-                    <tr key={log.id} className="hover:bg-slate-50/50">
-                      <td className="px-4 py-3 text-slate-400 font-mono text-[10px] whitespace-nowrap">
-                        {log.timestamp ? new Date(log.timestamp).toLocaleString('it-IT') : 'Data sconosciuta'}
-                      </td>
-                      <td className="px-4 py-3 font-semibold text-slate-700 whitespace-nowrap">
-                        {log.adminEmail || 'Admin locale'}
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        <span className={`inline-flex rounded-full border px-2 py-0.5 text-[9px] font-bold ${actionBadgeColor}`}>
-                          {log.action}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        <span className="font-semibold text-slate-800">{log.targetUserEmail || 'N/A'}</span>
-                        <span className="block text-[9px] text-slate-400 font-mono">ID: {log.targetUserId}</span>
-                      </td>
-                      <td className="px-4 py-3 text-xs text-slate-600">
-                        {log.details}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+              </li>
+            ))}
+          </ul>
         )}
       </div>
     </div>
-  );
-}
-
-function MetricCard({
-  label,
-  value,
-  detail,
-  icon,
-  iconClassName,
-  isLoading,
-}: {
-  label: string;
-  value: string;
-  detail: string;
-  icon: ReactNode;
-  iconClassName: string;
-  isLoading?: boolean;
-}) {
-  return (
-    <div className="flex flex-col justify-between rounded-3xl border border-slate-200 bg-white p-5 shadow-sm min-h-[120px]">
-      {isLoading ? (
-        <div className="animate-pulse space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="h-3 w-2/3 rounded bg-slate-100" />
-            <div className="h-8 w-8 rounded-xl bg-slate-100" />
-          </div>
-          <div className="space-y-1.5">
-            <div className="h-6 w-1/2 rounded bg-slate-200" />
-            <div className="h-3 w-3/4 rounded bg-slate-100" />
-          </div>
-        </div>
-      ) : (
-        <>
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{label}</span>
-            <span className={`rounded-xl p-2 ${iconClassName}`}>{icon}</span>
-          </div>
-          <div className="mt-4">
-            <h3 className="text-xl font-black text-slate-900">{value}</h3>
-            <p className="mt-1 text-[10px] text-slate-400">{detail}</p>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-function PlanBadge({ plan }: { plan?: string }) {
-  if (plan === 'pro') {
-    return (
-      <span className="inline-flex items-center rounded-full border border-purple-200 bg-purple-100 px-2 py-0.5 text-[10px] font-bold text-purple-700">
-        PRO (IA)
-      </span>
-    );
-  }
-  if (plan === 'smart') {
-    return (
-      <span className="inline-flex items-center rounded-full border border-indigo-200 bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">
-        SMART
-      </span>
-    );
-  }
-  if (plan === 'free') {
-    return (
-      <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
-        FREE
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex items-center rounded-full border border-rose-200 bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-700">
-      PIANO NON VALIDO ({String(plan || 'VUOTO')})
-    </span>
   );
 }
