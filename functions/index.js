@@ -119,7 +119,8 @@ function planFromSubscription(sub) {
 
 async function applySubscription(sub) {
   const uid = await findUid(sub.customer, sub.metadata && sub.metadata.uid);
-  if (!uid) return;
+  // Account eliminato: non ricreare il profilo con gli eventi di Stripe che arrivano dopo
+  if (!uid || !(await userRef(uid).get()).exists) return;
   const livePlan = planFromSubscription(sub);
   const isLive = ['active', 'trialing', 'past_due'].includes(sub.status) && livePlan;
   const autoRenew = !sub.cancel_at_period_end;
@@ -141,7 +142,7 @@ async function recordInvoice(invoice) {
   // Durante la prova gratuita la fattura è di 0 €: non è un pagamento da registrare
   if (!invoice.amount_paid) return;
   const uid = await findUid(invoice.customer, null);
-  if (!uid) return;
+  if (!uid || !(await userRef(uid).get()).exists) return;
   const line = invoice.lines && invoice.lines.data[0];
   const priceId = line && line.pricing && line.pricing.price_details && line.pricing.price_details.price
     || line && line.price && line.price.id;
@@ -215,6 +216,52 @@ exports.syncAdminClaim = onCall({ region: REGION }, async (request) => {
   }
   return { admin: shouldBeAdmin };
 });
+
+// Eliminazione di un account (solo amministratori): abbonamento, dati e accesso
+exports.deleteUserAccount = onCall(
+  { region: REGION, secrets: [STRIPE_SECRET_KEY], timeoutSeconds: 120 },
+  async (request) => {
+    const adminUid = requireAuth(request);
+    if (request.auth.token.admin !== true) throw new HttpsError('permission-denied', 'Solo per amministratori.');
+    const targetUid = request.data && request.data.uid;
+    if (typeof targetUid !== 'string' || !targetUid) throw new HttpsError('invalid-argument', 'Utente non valido.');
+    if (targetUid === adminUid) throw new HttpsError('failed-precondition', 'Non puoi eliminare il tuo account da qui.');
+
+    const snap = await userRef(targetUid).get();
+    const data = snap.exists ? snap.data() : {};
+
+    // Prima l'abbonamento: se non si riesce a chiudere, non si elimina nulla (nessun addebito orfano)
+    if (data.stripeSubscriptionId) {
+      const stripe = new Stripe(STRIPE_SECRET_KEY.value());
+      try {
+        await stripe.subscriptions.cancel(data.stripeSubscriptionId);
+      } catch (err) {
+        if (!(err && err.code === 'resource_missing')) {
+          console.error('Chiusura abbonamento non riuscita', err);
+          throw new HttpsError('internal', 'Non riesco a chiudere l’abbonamento su Stripe: account non eliminato.');
+        }
+      }
+    }
+
+    await db.recursiveDelete(userRef(targetUid));
+    try {
+      await getAuth().deleteUser(targetUid);
+    } catch (err) {
+      if (!(err && err.code === 'auth/user-not-found')) throw new HttpsError('internal', 'Dati eliminati ma non l’accesso: riprova.');
+    }
+
+    await db.collection('admin_audit_logs').add({
+      adminId: adminUid,
+      adminEmail: request.auth.token.email || 'unknown',
+      action: 'DELETE_ACCOUNT',
+      targetUserId: targetUid,
+      targetUserEmail: data.email || '',
+      timestamp: FieldValue.serverTimestamp(),
+      details: data.stripeSubscriptionId ? 'Account eliminato e abbonamento chiuso' : 'Account eliminato',
+    });
+    return { ok: true };
+  }
+);
 
 // ---------------------------------------------------------------------------
 // Analisi volantini con Gemini (la chiave resta sul server)
