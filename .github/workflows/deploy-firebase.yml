@@ -45,6 +45,20 @@ jobs:
         run: |
           printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
+          node -e '
+            let j;
+            try { j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); }
+            catch (e) { console.log("::error::FIREBASE_SERVICE_ACCOUNT non è un JSON valido: incolla TUTTO il contenuto del file scaricato, da { a }."); process.exit(1); }
+            if (j.type !== "service_account" || !j.private_key || !j.client_email) {
+              console.log("::error::FIREBASE_SERVICE_ACCOUNT non è una chiave di account di servizio (manca type/private_key/client_email).");
+              process.exit(1);
+            }
+            if (j.project_id !== process.env.PROJECT) {
+              console.log("::error::La chiave appartiene al progetto " + j.project_id + ", non a " + process.env.PROJECT + ".");
+              process.exit(1);
+            }
+            console.log("Chiave valida per " + j.client_email);
+          ' "$RUNNER_TEMP/sa.json"
 
       # Le funzioni (Stripe/Gemini) si attivano solo quando i relativi valori sono configurati
       - name: Decidi cosa pubblicare
