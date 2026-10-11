@@ -23,6 +23,8 @@ export interface UserProfile {
   email?: string;
   createdAt?: string;
   aiInteractionsThisMonth?: number;
+  aiUsage?: { month: string; flyerScans: number };
+  hadSubscription?: boolean;
   tempOTP?: string;
   tempOTPExpires?: string;
   tempOTPGeneratedAt?: string;

@@ -23,6 +23,8 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Logo from './components/Logo';
+import UpgradeCard from './components/UpgradeCard';
+import { limitsFor, planName } from './lib/plans';
 import MealPlanner from './components/MealPlanner';
 import VacationPlanner from './components/VacationPlanner';
 import Pantry from './components/Pantry';
@@ -637,7 +639,7 @@ export default function App() {
             {/* Pulsante per l'Assistente Vocale (Con restrizione licenza Pro) */}
             <button
               onClick={() => {
-                if (profile?.plan !== 'pro') {
+                if (!limitsFor(profile?.plan).voiceAssistant) {
                   setShowPremiumGate('voice');
                 } else {
                   window.dispatchEvent(new CustomEvent('toggle-voice-assistant'));
@@ -683,7 +685,7 @@ export default function App() {
                       ? 'bg-emerald-500 animate-pulse'
                       : 'bg-amber-500'
                   }`} />
-                  {profile.plan === 'pro' ? 'CHEF PRO' : 'SMART'}
+                  {planName(profile.plan).toUpperCase()}
                 </span>
               )}
             </div>
@@ -718,32 +720,30 @@ export default function App() {
               />
             )}
             {activeTab === 'vacation' && (
-              <VacationPlanner 
-                userId={user.uid} 
-                onNavigateToShopping={() => setActiveTab('shopping')} 
-              />
+              limitsFor(profile?.plan).vacationPlanner ? (
+                <VacationPlanner 
+                  userId={user.uid} 
+                  onNavigateToShopping={() => setActiveTab('shopping')} 
+                />
+              ) : (
+                <UpgradeCard
+                  title="Pianifica le vacanze"
+                  text="Organizza menù e spesa anche fuori casa, per tutto il periodo che serve. È incluso nel piano Famiglia, con 7 giorni di prova gratuita."
+                  badge="Famiglia"
+                  onUpgrade={() => setActiveTab('business')}
+                />
+              )
             )}
             {activeTab === 'offers' && (
-              profile?.plan === 'pro' ? (
+              limitsFor(profile?.plan).flyerScansPerMonth > 0 ? (
                 <FlyerAnalysis userId={user.uid} profile={profile} />
               ) : (
-                <div className="bg-white border rounded-3xl p-8 text-center space-y-4 py-16 max-w-xl mx-auto mt-8 border-slate-150 shadow-sm">
-                  <div className="w-16 h-16 bg-purple-50 text-purple-600 rounded-2xl flex items-center justify-center text-3xl mx-auto border border-purple-100">
-                    <Sparkles className="w-8 h-8 animate-pulse" />
-                  </div>
-                  <div>
-                    <h3 className="font-extrabold text-slate-900 text-lg">Scansione Volantini con OCR</h3>
-                    <p className="text-xs text-slate-500 mt-2 max-w-sm mx-auto leading-relaxed">
-                      L'analisi intelligente dei volantini promozionali della spesa ti garantisce risparmi eccezionali. Questa funzionalità richiede il piano <strong>Chef IA & OCR</strong>.
-                    </p>
-                  </div>
-                  <button 
-                    onClick={() => setActiveTab('business')}
-                    className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm active:scale-97 cursor-pointer"
-                  >
-                    Vedi Piani di Monetizzazione
-                  </button>
-                </div>
+                <UpgradeCard
+                  title="Scansiona i volantini"
+                  text="Fotografa il volantino del supermercato: ti diciamo quali ingredienti sani sono in offerta e li usiamo nel menù. Fa parte del piano Chef IA."
+                  badge="Chef IA"
+                  onUpgrade={() => setActiveTab('business')}
+                />
               )
             )}
             {activeTab === 'pantry' && (
@@ -827,7 +827,7 @@ export default function App() {
       </nav>
 
       {/* Only Load voice assistant panel for premium PRO users */}
-      {profile?.plan === 'pro' && (
+      {limitsFor(profile?.plan).voiceAssistant && (
         <VoiceAssistant 
           userId={user.uid}
           activeTab={activeTab}
@@ -853,7 +853,7 @@ export default function App() {
               <div>
                 <h4 className="font-extrabold text-slate-950 text-sm">Sblocca l'Assistente Vocale IA!</h4>
                 <p className="text-xs text-slate-500 mt-2 leading-relaxed">
-                  Controlla i menu, parla a voce spontaneamente per inserire le uova esaurite nella lista e ricalcola le ricette con l'esclusivo Assistente Vocale del piano <strong>Chef IA & OCR</strong>.
+                  Controlla i menù, detta a voce cosa manca nella lista e fatti aiutare mentre cucini con l'Assistente Vocale del piano <strong>Chef IA</strong>.
                 </p>
               </div>
               <div className="flex gap-2">

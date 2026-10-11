@@ -8,6 +8,7 @@ import { calculateNutrients } from '../lib/nutritionUtils';
 import { Calendar as CalendarIcon, RefreshCcw, Save, Trash2, ChevronLeft, ChevronRight, X, Clock, Gauge, UtensilsCrossed, ChefHat, Info, Tag, Sparkles, Users, Heart, ShoppingCart, Check, AlertTriangle, Package } from 'lucide-react';
 import { getCurrentSeason, scaleIngredientAmount, getRawIngredientNames } from '../lib/utils';
 import { checkIngredientMatch, isStaple, calculateMissingFromPantry } from '../lib/pantrySync';
+import { hitsExclusion, satisfiesDiet } from '../lib/dietFilters';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface Props {
@@ -28,6 +29,11 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
   const [loading, setLoading] = useState(true);
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
   const [targetServings, setTargetServings] = useState(2);
+  // Le porzioni partono dalle persone a tavola (come la lista della spesa), finché non le cambi a mano
+  const [servingsTouched, setServingsTouched] = useState(false);
+  useEffect(() => {
+    if (!servingsTouched && familyMembers.length > 0) setTargetServings(familyMembers.length);
+  }, [familyMembers.length, servingsTouched]);
   const season = getCurrentSeason();
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncSuccess, setSyncSuccess] = useState(false);
@@ -318,56 +324,36 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
       });
     }
 
-    // Feature: Exclude based on specific user allergies/excluded ingredients and member disliked meals
+    // ALLERGIE e ingredienti esclusi dal profilo: vincoli rigidi, non si rilassano mai
+    // (la sicurezza viene prima della varietà del menù).
+    const hardExclusions = profile?.excludedIngredients || [];
+    if (hardExclusions.length > 0) {
+      availableRecipes = availableRecipes.filter(r => !hitsExclusion(r, hardExclusions));
+    }
+    if (availableRecipes.length === 0) {
+      setIsGenerating(false);
+      alert('Con le restrizioni e le allergie impostate non ci sono ricette adatte in questa stagione. Controlla l\'elenco nella sezione Famiglia.');
+      return;
+    }
+
+    // Gusti dei membri (piatti e ingredienti non graditi): preferenze, si possono rilassare se restano troppe poche ricette
     const dislikedMealIds = new Set<string>(
       familyMembers.flatMap(member => (member.dislikedMeals || []))
     );
-
-    const allExclusions = Array.from(new Set<string>([
-      ...(profile?.excludedIngredients || []),
-      ...familyMembers.flatMap(member => (member.dislikedIngredients || []))
-    ])).map(ing => ing.toLowerCase());
-
-    const categoryExclusionMap: Record<string, string[]> = {
-      'pesce': ['fish'],
-      'manzo': ['red-meat'],
-      'vitello': ['red-meat'],
-      'pollo': ['white-meat'],
-      'tacchino': ['white-meat'],
-      'coniglio': ['white-meat'],
-      'rana': ['white-meat'],
-      'agnello': ['red-meat'],
-      'pecora': ['red-meat'],
-      'piccione': ['red-meat'],
-      'uova': ['eggs'],
-      'formaggi': ['cheese'],
-      'legumi': ['legumes']
-    };
+    const softExclusions = familyMembers.flatMap(member => (member.dislikedIngredients || []));
 
     let filteredRecipesWithExclusions = availableRecipes;
-    if (dislikedMealIds.size > 0 || allExclusions.length > 0) {
-      filteredRecipesWithExclusions = availableRecipes.filter(recipe => {
-        if (dislikedMealIds.has(recipe.id)) return false;
-
-        const recipeTitle = recipe.title.toLowerCase();
-        const recipeIngs = recipe.ingredients.map(i => i.name.toLowerCase());
-        const recipeProtein = recipe.proteinType;
-
-        return !allExclusions.some(excluded => {
-          const directMatch = recipeTitle.includes(excluded) || recipeIngs.some(i => i.includes(excluded));
-          if (directMatch) return true;
-          if (recipeProtein && categoryExclusionMap[excluded]?.includes(recipeProtein)) return true;
-          return false;
-        });
-      });
+    if (dislikedMealIds.size > 0 || softExclusions.length > 0) {
+      filteredRecipesWithExclusions = availableRecipes.filter(recipe =>
+        !dislikedMealIds.has(recipe.id) && !hitsExclusion(recipe, softExclusions)
+      );
     }
 
-    // Safeguard to prevent empty recipe pool if exclusions are too aggressive
+    // Se le preferenze lasciano troppe poche ricette le rilassiamo, ma solo quelle (mai le allergie)
     if (filteredRecipesWithExclusions.length >= 10) {
       availableRecipes = filteredRecipesWithExclusions;
     } else {
-      console.warn("Available recipes pool too small due to exclusions. Relaxing exclusions to guarantee plan generation.");
-      // Even if relaxing ingredient exclusions, still filter out explicitly disliked meal IDs if possible
+      console.warn("Available recipes pool too small due to preferences. Relaxing ingredient dislikes (allergies stay enforced).");
       availableRecipes = availableRecipes.filter(r => !dislikedMealIds.has(r.id));
     }
 
@@ -954,14 +940,15 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
       const isSeasonMatch = r.season === season || r.season === 'all';
       if (!isSeasonMatch) return false;
 
+      // Una sostituzione non deve mai violare diete e allergie della famiglia
+      if (!satisfiesDiet(r, profile?.dietaryRestrictions || [])) return false;
+      if (hitsExclusion(r, profile?.excludedIngredients || [])) return false;
+
       // Filter out based on family disliked items if present
       const dislikedMeals = familyMembers.flatMap(member => member.dislikedMeals || []);
       const dislikedIngredients = familyMembers.flatMap(member => member.dislikedIngredients || []);
       if (dislikedMeals.includes(r.id)) return false;
-      const hasDislikedIngredient = r.ingredients.some(ing => 
-        dislikedIngredients.some((dis: string) => ing.name.toLowerCase().includes(dis.toLowerCase()))
-      );
-      if (hasDislikedIngredient) return false;
+      if (hitsExclusion(r, dislikedIngredients)) return false;
 
       return true;
     });
@@ -1801,14 +1788,14 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
                     </h4>
                     <div className="flex items-center gap-3 bg-white border border-slate-200 rounded-lg p-1">
                       <button 
-                        onClick={() => setTargetServings(Math.max(1, targetServings - 1))}
+                        onClick={() => { setServingsTouched(true); setTargetServings(Math.max(1, targetServings - 1)); }}
                         className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-slate-100 text-indigo-600 font-bold"
                       >
                         -
                       </button>
                       <span className="w-8 text-center font-bold text-slate-700">{targetServings}</span>
                       <button 
-                        onClick={() => setTargetServings(targetServings + 1)}
+                        onClick={() => { setServingsTouched(true); setTargetServings(targetServings + 1); }}
                         className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-slate-100 text-indigo-600 font-bold"
                       >
                         +

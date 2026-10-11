@@ -34,6 +34,7 @@ import { sendPasswordResetEmail, onAuthStateChanged } from 'firebase/auth';
 import type { User } from 'firebase/auth';
 import { auth, db } from '../lib/firebase';
 import type { UserProfile } from '../types';
+import { PRICES } from '../lib/plans';
 
 type Plan = 'free' | 'smart' | 'pro';
 type AlertType = 'success' | 'info' | 'error';
@@ -391,7 +392,7 @@ export default function AdminDashboard() {
     const freeUsers = billableUsers.filter((user) => user.plan === 'free' || !user.plan).length;
     const suspendedUsers = productionUsers.filter((user) => user.isSuspended).length;
 
-    const mrr = standardUsers * 2.99 + proUsers * 5.99;
+    const mrr = standardUsers * PRICES.smart.month + proUsers * PRICES.pro.month;
     const serverHostingCost = 15 + Math.max(0, totalUsers - 10) * 0.01;
     const firestoreCost = totalUsers * 0.00018;
     const geminiApiCost = productionUsers.reduce(
@@ -825,8 +826,8 @@ export default function AdminDashboard() {
                     className="w-full cursor-pointer rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-indigo-200"
                   >
                     <option value="free">Famiglia Free</option>
-                    <option value="smart">Famiglia Smart (€2,99)</option>
-                    <option value="pro">Famiglia Pro (€5,99)</option>
+                    <option value="smart">Famiglia (€3,99)</option>
+                    <option value="pro">Chef IA (€6,99)</option>
                   </select>
                 </label>
               </div>

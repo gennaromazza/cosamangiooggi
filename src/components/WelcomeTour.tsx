@@ -15,6 +15,7 @@ import { addDoc, collection, deleteDoc, doc, updateDoc } from 'firebase/firestor
 import { db } from '../lib/firebase';
 import Logo from './Logo';
 import { DietaryRestriction, FamilyMember, UserProfile } from '../types';
+import { limitsFor } from '../lib/plans';
 
 type Tab = 'planner' | 'shopping' | 'pantry' | 'recipes' | 'family' | 'offers' | 'vacation' | 'guide' | 'business' | 'admin';
 
@@ -53,7 +54,6 @@ export default function WelcomeTour({ user, profile, onNavigate, onProfileUpdate
   const isLocal = isDemo || !!user?.uid?.startsWith('local-');
   // L'account demo ha dati d'esempio già pronti: gli mostriamo solo la visita guidata
   const interactive = !isDemo;
-  const isFree = !profile?.plan || profile.plan === 'free';
   const firstName = (profile?.name || user?.displayName || '').trim().split(' ')[0];
 
   useEffect(() => {
@@ -118,7 +118,7 @@ export default function WelcomeTour({ user, profile, onNavigate, onProfileUpdate
   const addMember = async () => {
     const name = memberName.trim();
     if (!name) return;
-    if (isFree && members.length >= 1) {
+    if (members.length >= limitsFor(profile?.plan).maxMembers) {
       setLimitHit(true);
       return;
     }
@@ -288,7 +288,7 @@ export default function WelcomeTour({ user, profile, onNavigate, onProfileUpdate
       </div>
       {limitHit && (
         <p className="mt-3 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl p-3">
-          Il piano gratuito comprende un profilo. Con Smart o Pro potrai aggiungere tutta la famiglia, quando vorrai.
+          Il piano gratuito comprende fino a 4 persone a tavola. Con Famiglia non hai limiti, quando vorrai.
         </p>
       )}
       <div className="mt-5 flex flex-wrap gap-2">

@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { db, functions } from '../lib/firebase';
+import { limitsFor, planName } from '../lib/plans';
 import { httpsCallable } from 'firebase/functions';
 import { Capacitor } from '@capacitor/core';
 import { Browser } from '@capacitor/browser';
-import { collection, query, onSnapshot, addDoc, deleteDoc, doc, updateDoc, setDoc } from 'firebase/firestore';
+import { collection, query, onSnapshot, addDoc, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firebaseUtils';
 import { FamilyMember, DietaryRestriction, UserProfile, Recipe } from '../types';
 import { Plus, Trash2, Heart, HeartOff, User, Settings2, X, UtensilsCrossed, ShieldCheck, Sparkles, RefreshCw, Calendar, Mail, Info, CreditCard } from 'lucide-react';
@@ -136,10 +137,7 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
     }
     const path = `users/${userId}`;
     try {
-      await setDoc(doc(db, path), {
-        ...profile,
-        dietaryRestrictions: updated
-      }, { merge: true });
+      await updateDoc(doc(db, path), { dietaryRestrictions: updated });
     } catch (e) {
       handleFirestoreError(e, OperationType.UPDATE, path);
     }
@@ -150,9 +148,14 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
   const addAllergy = async () => {
     if (!profile || !newAllergy.trim()) return;
     const current = profile.excludedIngredients || [];
-    if (current.includes(newAllergy.trim())) return;
+    const value = newAllergy.trim();
+    // Niente doppioni: "Arachidi" e "arachidi" sono la stessa cosa
+    if (current.some(a => a.toLowerCase() === value.toLowerCase())) {
+      setNewAllergy('');
+      return;
+    }
 
-    const updated = [...current, newAllergy.trim()];
+    const updated = [...current, value];
     if (userId === 'demo-family-user' || userId.startsWith('local-')) {
       const newProf = { ...profile, excludedIngredients: updated };
       setProfile(newProf);
@@ -162,10 +165,7 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
     }
     const path = `users/${userId}`;
     try {
-      await setDoc(doc(db, path), {
-        ...profile,
-        excludedIngredients: updated
-      }, { merge: true });
+      await updateDoc(doc(db, path), { excludedIngredients: updated });
       setNewAllergy('');
     } catch (e) {
       handleFirestoreError(e, OperationType.UPDATE, path);
@@ -183,10 +183,7 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
     }
     const path = `users/${userId}`;
     try {
-      await setDoc(doc(db, path), {
-        ...profile,
-        excludedIngredients: updated
-      }, { merge: true });
+      await updateDoc(doc(db, path), { excludedIngredients: updated });
     } catch (e) {
       handleFirestoreError(e, OperationType.UPDATE, path);
     }
@@ -194,8 +191,7 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
 
   const addMember = async () => {
     if (!newMemberName.trim()) return;
-    const isFree = !profile || !profile.plan || profile.plan === 'free';
-    if (isFree && members.length >= 1) {
+    if (members.length >= limitsFor(profile?.plan).maxMembers) {
       setShowLimitWarning(true);
       return;
     }
@@ -382,7 +378,7 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
                     profile?.plan === 'smart' ? 'bg-indigo-50 text-indigo-700' :
                     'bg-slate-100 text-slate-600'
                   }`}>
-                    {profile?.plan === 'pro' ? 'Chef IA & OCR' : profile?.plan === 'smart' ? 'Smart' : 'Free (Base)'}
+                    {planName(profile?.plan)}
                   </span>
                 </div>
               </div>
@@ -397,10 +393,10 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
                     <span className="w-2.5 h-2.5 rounded-full bg-slate-400" />
-                    <span className="text-xs font-bold text-slate-600">Piano Base Gratuito</span>
+                    <span className="text-xs font-bold text-slate-600">Piano Gratuito</span>
                   </div>
                   <p className="text-[11px] text-slate-500 leading-normal">
-                    Sei sul piano gratuito. Sblocca ricette e pianificazioni illimitate con i piani Premium.
+                    Sei sul piano gratuito: fino a 4 persone e 20 prodotti in dispensa. Con Famiglia non hai limiti.
                   </p>
                 </div>
               ) : (
@@ -453,7 +449,7 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
         <div className="mb-6 flex items-center justify-between text-xs text-slate-500 font-semibold bg-slate-50 border border-slate-150 px-4 py-2 rounded-xl">
           <span>Profili aggiuntivi aggiunti:</span>
           <span className="font-black text-slate-850">
-            {members.length} {(!profile || !profile.plan || profile.plan === 'free') ? '/ 1 (Piano Base)' : '(Illimitati)'}
+            {members.length} {Number.isFinite(limitsFor(profile?.plan).maxMembers) ? `/ ${limitsFor(profile?.plan).maxMembers} (Piano Gratuito)` : '(Illimitati)'}
           </span>
         </div>
 
@@ -483,7 +479,7 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
               <span>⚠️ Limite profili raggiunto</span>
             </div>
             <p className="text-[11px] leading-relaxed text-slate-600">
-              Il piano gratuito consente di configurare fino a <strong>1 profilo aggiuntivo</strong> per la famiglia. Sblocca profili illimitati per tutta la famiglia con il piano Smart o Pro!
+              Il piano gratuito comprende fino a <strong>4 persone a tavola</strong>. Con il piano Famiglia o Chef IA non hai limiti.
             </p>
           </div>
         )}

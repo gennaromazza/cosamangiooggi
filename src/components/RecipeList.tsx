@@ -196,7 +196,7 @@ export default function RecipeList({ userId, voiceSearchQuery, setVoiceSearchQue
         .join(', ');
       
       if (consumedList) {
-        setCookingSuccessMessage(`Complimenti! Hai preparato questo piatto. I seguenti ingredienti sono stati dettratti dalla dispensa: ${consumedList}. Buon appetito! 👩‍🍳`);
+        setCookingSuccessMessage(`Complimenti! Hai preparato questo piatto. I seguenti ingredienti sono stati detratti dalla dispensa: ${consumedList}. Buon appetito! 👩‍🍳`);
       } else {
         setCookingSuccessMessage(`Complimenti! Hai preparato questo piatto. Tutti gli ingredienti erano di base e la dispensa è rimasta invariata. Buon appetito! 👩‍🍳`);
       }

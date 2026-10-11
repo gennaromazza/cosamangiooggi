@@ -1,5 +1,5 @@
 import { db } from './firebase';
-import { collection, doc, getDocs, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, doc, getDocs, writeBatch } from 'firebase/firestore';
 import { Recipe, PantryItem } from '../types';
 import { getRawIngredientNames, scaleIngredientAmount } from './utils';
 
@@ -75,6 +75,27 @@ export function extractCoreStems(text: string): string[] {
   return Array.from(new Set(words.map(getItalianStem).filter(Boolean)));
 }
 
+function containsWholeWords(haystack: string, needle: string): boolean {
+  return ` ${haystack} `.includes(` ${needle} `);
+}
+
+/**
+ * Vero se `text` (titolo di ricetta o ingrediente) contiene l'ingrediente da escludere (allergia o
+ * non gradito). Confronta parole intere e radici italiane, quindi "gambero" intercetta "gamberi"
+ * ma "rana" non scatta più su "grana". Sbagliare per eccesso è accettabile, per difetto no.
+ */
+export function matchesExclusion(text: string, excluded: string): boolean {
+  if (!text || !excluded) return false;
+  const cleanText = cleanIngredientName(text);
+  const cleanEx = cleanIngredientName(excluded);
+  if (!cleanText || !cleanEx) return false;
+  if (containsWholeWords(cleanText, cleanEx)) return true;
+  const exStems = extractCoreStems(excluded);
+  if (exStems.length === 0) return false;
+  const textStems = extractCoreStems(text);
+  return exStems.every(stem => textStems.includes(stem));
+}
+
 export function checkIngredientMatch(pantryItem: string, recipeIngredient: string): boolean {
   if (!pantryItem || !recipeIngredient) return false;
   
@@ -85,7 +106,8 @@ export function checkIngredientMatch(pantryItem: string, recipeIngredient: strin
   if (cleanA === cleanB) return true;
   
   if (cleanA.length >= 4 && cleanB.length >= 4) {
-    if (cleanA.includes(cleanB) || cleanB.includes(cleanA)) {
+    // Contenimento a parole intere: "mela" non deve combaciare con "melanzane"
+    if (containsWholeWords(cleanA, cleanB) || containsWholeWords(cleanB, cleanA)) {
       return true;
     }
   }
@@ -125,17 +147,36 @@ export function checkIngredientMatch(pantryItem: string, recipeIngredient: strin
   return false;
 }
 
+// Unità riconducibili a un peso/volume comune (1 ml ≈ 1 g; 1 pz ≈ 150 g, come già assunto in app)
+const UNIT_ALIASES: Record<string, string> = {
+  gr: 'g', grammi: 'g', grammo: 'g',
+  kilo: 'kg', chili: 'kg', kilogrammi: 'kg',
+  lt: 'l', litro: 'l', litri: 'l',
+  pezzo: 'pz', pezzi: 'pz',
+};
+const UNIT_TO_GRAMS: Record<string, number> = { g: 1, kg: 1000, ml: 1, l: 1000, pz: 150 };
+
+function normalizeUnit(unit: string): string {
+  const u = (unit || '').toLowerCase().trim();
+  return UNIT_ALIASES[u] || u;
+}
+
+/** Cerca nella dispensa lo stesso prodotto (stesso nome normalizzato e stessa unità) per sommare le quantità invece di duplicarlo. */
+export function findPantryDuplicate(items: PantryItem[], name: string, unit: string): PantryItem | undefined {
+  const cleaned = cleanIngredientName(name);
+  if (!cleaned) return undefined;
+  return items.find(i => cleanIngredientName(i.name) === cleaned && normalizeUnit(i.unit) === normalizeUnit(unit));
+}
+
+/** Converte tra unità note (g, kg, ml, l, pz). Se un'unità non è convertibile (es. "cucchiaio") restituisce il valore invariato. */
 export function convertIngredientUnit(val: number, from: string, to: string): number {
-  const f = from.toLowerCase().trim();
-  const t = to.toLowerCase().trim();
+  const f = normalizeUnit(from);
+  const t = normalizeUnit(to);
   if (f === t) return val;
-  if (f === 'kg' && t === 'g') return val * 1000;
-  if (f === 'g' && t === 'kg') return val / 1000;
-  if (f === 'l' && t === 'ml') return val * 1000;
-  if (f === 'ml' && t === 'l') return val / 1000;
-  if (f === 'pz' && t === 'g') return val * 150;
-  if (f === 'g' && t === 'pz') return val / 150;
-  return val;
+  const fromGrams = UNIT_TO_GRAMS[f];
+  const toGrams = UNIT_TO_GRAMS[t];
+  if (fromGrams === undefined || toGrams === undefined) return val;
+  return (val * fromGrams) / toGrams;
 }
 
 export function calculateMissingFromPantry(
@@ -211,7 +252,7 @@ export const isStaple = (name: string): boolean => {
          n.includes('pepe nero');
 };
 
-interface ConsumptionResult {
+export interface ConsumptionResult {
   ingredientName: string;
   amountConsumed: number;
   unit: string;
@@ -220,11 +261,70 @@ interface ConsumptionResult {
   status: 'depleted' | 'reduced' | 'not_found';
 }
 
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
 /**
- * Deducts recipe ingredients from the user's pantry.
- * @param userId - The user's Firebase UID
- * @param recipe - The recipe being prepared
- * @param targetServings - The target servings scaling the recipe
+ * Calcola cosa togliere dalla dispensa per cucinare una ricetta, senza toccare i dati.
+ * Lavora su una copia aggiornata a ogni ingrediente: due ingredienti che combaciano con lo stesso
+ * prodotto (es. "pomodori" e "passata") non si sovrascrivono e un prodotto esaurito non viene riusato.
+ * `finalQuantities` contiene solo i prodotti modificati: quantità 0 = da eliminare.
+ */
+export function planConsumption(
+  pantryItems: PantryItem[],
+  recipe: Recipe,
+  targetServings: number
+): { results: ConsumptionResult[]; finalQuantities: Map<string, number> } {
+  const working = pantryItems.map(p => ({ ...p }));
+  const finalQuantities = new Map<string, number>();
+  const results: ConsumptionResult[] = [];
+
+  for (const ing of recipe.ingredients) {
+    if (isStaple(ing.name)) continue;
+    const neededAmount = scaleIngredientAmount(ing.amount, recipe.servings || 2, targetServings);
+
+    let matchedItem = working.find(p => p.quantity > 0 && checkIngredientMatch(p.name, ing.name));
+    if (!matchedItem) {
+      for (const rawName of getRawIngredientNames(ing.name)) {
+        const m = working.find(p => p.quantity > 0 && checkIngredientMatch(p.name, rawName));
+        if (m) { matchedItem = m; break; }
+      }
+    }
+
+    if (!matchedItem) {
+      results.push({
+        ingredientName: ing.name,
+        amountConsumed: 0,
+        unit: ing.unit,
+        pantryItemName: 'Non in dispensa',
+        newQuantity: 0,
+        status: 'not_found'
+      });
+      continue;
+    }
+
+    const currentQty = matchedItem.quantity;
+    const convertedNeeded = convertIngredientUnit(neededAmount, ing.unit, matchedItem.unit);
+    const newQty = Math.max(0, round2(currentQty - convertedNeeded));
+    matchedItem.quantity = newQty;
+    finalQuantities.set(matchedItem.id, newQty);
+    results.push({
+      ingredientName: ing.name,
+      amountConsumed: round2(Math.min(currentQty, convertedNeeded)),
+      unit: matchedItem.unit,
+      pantryItemName: matchedItem.name,
+      newQuantity: newQty,
+      status: newQty <= 0 ? 'depleted' : 'reduced'
+    });
+  }
+
+  return { results, finalQuantities };
+}
+
+/**
+ * Detrae dalla dispensa gli ingredienti di una ricetta.
+ * @param userId - UID Firebase (o id dell'account locale/demo)
+ * @param recipe - la ricetta preparata
+ * @param targetServings - le porzioni preparate
  */
 export async function consumeIngredientsFromPantry(
   userId: string,
@@ -232,134 +332,34 @@ export async function consumeIngredientsFromPantry(
   targetServings: number
 ): Promise<ConsumptionResult[]> {
   if (userId === 'demo-family-user' || userId.startsWith('local-')) {
-    const saved = localStorage.getItem(`pantry_${userId}`);
-    let pantryItems: PantryItem[] = saved ? JSON.parse(saved) : [];
-    const results: ConsumptionResult[] = [];
-
-    for (const ing of recipe.ingredients) {
-      if (isStaple(ing.name)) continue;
-      const neededAmount = scaleIngredientAmount(ing.amount, recipe.servings || 2, targetServings);
-      let matchedItem = pantryItems.find(p => p.quantity > 0 && checkIngredientMatch(p.name, ing.name));
-      if (!matchedItem) {
-        const raws = getRawIngredientNames(ing.name);
-        for (const rawName of raws) {
-          const m = pantryItems.find(p => p.quantity > 0 && checkIngredientMatch(p.name, rawName));
-          if (m) { matchedItem = m; break; }
-        }
-      }
-
-      if (matchedItem) {
-        const currentQty = matchedItem.quantity;
-        const convertedNeeded = convertIngredientUnit(neededAmount, ing.unit, matchedItem.unit);
-        const newQty = Math.max(0, currentQty - convertedNeeded);
-        if (newQty <= 0) {
-          pantryItems = pantryItems.filter(p => p.id !== matchedItem!.id);
-          results.push({
-            ingredientName: ing.name,
-            amountConsumed: currentQty,
-            unit: matchedItem.unit,
-            pantryItemName: matchedItem.name,
-            newQuantity: 0,
-            status: 'depleted'
-          });
-        } else {
-          pantryItems = pantryItems.map(p => p.id === matchedItem!.id ? { ...p, quantity: newQty } : p);
-          results.push({
-            ingredientName: ing.name,
-            amountConsumed: convertedNeeded,
-            unit: matchedItem.unit,
-            pantryItemName: matchedItem.name,
-            newQuantity: newQty,
-            status: 'reduced'
-          });
-        }
-      } else {
-        results.push({
-          ingredientName: ing.name,
-          amountConsumed: 0,
-          unit: ing.unit,
-          pantryItemName: 'Non in dispensa',
-          newQuantity: 0,
-          status: 'not_found'
-        });
-      }
+    let pantryItems: PantryItem[] = [];
+    try {
+      pantryItems = JSON.parse(localStorage.getItem(`pantry_${userId}`) || '[]');
+    } catch {
+      pantryItems = [];
     }
-    localStorage.setItem(`pantry_${userId}`, JSON.stringify(pantryItems));
+    const { results, finalQuantities } = planConsumption(pantryItems, recipe, targetServings);
+    const updated = pantryItems
+      .filter(p => finalQuantities.get(p.id) !== 0)
+      .map(p => (finalQuantities.has(p.id) ? { ...p, quantity: finalQuantities.get(p.id)! } : p));
+    localStorage.setItem(`pantry_${userId}`, JSON.stringify(updated));
     return results;
   }
 
   const pantryPath = `users/${userId}/pantry`;
   const pantrySnapshot = await getDocs(collection(db, pantryPath));
-  const pantryItems: PantryItem[] = pantrySnapshot.docs.map(d => ({
-    id: d.id,
-    ...d.data()
-  } as PantryItem));
+  const pantryItems: PantryItem[] = pantrySnapshot.docs.map(d => ({ id: d.id, ...d.data() } as PantryItem));
 
-  const results: ConsumptionResult[] = [];
+  const { results, finalQuantities } = planConsumption(pantryItems, recipe, targetServings);
 
-  for (const ing of recipe.ingredients) {
-    if (isStaple(ing.name)) {
-      continue;
-    }
-
-    const neededAmount = scaleIngredientAmount(ing.amount, recipe.servings || 2, targetServings);
-    
-    // Find matching item in pantry
-    let matchedItem = pantryItems.find(p => p.quantity > 0 && checkIngredientMatch(p.name, ing.name));
-    
-    if (!matchedItem) {
-      // Try raw component mapping
-      const raws = getRawIngredientNames(ing.name);
-      if (raws.length > 0) {
-        for (const rawName of raws) {
-          const m = pantryItems.find(p => p.quantity > 0 && checkIngredientMatch(p.name, rawName));
-          if (m) {
-            matchedItem = m;
-            break;
-          }
-        }
-      }
-    }
-
-    if (matchedItem) {
-      const currentQty = matchedItem.quantity;
-      const convertedNeeded = convertIngredientUnit(neededAmount, ing.unit, matchedItem.unit);
-      const newQty = Math.max(0, currentQty - convertedNeeded);
-      
-      const itemRef = doc(db, pantryPath, matchedItem.id);
-
-      if (newQty <= 0) {
-        await deleteDoc(itemRef);
-        results.push({
-          ingredientName: ing.name,
-          amountConsumed: currentQty,
-          unit: matchedItem.unit,
-          pantryItemName: matchedItem.name,
-          newQuantity: 0,
-          status: 'depleted'
-        });
-      } else {
-        await updateDoc(itemRef, { quantity: newQty });
-        results.push({
-          ingredientName: ing.name,
-          amountConsumed: convertedNeeded,
-          unit: matchedItem.unit,
-          pantryItemName: matchedItem.name,
-          newQuantity: newQty,
-          status: 'reduced'
-        });
-      }
-    } else {
-      results.push({
-        ingredientName: ing.name,
-        amountConsumed: neededAmount,
-        unit: ing.unit,
-        pantryItemName: ing.name,
-        newQuantity: 0,
-        status: 'not_found'
-      });
-    }
-  }
+  // Un'unica scrittura atomica: o si aggiorna tutta la dispensa o niente
+  const batch = writeBatch(db);
+  finalQuantities.forEach((qty, id) => {
+    const ref = doc(db, pantryPath, id);
+    if (qty <= 0) batch.delete(ref);
+    else batch.update(ref, { quantity: qty });
+  });
+  await batch.commit();
 
   return results;
 }

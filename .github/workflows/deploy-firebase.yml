@@ -39,6 +39,7 @@ jobs:
           cache: npm
 
       - run: npm ci
+      - run: npm test
       - run: npm run build
 
       - name: Credenziali Firebase
@@ -64,7 +65,8 @@ jobs:
       - name: Decidi cosa pubblicare
         run: |
           if [ -n "$STRIPE_SECRET_KEY" ] && [ -n "$STRIPE_WEBHOOK_SECRET" ] && [ -n "$GEMINI_API_KEY" ] \
-             && [ -n "${{ vars.PRICE_SMART }}" ] && [ -n "${{ vars.PRICE_PRO }}" ] && [ -n "${{ vars.APP_URL }}" ]; then
+             && [ -n "${{ vars.PRICE_SMART }}" ] && [ -n "${{ vars.PRICE_PRO }}" ] \
+             && [ -n "${{ vars.PRICE_SMART_YEAR }}" ] && [ -n "${{ vars.PRICE_PRO_YEAR }}" ] && [ -n "${{ vars.APP_URL }}" ]; then
             echo "TARGETS=hosting,firestore,functions" >> "$GITHUB_ENV"
             echo "WITH_FUNCTIONS=1" >> "$GITHUB_ENV"
           else
@@ -79,6 +81,8 @@ jobs:
           {
             echo "PRICE_SMART=${{ vars.PRICE_SMART }}"
             echo "PRICE_PRO=${{ vars.PRICE_PRO }}"
+            echo "PRICE_SMART_YEAR=${{ vars.PRICE_SMART_YEAR }}"
+            echo "PRICE_PRO_YEAR=${{ vars.PRICE_PRO_YEAR }}"
             echo "ADMIN_EMAILS=${{ vars.ADMIN_EMAILS }}"
             echo "APP_URL=${{ vars.APP_URL }}"
           } > functions/.env
