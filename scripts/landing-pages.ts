@@ -528,6 +528,7 @@ export function renderPage(page: GuidePage, siteUrl: string, appUrl: string): st
 <html lang="it">
 <head>
   <meta charset="utf-8">
+  <meta name="google-site-verification" content="Tl9as-TuakdQI-j2nG1QtSZ7vNQ_9Dpq3q-PS2Q0Gp0" />
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${esc(page.title)} | Che cucino oggi?</title>
   <meta name="description" content="${esc(page.description)}">
