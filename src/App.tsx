@@ -103,7 +103,7 @@ export default function App() {
   // Sync profile & Initialize missing database fields for new accounts
   useEffect(() => {
     if (!user) return;
-    if (user.uid === 'demo-family-user') return;
+    if (user.uid === 'demo-family-user' || user.uid.startsWith('local-')) return;
     const profilePath = `users/${user.uid}`;
     const uDoc = doc(db, profilePath);
 
@@ -878,10 +878,11 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <WelcomeTour 
-        user={user} 
-        profile={profile} 
-        onNavigateToFamily={() => setActiveTab('family')} 
+      <WelcomeTour
+        user={user}
+        profile={profile}
+        onNavigate={(tab) => setActiveTab(tab)}
+        onProfileUpdate={setProfile}
       />
 
       <PWAInstallPrompt />

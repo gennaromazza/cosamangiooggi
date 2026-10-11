@@ -328,6 +328,12 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
           <h2 className="text-2xl font-bold text-slate-800">Membri della Famiglia</h2>
           <p className="text-slate-500">Imposta i gusti di tutti per menù personalizzati.</p>
         </div>
+        <button
+          onClick={() => window.dispatchEvent(new CustomEvent('open-welcome-tour'))}
+          className="self-start md:self-auto text-sm font-bold text-indigo-600 hover:text-indigo-800 underline underline-offset-4"
+        >
+          Rivedi la guida iniziale
+        </button>
       </div>
 
       {/* Visual subscription and profile status card */}
