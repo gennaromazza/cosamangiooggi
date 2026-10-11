@@ -6,7 +6,7 @@ import { PantryItem, Recipe, UserProfile } from '../types';
 import { INITIAL_RECIPES } from '../data/recipes';
 import { getRawIngredientNames, scaleIngredientAmount } from '../lib/utils';
 import { calculateNutrients } from '../lib/nutritionUtils';
-import { consumeIngredientsFromPantry, checkIngredientMatch, isStaple } from '../lib/pantrySync';
+import { consumeIngredientsFromPantry, checkIngredientMatch, isStaple, findPantryDuplicate } from '../lib/pantrySync';
 import { 
   Plus, 
   Trash2, 
@@ -65,11 +65,11 @@ export default function Pantry({ userId, profile, onNavigateToPlanner }: Props) 
       const results = await consumeIngredientsFromPantry(userId, selectedRecipe, targetServings);
       const consumedList = results
         .filter(r => r.status !== 'not_found')
-        .map(r => `${r.pantryItemName} (${r.amountConsumed} ${r.unit})`)
+        .map(r => `${r.pantryItemName} (${Math.round(r.amountConsumed * 10) / 10} ${r.unit})`)
         .join(', ');
       
       if (consumedList) {
-        setCookingSuccessMessage(`Complimenti! Hai preparato questo piatto. I seguenti ingredienti sono stati dettratti dalla dispensa: ${consumedList}. Buon appetito! 👩‍🍳`);
+        setCookingSuccessMessage(`Complimenti! Hai preparato questo piatto. I seguenti ingredienti sono stati detratti dalla dispensa: ${consumedList}. Buon appetito! 👩‍🍳`);
       } else {
         setCookingSuccessMessage(`Complimenti! Hai preparato questo piatto. Tutti gli ingredienti erano di base e la dispensa è rimasta invariata. Buon appetito! 👩‍🍳`);
       }
@@ -135,14 +135,41 @@ export default function Pantry({ userId, profile, onNavigateToPlanner }: Props) 
   }, [userId]);
 
   const addItem = async () => {
-    if (!newItem.name.trim()) return;
+    const name = newItem.name.trim();
+    const quantity = Number(newItem.quantity);
+    if (!name || !Number.isFinite(quantity) || quantity <= 0) return;
+    const isLocal = userId === 'demo-family-user' || userId.startsWith('local-');
+
+    // Stesso prodotto già presente: si somma la quantità (non si crea un doppione e non si consuma il limite)
+    const duplicate = findPantryDuplicate(items, name, newItem.unit);
+    if (duplicate) {
+      const merged = Math.round((duplicate.quantity + quantity) * 100) / 100;
+      if (isLocal) {
+        const updated = items.map(i => i.id === duplicate.id ? { ...i, quantity: merged } : i);
+        setItems(updated);
+        localStorage.setItem(`pantry_${userId}`, JSON.stringify(updated));
+      } else {
+        const path = `users/${userId}/pantry`;
+        try {
+          await updateDoc(doc(db, path, duplicate.id), { quantity: merged });
+        } catch (e) {
+          handleFirestoreError(e, OperationType.UPDATE, path);
+          return;
+        }
+      }
+      setNewItem({ name: '', quantity: 1, unit: 'pz', category: 'Altro' });
+      setShowLimitWarning(false);
+      return;
+    }
+
     const isFree = !profile || !profile.plan || profile.plan === 'free';
     if (isFree && items.length >= 15) {
       setShowLimitWarning(true);
       return;
     }
-    if (userId === 'demo-family-user' || userId.startsWith('local-')) {
-      const updated = [...items, { ...newItem, id: Date.now().toString() }];
+    const toSave = { ...newItem, name, quantity };
+    if (isLocal) {
+      const updated = [...items, { ...toSave, id: Date.now().toString() }];
       setItems(updated);
       localStorage.setItem(`pantry_${userId}`, JSON.stringify(updated));
       setNewItem({ name: '', quantity: 1, unit: 'pz', category: 'Altro' });
@@ -151,7 +178,7 @@ export default function Pantry({ userId, profile, onNavigateToPlanner }: Props) 
     }
     const path = `users/${userId}/pantry`;
     try {
-      await addDoc(collection(db, path), newItem);
+      await addDoc(collection(db, path), toSave);
       setNewItem({ name: '', quantity: 1, unit: 'pz', category: 'Altro' });
       setShowLimitWarning(false);
     } catch (e) {
@@ -174,10 +201,19 @@ export default function Pantry({ userId, profile, onNavigateToPlanner }: Props) 
     }
   };
 
-  const updateQuantity = async (id: string, delta: number) => {
+  // Passo sensato per unità: 1 g per volta sarebbe inutilizzabile
+  const stepForUnit = (unit: string) => {
+    const u = (unit || '').toLowerCase();
+    if (u === 'g' || u === 'ml') return 50;
+    if (u === 'kg' || u === 'l') return 0.5;
+    return 1;
+  };
+
+  const updateQuantity = async (id: string, direction: 1 | -1) => {
     const item = items.find(i => i.id === id);
     if (!item) return;
-    const newQty = Math.max(0, item.quantity + delta);
+    const delta = direction * stepForUnit(item.unit);
+    const newQty = Math.max(0, Math.round((item.quantity + delta) * 100) / 100);
     if (userId === 'demo-family-user' || userId.startsWith('local-')) {
       const updated = items.map(i => i.id === id ? { ...i, quantity: newQty } : i);
       setItems(updated);

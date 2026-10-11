@@ -3,7 +3,7 @@ import { db, functions } from '../lib/firebase';
 import { httpsCallable } from 'firebase/functions';
 import { Capacitor } from '@capacitor/core';
 import { Browser } from '@capacitor/browser';
-import { collection, query, onSnapshot, addDoc, deleteDoc, doc, updateDoc, setDoc } from 'firebase/firestore';
+import { collection, query, onSnapshot, addDoc, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firebaseUtils';
 import { FamilyMember, DietaryRestriction, UserProfile, Recipe } from '../types';
 import { Plus, Trash2, Heart, HeartOff, User, Settings2, X, UtensilsCrossed, ShieldCheck, Sparkles, RefreshCw, Calendar, Mail, Info, CreditCard } from 'lucide-react';
@@ -136,10 +136,7 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
     }
     const path = `users/${userId}`;
     try {
-      await setDoc(doc(db, path), {
-        ...profile,
-        dietaryRestrictions: updated
-      }, { merge: true });
+      await updateDoc(doc(db, path), { dietaryRestrictions: updated });
     } catch (e) {
       handleFirestoreError(e, OperationType.UPDATE, path);
     }
@@ -150,9 +147,14 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
   const addAllergy = async () => {
     if (!profile || !newAllergy.trim()) return;
     const current = profile.excludedIngredients || [];
-    if (current.includes(newAllergy.trim())) return;
+    const value = newAllergy.trim();
+    // Niente doppioni: "Arachidi" e "arachidi" sono la stessa cosa
+    if (current.some(a => a.toLowerCase() === value.toLowerCase())) {
+      setNewAllergy('');
+      return;
+    }
 
-    const updated = [...current, newAllergy.trim()];
+    const updated = [...current, value];
     if (userId === 'demo-family-user' || userId.startsWith('local-')) {
       const newProf = { ...profile, excludedIngredients: updated };
       setProfile(newProf);
@@ -162,10 +164,7 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
     }
     const path = `users/${userId}`;
     try {
-      await setDoc(doc(db, path), {
-        ...profile,
-        excludedIngredients: updated
-      }, { merge: true });
+      await updateDoc(doc(db, path), { excludedIngredients: updated });
       setNewAllergy('');
     } catch (e) {
       handleFirestoreError(e, OperationType.UPDATE, path);
@@ -183,10 +182,7 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
     }
     const path = `users/${userId}`;
     try {
-      await setDoc(doc(db, path), {
-        ...profile,
-        excludedIngredients: updated
-      }, { merge: true });
+      await updateDoc(doc(db, path), { excludedIngredients: updated });
     } catch (e) {
       handleFirestoreError(e, OperationType.UPDATE, path);
     }

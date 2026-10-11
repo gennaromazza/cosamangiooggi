@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { db } from '../lib/firebase';
-import { collection, addDoc, getDocs, doc, setDoc, query, onSnapshot } from 'firebase/firestore';
+import { collection, addDoc, getDocs, doc, setDoc, updateDoc, query, onSnapshot } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firebaseUtils';
 import { Recipe, UserProfile, PantryItem } from '../types';
 import { INITIAL_RECIPES } from '../data/recipes';
 import { consumeIngredientsFromPantry } from '../lib/pantrySync';
+import { extractVoiceArgument } from '../lib/voiceText';
 import { 
   Mic, 
   MicOff, 
@@ -333,15 +334,7 @@ export default function VoiceAssistant({
 
     // 3. START PREPARING A RECIPE COMMAND
     if (cmd.includes("avvia preparazione") || cmd.includes("prepara") || cmd.includes("cucina") || cmd.includes("inizia a cucinare")) {
-      let recipeQuery = cmd
-        .replace("avvia preparazione", "")
-        .replace("prepara", "")
-        .replace("cucina", "")
-        .replace("inizia a cucinare", "")
-        .replace("la ricetta", "")
-        .replace("il", "")
-        .replace("la", "")
-        .trim();
+      const recipeQuery = extractVoiceArgument(cmd, ["avvia preparazione", "prepara", "cucina", "inizia a cucinare", "la ricetta"]);
 
       if (recipeQuery.length > 2) {
         // Find best recipe match
@@ -364,20 +357,7 @@ export default function VoiceAssistant({
 
     // 4. ADD INGREDIENT TO SHOPPING LIST COMMAND
     if (cmd.includes("aggiungi") && (cmd.includes("alla spesa") || cmd.includes("alla lista della spesa") || cmd.includes("nella spesa") || cmd.includes("compra"))) {
-      let rawIng = cmd
-        .replace("aggiungi", "")
-        .replace("alla spesa", "")
-        .replace("alla lista della spesa", "")
-        .replace("nella spesa", "")
-        .replace("compra", "")
-        .replace("la", "")
-        .replace("il", "")
-        .replace("delle", "")
-        .replace("degli", "")
-        .replace("del", "")
-        .replace("di", "")
-        .replace("un po' di", "")
-        .trim();
+      const rawIng = extractVoiceArgument(cmd, ["aggiungi", "alla spesa", "alla lista della spesa", "nella spesa", "compra"]);
         
       if (rawIng) {
         // Capitalize 
@@ -404,18 +384,7 @@ export default function VoiceAssistant({
 
     // 5. ADD INGREDIENT TO PANTRY COMMAND
     if (cmd.includes("aggiungi") && (cmd.includes("alla dispensa") || cmd.includes("in dispensa") || cmd.includes("ho in dispensa") || cmd.includes("ho"))) {
-      let rawIng = cmd
-        .replace("aggiungi", "")
-        .replace("alla dispensa", "")
-        .replace("in dispensa", "")
-        .replace("ho in dispensa", "")
-        .replace("ho", "")
-        .replace("la", "")
-        .replace("il", "")
-        .replace("della", "")
-        .replace("del", "")
-        .replace("dei", "")
-        .trim();
+      const rawIng = extractVoiceArgument(cmd, ["aggiungi", "alla dispensa", "in dispensa", "ho in dispensa", "ho"]);
 
       if (rawIng.length > 1) {
         const ingName = rawIng.charAt(0).toUpperCase() + rawIng.slice(1);
@@ -440,29 +409,16 @@ export default function VoiceAssistant({
 
     // 6. EXCLUDE ALIMENTO (ALLERGY/EXCLUSION) COMMAND
     if (cmd.includes("escludi") || cmd.includes("allergia a") || cmd.includes("evita") || cmd.includes("allergico a")) {
-      let rawIng = cmd
-        .replace("escludi", "")
-        .replace("allergia a", "")
-        .replace("allergico a", "")
-        .replace("evita", "")
-        .replace("il", "")
-        .replace("la", "")
-        .replace("i", "")
-        .replace("gli", "")
-        .replace("le", "")
-        .trim();
+      const rawIng = extractVoiceArgument(cmd, ["escludi", "allergia a", "allergico a", "evita"]);
 
       if (rawIng && profile) {
         const ingName = rawIng.charAt(0).toUpperCase() + rawIng.slice(1);
         const current = profile.excludedIngredients || [];
-        if (!current.includes(ingName)) {
+        if (!current.some(c => c.toLowerCase() === ingName.toLowerCase())) {
           const updated = [...current, ingName];
           const path = `users/${userId}`;
           try {
-            await setDoc(doc(db, path), {
-              ...profile,
-              excludedIngredients: updated
-            }, { merge: true });
+            await updateDoc(doc(db, path), { excludedIngredients: updated });
             speakFeedback(`Ho aggiunto ${ingName} alle tue esclusioni alimentari. I prossimi menu eviteranno questo ingrediente.`);
             setActiveTab('family');
           } catch (e) {
@@ -478,15 +434,7 @@ export default function VoiceAssistant({
 
     // 7. SEARCH RECIPES COMMAND
     if (cmd.includes("cerca") || cmd.includes("cerca ricette con") || cmd.includes("trova ricette")) {
-      let searchQueryText = cmd
-        .replace("cerca ricette con", "")
-        .replace("cerca ricette", "")
-        .replace("cerca", "")
-        .replace("trova ricette con", "")
-        .replace("trova ricette", "")
-        .replace("le", "")
-        .replace("la", "")
-        .trim();
+      const searchQueryText = extractVoiceArgument(cmd, ["cerca ricette con", "cerca ricette", "cerca", "trova ricette con", "trova ricette"]);
 
       if (searchQueryText.length > 1) {
         setVoiceSearchQuery(searchQueryText);

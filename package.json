@@ -10,7 +10,8 @@
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
     "cap:sync": "cap sync",
-    "cap:open": "npx cap open android"
+    "cap:open": "npx cap open android",
+    "test": "tsx --test --test-force-exit src/lib/logic.test.ts"
   },
   "dependencies": {
     "@capacitor/android": "^8.4.1",
@@ -44,7 +45,7 @@
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.28.1",
     "tailwindcss": "^4.1.14",
-    "tsx": "^4.21.0",
+    "tsx": "^4.23.15",
     "typescript": "~5.8.2",
     "vite": "^6.2.3"
   }

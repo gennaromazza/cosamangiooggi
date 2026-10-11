@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react';
 import { db } from '../lib/firebase';
-import { doc, getDoc, collection, getDocs, query, onSnapshot, addDoc, deleteDoc } from 'firebase/firestore';
+import { doc, getDoc, collection, getDocs, query, onSnapshot, addDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firebaseUtils';
 import { WeeklyPlan, Recipe, PantryItem, Ingredient, UserProfile } from '../types';
 import { INITIAL_RECIPES } from '../data/recipes';
 import { ShoppingCart, Download, CheckCircle2, Circle, CheckSquare, Plus, Trash2, Sparkles, Search, X, LayoutGrid, ListTodo, ChevronLeft, ChevronRight, Info, Calendar, PenLine, MessageCircle, AlertTriangle, Lock } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getRawIngredientNames, scaleIngredientAmount } from '../lib/utils';
-import { checkIngredientMatch, isStaple, calculateMissingFromPantry } from '../lib/pantrySync';
+import { checkIngredientMatch, isStaple, calculateMissingFromPantry, findPantryDuplicate } from '../lib/pantrySync';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -274,21 +274,29 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
     }
   };
 
-  // Checking off an item completes/buys it and adds it to the Pantry
+  // Segnare un articolo come acquistato lo sposta in dispensa (sommando la quantità se esiste già)
   const handlePurchaseItem = async (name: string, amount: number, unit: string, customDocId?: string) => {
+    const isLocal = userId === 'demo-family-user' || userId.startsWith('local-');
     const isFree = !profile || !profile.plan || profile.plan === 'free';
-    if (isFree && pantryCount >= 15) {
-      setShowLimitWarningModal(true);
-      if (customDocId && !(userId === 'demo-family-user' || userId.startsWith('local-'))) {
-        await deleteDoc(doc(db, `users/${userId}/voiceShoppingItems`, customDocId));
-      }
-      return;
-    }
+    const quantity = amount > 0 ? amount : 1;
+    const finalUnit = unit || 'pz';
 
-    if (userId === 'demo-family-user' || userId.startsWith('local-')) {
-      const savedPantryStr = localStorage.getItem(`pantry_${userId}`);
-      const pantry = savedPantryStr ? JSON.parse(savedPantryStr) : [];
-      const updatedPantry = [...pantry, { id: Date.now().toString(), name, quantity: amount || 1, unit: unit || 'pz', category: 'Altro' }];
+    if (isLocal) {
+      let pantry: PantryItem[] = [];
+      try {
+        pantry = JSON.parse(localStorage.getItem(`pantry_${userId}`) || '[]');
+      } catch {
+        pantry = [];
+      }
+      const duplicate = findPantryDuplicate(pantry, name, finalUnit);
+      if (!duplicate && isFree && pantry.length >= 15) {
+        // Limite del piano gratuito: avvisiamo senza perdere l'articolo dalla lista
+        setShowLimitWarningModal(true);
+        return;
+      }
+      const updatedPantry = duplicate
+        ? pantry.map(p => p.id === duplicate.id ? { ...p, quantity: Math.round((p.quantity + quantity) * 100) / 100 } : p)
+        : [...pantry, { id: Date.now().toString(), name, quantity, unit: finalUnit, category: 'Altro' }];
       localStorage.setItem(`pantry_${userId}`, JSON.stringify(updatedPantry));
       if (customDocId) {
         deleteCustomItem(customDocId);
@@ -298,15 +306,25 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
 
     const pantryPath = `users/${userId}/pantry`;
     try {
-      // 1. Add to Pantry
-      await addDoc(collection(db, pantryPath), {
-        name: name,
-        quantity: amount || 1,
-        unit: unit || 'pz',
-        category: 'Altro'
-      });
+      const snapshot = await getDocs(collection(db, pantryPath));
+      const pantry = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as PantryItem));
+      const duplicate = findPantryDuplicate(pantry, name, finalUnit);
 
-      // 2. If it's a voice/custom document item, remove it
+      if (!duplicate && isFree && pantry.length >= 15) {
+        // Limite del piano gratuito: avvisiamo senza perdere l'articolo dalla lista
+        setShowLimitWarningModal(true);
+        return;
+      }
+
+      if (duplicate) {
+        await updateDoc(doc(db, pantryPath, duplicate.id), {
+          quantity: Math.round((duplicate.quantity + quantity) * 100) / 100
+        });
+      } else {
+        await addDoc(collection(db, pantryPath), { name, quantity, unit: finalUnit, category: 'Altro' });
+      }
+
+      // Se era un articolo aggiunto a voce o a mano, lo togliamo dalla lista
       if (customDocId) {
         await deleteDoc(doc(db, `users/${userId}/voiceShoppingItems`, customDocId));
       }
