@@ -410,3 +410,13 @@ test('"Lascia così": l\'impronta cambia solo se cambiano i problemi', () => {
   assert.equal(a, b);
   assert.notEqual(a, c);
 });
+
+test('spesa: le alternative di chi non è più a tavola non contano nelle porzioni', () => {
+  const plan = settimana(['carne'], { anna: 'veg1', fantasma: 'veg2' });
+  const conTutti = Object.fromEntries(planMeals(plan, 2).map((m) => [m.recipeId, m.people]));
+  assert.equal(conTutti.veg2, 1);
+  const soloAnna = Object.fromEntries(planMeals(plan, 2, new Set(['anna'])).map((m) => [m.recipeId, m.people]));
+  assert.equal(soloAnna.veg2, undefined);
+  assert.equal(soloAnna.veg1, 1);
+  assert.equal(soloAnna.carne, 1);
+});

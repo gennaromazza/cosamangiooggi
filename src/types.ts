@@ -11,6 +11,8 @@ export interface FamilyMember {
   dietaryRestrictions?: DietaryRestriction[];
   /** Allergie o ingredienti da evitare assolutamente solo per questa persona */
   allergies?: string[];
+  /** È la persona collegata all'account: il suo nome e quello dell'account restano uguali */
+  isSelf?: boolean;
 }
 
 export interface UserProfile {

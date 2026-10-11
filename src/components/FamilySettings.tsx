@@ -12,6 +12,7 @@ import { INITIAL_RECIPES } from '../data/recipes';
 import IngredientPicker from './IngredientPicker';
 import QuickDishModal from './QuickDishModal';
 import { hasPersonalRules } from '../lib/memberAlternatives';
+import { applyAccountName } from '../lib/selfMember';
 
 interface Props {
   userId: string;
@@ -339,6 +340,17 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
     const current = members.find(m => m.id === id);
     if (!current || current.name === name) return;
     await patchMember(id, { name });
+    if (current.isSelf) {
+      try {
+        const updated = await applyAccountName(userId, name, profile);
+        if (updated) {
+          setProfile(updated);
+          onProfileUpdate?.(updated);
+        }
+      } catch (e) {
+        console.error('Nome dell\'account non aggiornato:', e);
+      }
+    }
   };
 
   const toggleMemberDiet = (id: string, diet: DietaryRestriction) => {
@@ -421,7 +433,7 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
                           ['dislike', 'Non mangia'],
                           ['like', 'Ama'],
                           ['meals', 'Piatti'],
-                          ['diet', 'Dieta'],
+                          ['diet', 'Dieta e allergie'],
                         ] as const).map(([id, label]) => (
                           <button
                             key={id}
@@ -711,7 +723,7 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
         <div>
           <h3 className="text-xl font-semibold text-slate-900">Regole per tutti</h3>
           <p className="text-sm text-slate-500 mt-1">
-            Valgono per ogni persona a tavola e per ogni menù. Una regola solo per una persona? Aprila dalla sua scheda, in «Dieta».
+            Valgono per ogni persona a tavola e per ogni menù. Una regola solo per una persona? Aprila dalla sua scheda, in «Dieta e allergie».
           </p>
         </div>
 

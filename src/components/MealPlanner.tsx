@@ -84,13 +84,16 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
   const [favorites, setFavorites] = useState<string[]>([]);
   const [useOnlyFavorites, setUseOnlyFavorites] = useState(false);
 
+  // Porzioni del piano = persone a tavola, come nella lista della spesa (il selettore dentro la ricetta non le cambia)
+  const planServings = familyMembers.length || 2;
+
   const missingIngredientsInfo = useMemo(() => {
     if (!currentPlan || !recipes || recipes.length === 0) return { count: 0, items: [] };
 
     const rawRequirements: { name: string; amount: number; unit: string }[] = [];
     
     // Chi ha un'alternativa mangia quella: si compra per le porzioni reali di ogni piatto
-    planMeals(currentPlan, targetServings).forEach(({ recipeId, people }) => {
+    planMeals(currentPlan, planServings, new Set(familyMembers.map(m => m.id))).forEach(({ recipeId, people }) => {
       const recipe = recipes.find(r => r.id === recipeId);
       if (!recipe) return;
       const ratio = people / (recipe.servings || 2);
@@ -109,7 +112,7 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
       count: list.length,
       items: list
     };
-  }, [currentPlan, recipes, pantryItems, targetServings]);
+  }, [currentPlan, recipes, pantryItems, planServings, familyMembers]);
 
   const planHasMeals = useMemo(() => {
     if (!currentPlan) return false;
@@ -1171,6 +1174,16 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
               Lascia così
             </button>
           </div>
+        </div>
+      )}
+      {currentPlan?.generatedWithoutFamily && familyMembers.length > 0 && !showIssues && !isGenerating && (
+        <div role="status" className="bg-amber-50 border border-amber-200 rounded-2xl p-4 space-y-3">
+          <p className="text-sm text-amber-900 leading-relaxed">
+            Questo menù è stato creato prima di aggiungere le persone a tavola, quindi non tiene conto dei loro gusti.
+          </p>
+          <button onClick={generateNow} className="h-11 px-4 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold">
+            Crealo di nuovo
+          </button>
         </div>
       )}
       {rebuildNotice && !showIssues && (

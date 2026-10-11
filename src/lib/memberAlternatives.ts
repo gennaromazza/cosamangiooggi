@@ -56,8 +56,9 @@ export function pickAlternatives(args: {
 /**
  * Quante persone mangiano ogni piatto del piano. Chi ha un'alternativa mangia quella (1 porzione),
  * gli altri mangiano il piatto di tutti: serve a spesa e dispensa per non comprare di troppo.
+ * Con `memberIds` si ignorano le alternative di chi non è più a tavola.
  */
-export function planMeals(plan: WeeklyPlan, servings: number): { recipeId: string; people: number }[] {
+export function planMeals(plan: WeeklyPlan, servings: number, memberIds?: Set<string>): { recipeId: string; people: number }[] {
   const people = new Map<string, number>();
   const add = (id: string, count: number) => people.set(id, (people.get(id) || 0) + count);
   for (const day of Object.values(plan.days)) {
@@ -66,7 +67,8 @@ export function planMeals(plan: WeeklyPlan, servings: number): { recipeId: strin
       [day.dinnerIds, day.dinnerAlt],
     ];
     for (const [ids, alt] of slots) {
-      const altIds = Object.values(alt || {});
+      // Le alternative di persone non più a tavola non contano
+      const altIds = Object.entries(alt || {}).filter(([memberId]) => !memberIds || memberIds.has(memberId)).map(([, recipeId]) => recipeId);
       const forEveryoneElse = Math.max(servings - altIds.length, 0);
       (ids || []).forEach((id) => add(id, forEveryoneElse));
       altIds.forEach((id) => add(id, 1));

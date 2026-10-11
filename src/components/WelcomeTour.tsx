@@ -19,6 +19,7 @@ import { FamilyMember, PantryItem, UserProfile } from '../types';
 import { limitsFor } from '../lib/plans';
 import { membersWithoutPreferences, PANTRY_STARTERS, pantryItemFor } from '../lib/onboarding';
 import FamilySettings from './FamilySettings';
+import { applyAccountName } from '../lib/selfMember';
 import IngredientPicker from './IngredientPicker';
 
 type Tab = 'planner' | 'shopping' | 'pantry' | 'recipes' | 'family' | 'offers' | 'vacation' | 'guide' | 'business' | 'admin';
@@ -64,6 +65,7 @@ export default function WelcomeTour({ user, profile, onNavigate, onProfileUpdate
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [pantry, setPantry] = useState<PantryItem[]>([]);
+  const [pantryLimitHit, setPantryLimitHit] = useState(false);
 
   const isDemo = user?.uid === 'demo-family-user';
   const isLocal = isDemo || !!user?.uid?.startsWith('local-');
@@ -122,7 +124,7 @@ export default function WelcomeTour({ user, profile, onNavigate, onProfileUpdate
       let list = readLocal<FamilyMember[]>(`members_${user.uid}`, []);
       if (list.length === 0 && shouldSeed()) {
         seededFor.current = user.uid;
-        list = [{ id: Date.now().toString(), name: firstName, ...BLANK_MEMBER }];
+        list = [{ id: Date.now().toString(), name: firstName, isSelf: true, ...BLANK_MEMBER }];
         try {
           localStorage.setItem(`members_${user.uid}`, JSON.stringify(list));
         } catch {
@@ -140,7 +142,7 @@ export default function WelcomeTour({ user, profile, onNavigate, onProfileUpdate
         setMembers(list);
         if (list.length === 0 && shouldSeed()) {
           seededFor.current = user.uid;
-          addDoc(collection(db, `users/${user.uid}/familyMembers`), { name: firstName, ...BLANK_MEMBER }).catch((e) => {
+          addDoc(collection(db, `users/${user.uid}/familyMembers`), { name: firstName, isSelf: true, ...BLANK_MEMBER }).catch((e) => {
             console.error('Impossibile aggiungere la persona registrata:', e);
             seededFor.current = null;
           });
@@ -253,6 +255,10 @@ export default function WelcomeTour({ user, profile, onNavigate, onProfileUpdate
       } else {
         await updateDoc(doc(db, `users/${user.uid}/familyMembers`, id), { name });
       }
+      if (members.find((m) => m.id === id)?.isSelf) {
+        const updated = await applyAccountName(user.uid, name, profile);
+        if (updated) onProfileUpdate(updated);
+      }
     } catch (e) {
       console.error('Impossibile cambiare il nome:', e);
     }
@@ -262,6 +268,11 @@ export default function WelcomeTour({ user, profile, onNavigate, onProfileUpdate
 
   const togglePantry = async (name: string) => {
     const existing = pantry.find((p) => p.name.toLowerCase() === name.toLowerCase());
+    if (!existing && pantry.length >= limitsFor(profile?.plan).maxPantryItems) {
+      setPantryLimitHit(true);
+      return;
+    }
+    setPantryLimitHit(false);
     try {
       if (existing) {
         if (isLocal) {
@@ -446,7 +457,7 @@ export default function WelcomeTour({ user, profile, onNavigate, onProfileUpdate
       </p>
       <h2 className="text-3xl font-semibold text-slate-900 mb-2">Cosa mangia {currentMember.name}?</h2>
       <p className="text-slate-600 leading-relaxed mb-5">
-        Indica cosa non mangia, cosa ama e i suoi piatti. In «Dieta» trovi anche <strong>allergie e intolleranze</strong>:
+        Indica cosa non mangia, cosa ama e i suoi piatti. In «Dieta e allergie» trovi anche <strong>allergie e intolleranze</strong>:
         valgono solo per {currentMember.name}, e il menù le rispetta con un piatto alternativo. Puoi saltare e completare dopo.
       </p>
       <FamilySettings
@@ -475,6 +486,11 @@ export default function WelcomeTour({ user, profile, onNavigate, onProfileUpdate
         activeClass="bg-emerald-600 border-emerald-600 text-white"
         placeholder="Cerca o aggiungi un prodotto"
       />
+      {pantryLimitHit && (
+        <p className="mt-3 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl p-3">
+          Il piano gratuito comprende fino a {limitsFor(profile?.plan).maxPantryItems} prodotti in dispensa. Con Famiglia non hai limiti, quando vorrai.
+        </p>
+      )}
       <p className="mt-4 text-sm text-slate-500">Le quantità sono indicative: le correggi in Dispensa.</p>
     </div>
   );
