@@ -34,6 +34,8 @@ jobs:
 
       - run: npm ci
       - run: npm run build
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
 
       # La cartella android/ non è nel repository: la generiamo ad ogni build
       - run: npx cap add android
@@ -92,6 +94,11 @@ jobs:
           MANIFEST=android/app/src/main/AndroidManifest.xml
           grep -q POST_NOTIFICATIONS "$MANIFEST" || sed -i 's#</manifest>#    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n</manifest>#' "$MANIFEST"
           grep POST_NOTIFICATIONS "$MANIFEST"
+      # Versione dell'app: cresce a ogni build, così Android la riconosce come aggiornamento
+      - name: Versione dell'app
+        run: |
+          sed -i "s/versionCode 1/versionCode ${{ github.run_number }}/; s/versionName \"1.0\"/versionName \"$(date +%Y.%m.%d).${{ github.run_number }}\"/" android/app/build.gradle
+          grep -n "versionCode\|versionName" android/app/build.gradle
       - run: npx cap sync android
 
       - name: Build APK (debug, installabile senza store)
@@ -111,6 +118,7 @@ jobs:
           APP_URL: ${{ vars.APP_URL }}
           APK: android/app/build/outputs/apk/debug/app-debug.apk
           BUILD: ${{ github.sha }}
+          BUILD_NUMBER: ${{ github.run_number }}
         run: |
           export SITE_URL="${SITE_URL:-https://che-cucino-oggi.web.app}"
           export APP_URL="${APP_URL:-https://$PROJECT.web.app}"

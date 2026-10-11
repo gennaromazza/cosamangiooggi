@@ -42,6 +42,7 @@ import BusinessModel from './components/BusinessModel';
 import AdminDashboard from './components/AdminDashboard';
 import WelcomeTour from './components/WelcomeTour';
 import AccountSettings from './components/AccountSettings';
+import UpdateBanner from './components/UpdateBanner';
 import PWAInstallPrompt from './components/PWAInstallPrompt';
 import { auth, db, functions } from './lib/firebase';
 import { httpsCallable } from 'firebase/functions';
@@ -973,6 +974,7 @@ export default function App() {
       />
 
       <PWAInstallPrompt />
+      <UpdateBanner />
     </div>
   );
 }

@@ -6,6 +6,10 @@ import {defineConfig} from 'vite';
 export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss()],
+    // Numero della build (in CI è il numero dell'esecuzione): l'app lo confronta con quello del sito per proporre l'aggiornamento
+    define: {
+      __BUILD_NUMBER__: JSON.stringify(Number(process.env.BUILD_NUMBER) || 0),
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

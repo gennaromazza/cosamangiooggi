@@ -32,7 +32,12 @@ if (apk && existsSync(apk)) {
   const sizeMB = Math.round((statSync(apk).size / 1024 / 1024) * 10) / 10;
   writeFileSync(
     join(out, 'version.json'),
-    JSON.stringify({ date: new Date().toISOString(), build: (process.env.BUILD || '').slice(0, 7), sizeMB }),
+    JSON.stringify({
+      number: Number(process.env.BUILD_NUMBER) || 0,
+      date: new Date().toISOString(),
+      build: (process.env.BUILD || '').slice(0, 7),
+      sizeMB,
+    }),
   );
   console.log(`APK incluso (${sizeMB} MB)`);
 } else {

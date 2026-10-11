@@ -17,6 +17,7 @@ import { extractVoiceArgument } from './voiceText';
 import { INITIAL_RECIPES } from '../data/recipes';
 import type { PantryItem, Recipe } from '../types';
 import { readFileSync } from 'node:fs';
+import { isNewer } from './updateCheck';
 import { fillPlaceholders } from '../../scripts/landing';
 import { dishSuggestionsLeft, limitsFor, normalizePlan, planName, PRICES, yearlySavingPercent, PLAN_LIMITS } from './plans';
 
@@ -258,4 +259,13 @@ test('sito ufficiale: prezzi dal codice, nessun segnaposto rimasto e SEO di base
   assert.ok(title.length > 20 && title.length <= 80, `titolo di ${title.length} caratteri`);
   assert.ok(description.length >= 80 && description.length <= 170, `descrizione di ${description.length} caratteri`);
   assert.equal((home.match(/<h1[ >]/g) || []).length, 1);
+});
+
+
+test('aggiornamenti: si propone solo una build più recente di quella installata', () => {
+  assert.equal(isNewer(19, 18), true);
+  assert.equal(isNewer(18, 18), false);
+  assert.equal(isNewer(17, 18), false);
+  assert.equal(isNewer(0, 18), false);
+  assert.equal(isNewer(Number.NaN, 18), false);
 });
