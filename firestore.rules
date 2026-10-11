@@ -15,18 +15,18 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    // Il claim "admin" viene assegnato solo dal server (funzione syncAdminClaim,
+    // in base all'elenco ADMIN_EMAILS). Il client non può autoassegnarselo.
     function isAdmin() {
-      return isSignedIn() && (
-        (request.auth.token.email != null && (
-          request.auth.token.email.matches('(?i)^debora\\.dibellucci12@gmail\\.com$') ||
-          request.auth.token.email.matches('(?i)^debora\\.dibellucci12@gmail\\.co$') ||
-          request.auth.token.email.matches('(?i)^info\\.mondogadgets@gmail\\.com$') ||
-          request.auth.token.email.matches('(?i).*admin.*')
-        )) || (
-          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true
-        )
-      );
+      return isSignedIn() && request.auth.token.admin == true;
+    }
+
+    // Campi del profilo che può modificare solo il server (Stripe/Cloud Functions) o un admin
+    function protectedFields() {
+      return ['plan', 'isAdmin', 'isSuspended', 'subscriptionStatus', 'autoRenew',
+              'paymentHistory', 'stripeCustomerId', 'stripeSubscriptionId',
+              'aiInteractionsThisMonth', 'tempOTP', 'tempOTPExpires', 'tempOTPGeneratedAt',
+              'tempPassword', 'tempPasswordGeneratedAt'];
     }
 
     function isValidId(id) {
@@ -49,7 +49,9 @@ service cloud.firestore {
     match /users/{userId} {
       allow get: if isOwner(userId) || isAdmin();
       allow list: if isAdmin();
-      allow write: if isOwner(userId) || isAdmin();
+      allow create: if (isOwner(userId) && !request.resource.data.keys().hasAny(protectedFields())) || isAdmin();
+      allow update: if (isOwner(userId) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(protectedFields())) || isAdmin();
+      allow delete: if isAdmin();
       
       // Subcollections
       match /familyMembers/{memberId} {

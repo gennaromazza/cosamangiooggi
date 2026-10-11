@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { GoogleGenAI, Type } from "@google/genai";
-import { db } from '../lib/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { db, functions } from '../lib/firebase';
 import { doc, setDoc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firebaseUtils';
 import { UserProfile } from '../types';
@@ -29,8 +29,8 @@ export default function FlyerAnalysis({ userId, profile }: Props) {
     if (!file) return;
 
     // Check file size (limit to 10MB to avoid browser crashes with base64)
-    if (file.size > 10 * 1024 * 1024) {
-      setError("Il file è troppo grande (massimo 10MB). Carica un file più piccolo.");
+    if (file.size > 6 * 1024 * 1024) {
+      setError("Il file è troppo grande (massimo 6MB). Carica un file più piccolo.");
       return;
     }
 
@@ -43,54 +43,13 @@ export default function FlyerAnalysis({ userId, profile }: Props) {
         const base64Data = (reader.result as string).split(',')[1];
         const mimeType = file.type;
 
-        // Verify API KEY exists
-        const apiKey = process.env.GEMINI_API_KEY;
-        if (!apiKey || apiKey === 'undefined') {
-          throw new Error("Chiave API mancante. Verifica la configurazione.");
-        }
+        // L'analisi avviene sul server: la chiave Gemini non è mai nell'app
+        const result = await httpsCallable<{ data: string; mimeType: string }, { ingredients: string[] }>(
+          functions,
+          'analyzeFlyer'
+        )({ data: base64Data, mimeType });
+        const ingredients = result.data.ingredients;
 
-        const ai = new GoogleGenAI({ apiKey });
-        
-        const response = await ai.models.generateContent({
-          model: "gemini-3-flash-preview",
-          contents: {
-            parts: [
-              {
-                inlineData: {
-                  mimeType: mimeType,
-                  data: base64Data
-                }
-              },
-              {
-                text: "Analizza questo volantino delle offerte e identifica gli ingredienti alimentari SANI (carne, pesce, verdura, frutta, cereali, legumi, latticini base) che sono in offerta. \n\nREGOLE CRITICHE:\n1. ESCLUDI ASSOLUTAMENTE: alcolici (vino, birra, superalcolici), gelati, dolci industriali (merendine, biscotti farciti), snack fritti e bibite zuccherate.\n2. Includi solo ingredienti 'base' che possono essere usati come componenti di un pasto.\n3. Restituisci SOLO una lista di nomi di ingredienti in italiano, puliti e semplici (es. 'Pollo', 'Salmone', 'Zucchine', 'Bresaola', 'Tacchino', 'Carote', 'Salsiccia')."
-              }
-            ]
-          },
-          config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                ingredients: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING },
-                  description: "Lista di ingredienti in offerta"
-                }
-              },
-              required: ["ingredients"]
-            }
-          }
-        });
-
-        if (!response.text) {
-          throw new Error("Nessuna risposta dal modello.");
-        }
-
-        const result = JSON.parse(response.text);
-        const ingredients = (result.ingredients as string[]).map(ing => 
-          ing.charAt(0).toUpperCase() + ing.slice(1).toLowerCase()
-        );
-        
         setExtractedOffers(ingredients);
         await saveOffers(ingredients);
       } catch (err: any) {

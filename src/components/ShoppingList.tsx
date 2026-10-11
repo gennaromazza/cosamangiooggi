@@ -693,7 +693,7 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
                 <select
                   value={newItem.unit}
                   onChange={(e) => setNewItem({ ...newItem, unit: e.target.value })}
-                  className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-lg px-2 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 >
                   <option value="pz">pz</option>
                   <option value="g">g</option>

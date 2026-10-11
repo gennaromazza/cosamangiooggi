@@ -31,8 +31,10 @@ import {
   Play
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { doc, updateDoc, setDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { Capacitor } from '@capacitor/core';
+import { Browser } from '@capacitor/browser';
+import { functions } from '../lib/firebase';
 import { UserProfile } from '../types';
 import { jsPDF } from 'jspdf';
 
@@ -58,22 +60,7 @@ export default function BusinessModel({
   const [payingConversionRateStandard, setPayingConversionRateStandard] = useState<number>(5); // % of MAU subscribing to Standard (2.99)
   const [payingConversionRatePro, setPayingConversionRatePro] = useState<number>(3); // % of MAU subscribing to Pro (5.99)
   
-  // Checkout modal states
-  const [showCheckout, setShowCheckout] = useState<boolean>(false);
-  const [checkoutPlan, setCheckoutPlan] = useState<'smart' | 'pro' | null>(null);
-  const [selectedGateway, setSelectedGateway] = useState<'gpay' | 'googleplay'>('gpay');
-  
-  // Payment states
-  const [isProcessingPayment, setIsProcessingPayment] = useState<boolean>(false);
-  const [paymentSuccess, setPaymentSuccess] = useState<boolean>(false);
-  const [checkoutError, setCheckoutError] = useState<string | null>(null);
-  
-  // Google Pay specific biometric state
-  const [isBiometricScanning, setIsBiometricScanning] = useState<boolean>(false);
-  const [biometricProgress, setBiometricProgress] = useState<number>(0);
-  
-  // Google Play Billing native state
-  const [isPlayBillingLoading, setIsPlayBillingLoading] = useState<boolean>(false);
+  const [billingBusy, setBillingBusy] = useState<boolean>(false);
 
   // Active Plan Level For Current User
   const currentPlan = profile?.plan || 'free';
@@ -129,219 +116,33 @@ export default function BusinessModel({
     };
   }, [mau, payingConversionRateStandard, payingConversionRatePro, costs]);
 
-  // Handle Checkout Open Click
-  const handleOpenCheckout = (plan: 'smart' | 'pro') => {
-    setCheckoutPlan(plan);
-    setCheckoutError(null);
-    setPaymentSuccess(false);
-    setSelectedGateway('gpay');
-    setShowCheckout(true);
-    setIsBiometricScanning(false);
-    setBiometricProgress(0);
-    setIsPlayBillingLoading(false);
-  };
+  const isLocalAccount = userId === 'demo-family-user' || userId.startsWith('local-');
 
-  // Google Pay Biometric Scan simulation
-  const handleGPayTouchStart = () => {
-    if (isProcessingPayment || paymentSuccess) return;
-    setIsBiometricScanning(true);
-    setBiometricProgress(0);
-    setCheckoutError(null);
-  };
-
-  useEffect(() => {
-    let interval: any;
-    if (isBiometricScanning && biometricProgress < 100) {
-      interval = setInterval(() => {
-        setBiometricProgress((prev) => {
-          if (prev >= 100) {
-            clearInterval(interval);
-            handleCompleteGPayPayment();
-            return 100;
-          }
-          return prev + 5;
-        });
-      }, 70);
+  // Apre una pagina di Stripe (checkout o gestione abbonamento) nel browser
+  const openStripePage = async (fn: 'createCheckoutSession' | 'createPortalSession', data?: { plan: 'smart' | 'pro' }) => {
+    if (isLocalAccount) {
+      alert("Per abbonarti devi accedere con un account (email o Google), non in modalità demo/locale.");
+      return;
     }
-    return () => clearInterval(interval);
-  }, [isBiometricScanning, biometricProgress]);
-
-  const handleGPayTouchEnd = () => {
-    if (biometricProgress < 100) {
-      setIsBiometricScanning(false);
-      setBiometricProgress(0);
+    setBillingBusy(true);
+    try {
+      const result = await httpsCallable<unknown, { url: string }>(functions, fn)(data);
+      if (Capacitor.isNativePlatform()) {
+        await Browser.open({ url: result.data.url });
+      } else {
+        window.location.assign(result.data.url);
+      }
+    } catch (e: any) {
+      console.error(e);
+      alert(e?.message || "Impossibile aprire la pagina di pagamento. Riprova.");
+    } finally {
+      setBillingBusy(false);
     }
   };
 
-  const handleCompleteGPayPayment = async () => {
-    setIsBiometricScanning(false);
-    setIsProcessingPayment(true);
-
-    setTimeout(async () => {
-      try {
-        if (checkoutPlan) {
-          const currentHistory = profile?.paymentHistory || [];
-          const mockTxId = `gpay_tx_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
-          const newPayment = {
-            transactionId: mockTxId,
-            plan: checkoutPlan,
-            amount: checkoutPlan === 'smart' ? 2.99 : 5.99,
-            date: new Date().toISOString(),
-            status: 'paid' as const,
-            paymentMethod: 'gpay' as const,
-          };
-
-          const updatedHistory = [newPayment, ...currentHistory];
-
-          if (userId === 'demo-family-user' || userId.startsWith('local-')) {
-            const updatedProfile: UserProfile = {
-              ...(profile || {
-                id: userId,
-                name: 'Famiglia Demo',
-                email: 'demo@che-cucino-oggi.it',
-                dietaryRestrictions: [],
-                excludedIngredients: [],
-                createdAt: new Date().toISOString()
-              }),
-              plan: checkoutPlan,
-              paymentHistory: updatedHistory,
-              subscriptionStatus: 'active',
-              autoRenew: true
-            };
-            localStorage.setItem(`profile_${userId}`, JSON.stringify(updatedProfile));
-            if (onProfileUpdate) {
-              onProfileUpdate(updatedProfile);
-            }
-          } else {
-            const userRef = doc(db, 'users', userId);
-            await setDoc(userRef, {
-              plan: checkoutPlan,
-              paymentHistory: updatedHistory,
-              subscriptionStatus: 'active',
-              autoRenew: true
-            }, { merge: true });
-          }
-
-          setPaymentSuccess(true);
-          setIsProcessingPayment(false);
-
-          setTimeout(() => {
-            setShowCheckout(false);
-            setPaymentSuccess(false);
-          }, 2500);
-        }
-      } catch (e) {
-        console.error(e);
-        setCheckoutError("Errore nell'attivazione del piano.");
-        setIsProcessingPayment(false);
-      }
-    }, 1500);
-  };
-
-  // Google Play Billing (IAP Android) simulation
-  const handleGooglePlaySubscribe = async () => {
-    if (!checkoutPlan) return;
-    setIsPlayBillingLoading(true);
-    setCheckoutError(null);
-
-    setTimeout(async () => {
-      try {
-        const currentHistory = profile?.paymentHistory || [];
-        const mockTxId = `gplay_iap_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
-        const newPayment = {
-          transactionId: mockTxId,
-          plan: checkoutPlan,
-          amount: checkoutPlan === 'smart' ? 2.99 : 5.99,
-          date: new Date().toISOString(),
-          status: 'paid' as const,
-          paymentMethod: 'googleplay' as const,
-        };
-
-        const updatedHistory = [newPayment, ...currentHistory];
-
-        if (userId === 'demo-family-user' || userId.startsWith('local-')) {
-          const updatedProfile: UserProfile = {
-            ...(profile || {
-              id: userId,
-              name: 'Famiglia Demo',
-              email: 'demo@che-cucino-oggi.it',
-              dietaryRestrictions: [],
-              excludedIngredients: [],
-              createdAt: new Date().toISOString()
-            }),
-            plan: checkoutPlan,
-            paymentHistory: updatedHistory,
-            subscriptionStatus: 'active',
-            autoRenew: true
-          };
-          localStorage.setItem(`profile_${userId}`, JSON.stringify(updatedProfile));
-          if (onProfileUpdate) {
-            onProfileUpdate(updatedProfile);
-          }
-        } else {
-          const userRef = doc(db, 'users', userId);
-          await setDoc(userRef, {
-            plan: checkoutPlan,
-            paymentHistory: updatedHistory,
-            subscriptionStatus: 'active',
-            autoRenew: true
-          }, { merge: true });
-        }
-
-        setIsPlayBillingLoading(false);
-        setPaymentSuccess(true);
-
-        setTimeout(() => {
-          setShowCheckout(false);
-          setPaymentSuccess(false);
-        }, 2500);
-      } catch (err) {
-        console.error(err);
-        setCheckoutError("Impossibile connettersi al Google Play Service.");
-        setIsPlayBillingLoading(false);
-      }
-    }, 2000);
-  };
-
-  // Downgrade / Cancel Subscription
-  const handleDowngradeToFree = async () => {
-    if (window.confirm("Vuoi davvero disdire il tuo abbonamento e tornare al piano Famiglia Base gratuito?")) {
-      try {
-        if (userId === 'demo-family-user' || userId.startsWith('local-')) {
-          const updatedProfile: UserProfile = {
-            ...(profile || {
-              id: userId,
-              name: 'Famiglia Demo',
-              email: 'demo@che-cucino-oggi.it',
-              dietaryRestrictions: [],
-              excludedIngredients: [],
-              createdAt: new Date().toISOString()
-            }),
-            plan: 'free',
-            subscriptionStatus: undefined,
-            autoRenew: false
-          };
-          localStorage.setItem(`profile_${userId}`, JSON.stringify(updatedProfile));
-          if (onProfileUpdate) {
-            onProfileUpdate(updatedProfile);
-          }
-        } else {
-          const userRef = doc(db, 'users', userId);
-          await setDoc(userRef, {
-            plan: 'free',
-            subscriptionStatus: null,
-            autoRenew: false
-          }, { merge: true });
-        }
-        alert("Abbonamento disdetto correttamente. Sei tornato al Piano Base Gratuito.");
-      } catch (e) {
-        console.error(e);
-        alert("Errore durante il downgrade del piano.");
-      }
-    }
-  };
+  const handleOpenCheckout = (plan: 'smart' | 'pro') => openStripePage('createCheckoutSession', { plan });
+  // Disdetta, riattivazione, metodo di pagamento e fatture: portale clienti Stripe
+  const handleManageSubscription = () => openStripePage('createPortalSession');
 
   // PDF Invoice Builder using jsPDF
   const handleDownloadInvoice = (invoice: any) => {
@@ -439,214 +240,9 @@ export default function BusinessModel({
     }
   };
 
-  const handleSimulateSubscription = async (plan: 'free' | 'smart' | 'pro', autoRenew: boolean, status: 'active' | 'pending_renewal' | undefined) => {
-    try {
-      const updatedProfile: UserProfile = {
-        ...(profile || {
-          id: userId,
-          name: 'Famiglia Demo',
-          email: 'demo@che-cucino-oggi.it',
-          dietaryRestrictions: [],
-          excludedIngredients: [],
-          createdAt: new Date().toISOString()
-        }),
-        plan,
-        autoRenew,
-        subscriptionStatus: status
-      };
-
-      if (userId === 'demo-family-user' || userId.startsWith('local-')) {
-        localStorage.setItem(`profile_${userId}`, JSON.stringify(updatedProfile));
-        if (onProfileUpdate) {
-          onProfileUpdate(updatedProfile);
-        }
-      } else {
-        const userRef = doc(db, 'users', userId);
-        await setDoc(userRef, {
-          plan,
-          autoRenew,
-          subscriptionStatus: status || null
-        }, { merge: true });
-        
-        if (onProfileUpdate) {
-          onProfileUpdate(updatedProfile);
-        }
-      }
-    } catch (e) {
-      console.error("Errore durante la simulazione dello stato:", e);
-    }
-  };
-
   return (
     <div className="space-y-8 pb-20">
       
-      {/* Sandbox & Debugging Console (Admin only) */}
-      {isAdmin && (
-        <div className="bg-slate-900 text-slate-100 rounded-3xl p-6 border border-slate-800 shadow-xl relative overflow-hidden">
-          <div className="absolute top-0 right-0 p-3 bg-indigo-500/10 text-indigo-400 font-mono text-[9px] uppercase tracking-wider rounded-bl-xl border-l border-b border-slate-800">
-            Console Sandbox Audit
-          </div>
-
-          <div className="flex items-center gap-3 mb-4">
-            <div className="p-2.5 bg-indigo-500/10 text-indigo-400 rounded-xl">
-              <Terminal className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="text-sm font-extrabold text-white flex items-center gap-2">
-                Console di Test & Simulazione Abbonamenti
-                <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[9px] px-2 py-0.5 rounded-full uppercase font-mono font-bold animate-pulse">
-                  Online
-                </span>
-              </h3>
-              <p className="text-[10px] text-slate-400">
-                Usa questa console di audit per forzare gli stati dell'abbonamento e verificare istantaneamente la reattività dei gate di sicurezza e dei badge.
-              </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pt-2">
-            {/* Preset Buttons */}
-            <div className="lg:col-span-7 space-y-3">
-              <span className="text-[9px] uppercase font-bold text-slate-500 block tracking-wider">Forza Stato Abbonamento</span>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleSimulateSubscription('free', false, undefined)}
-                  className={`py-2 px-3 text-left rounded-xl transition-all flex items-center gap-2 text-xs border cursor-pointer ${
-                    currentPlan === 'free'
-                      ? 'bg-slate-850 text-white border-slate-700 font-bold shadow-md shadow-indigo-500/10'
-                      : 'bg-slate-950/50 hover:bg-slate-850 text-slate-400 border-transparent'
-                  }`}
-                >
-                  <span className="text-sm">🆓</span>
-                  <div className="leading-tight">
-                    <span className="block font-bold">Piano Base (Free)</span>
-                    <span className="text-[9px] opacity-75">Nessun abbonamento attivo</span>
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleSimulateSubscription('smart', true, 'active')}
-                  className={`py-2 px-3 text-left rounded-xl transition-all flex items-center gap-2 text-xs border cursor-pointer ${
-                    currentPlan === 'smart' && profile?.autoRenew !== false && profile?.subscriptionStatus !== 'pending_renewal'
-                      ? 'bg-indigo-950/80 text-indigo-300 border-indigo-900/50 font-bold shadow-md shadow-indigo-500/20'
-                      : 'bg-slate-950/50 hover:bg-slate-850 text-slate-400 border-transparent'
-                  }`}
-                >
-                  <span className="text-sm">⚡</span>
-                  <div className="leading-tight">
-                    <span className="block font-bold">Smart (Attivo)</span>
-                    <span className="text-[9px] opacity-75">Rinnovo auto attivo</span>
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleSimulateSubscription('smart', false, 'pending_renewal')}
-                  className={`py-2 px-3 text-left rounded-xl transition-all flex items-center gap-2 text-xs border cursor-pointer ${
-                    currentPlan === 'smart' && (profile?.autoRenew === false || profile?.subscriptionStatus === 'pending_renewal')
-                      ? 'bg-amber-950/80 text-amber-300 border-amber-900/50 font-bold shadow-md shadow-amber-500/20'
-                      : 'bg-slate-950/50 hover:bg-slate-850 text-slate-400 border-transparent'
-                  }`}
-                >
-                  <span className="text-sm">⏳</span>
-                  <div className="leading-tight">
-                    <span className="block font-bold">Smart (In scadenza)</span>
-                    <span className="text-[9px] opacity-75">In attesa di rinnovo</span>
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleSimulateSubscription('pro', true, 'active')}
-                  className={`py-2 px-3 text-left rounded-xl transition-all flex items-center gap-2 text-xs border cursor-pointer ${
-                    currentPlan === 'pro' && profile?.autoRenew !== false && profile?.subscriptionStatus !== 'pending_renewal'
-                      ? 'bg-purple-950/80 text-purple-300 border-purple-900/50 font-bold shadow-md shadow-purple-500/20'
-                      : 'bg-slate-950/50 hover:bg-slate-850 text-slate-400 border-transparent'
-                  }`}
-                >
-                  <span className="text-sm">💎</span>
-                  <div className="leading-tight">
-                    <span className="block font-bold">Chef Pro (Attivo)</span>
-                    <span className="text-[9px] opacity-75">Rinnovo auto attivo</span>
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleSimulateSubscription('pro', false, 'pending_renewal')}
-                  className={`py-2 px-3 text-left rounded-xl transition-all flex items-center gap-2 text-xs border cursor-pointer ${
-                    currentPlan === 'pro' && (profile?.autoRenew === false || profile?.subscriptionStatus === 'pending_renewal')
-                      ? 'bg-purple-950/50 text-purple-400 border-purple-900/30 font-bold shadow-md shadow-purple-500/20'
-                      : 'bg-slate-950/50 hover:bg-slate-850 text-slate-400 border-transparent'
-                  }`}
-                >
-                  <span className="text-sm">⚠️</span>
-                  <div className="leading-tight">
-                    <span className="block font-bold">Chef Pro (In scadenza)</span>
-                    <span className="text-[9px] opacity-75">In attesa di rinnovo</span>
-                  </div>
-                </button>
-              </div>
-            </div>
-
-            {/* Current Gates Status */}
-            <div className="lg:col-span-5 bg-slate-950/40 border border-slate-800/80 p-4 rounded-2xl space-y-3">
-              <span className="text-[9px] uppercase font-bold text-slate-500 block tracking-wider">Risposta dei Gate di Sicurezza</span>
-              <div className="space-y-2 text-xs">
-                <div className="flex items-center justify-between border-b border-slate-800/40 pb-1.5">
-                  <span className="text-slate-400">Pianificatore Avanzato</span>
-                  <span className={`font-bold px-1.5 py-0.5 rounded text-[10px] ${
-                    currentPlan !== 'free' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'
-                  }`}>
-                    {currentPlan !== 'free' ? '🔓 SBLOCCATO' : '🔒 BLOCCATO'}
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between border-b border-slate-800/40 pb-1.5">
-                  <span className="text-slate-400">Chef IA & OCR Volantini</span>
-                  <span className={`font-bold px-1.5 py-0.5 rounded text-[10px] ${
-                    currentPlan === 'pro' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'
-                  }`}>
-                    {currentPlan === 'pro' ? '🔓 SBLOCCATO' : '🔒 BLOCCATO'}
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between border-b border-slate-800/40 pb-1.5">
-                  <span className="text-slate-400">Membri Famiglia</span>
-                  <span className="font-mono text-indigo-400 font-bold">
-                    {currentPlan !== 'free' ? 'Illimitati' : 'Max 1'}
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between pb-1.5 border-b border-slate-800/40">
-                  <span className="text-slate-400">Articoli in Dispensa</span>
-                  <span className="font-mono text-indigo-400 font-bold">
-                    {currentPlan !== 'free' ? 'Illimitati' : 'Max 15'}
-                  </span>
-                </div>
-
-                <div className="flex flex-col gap-1.5 pt-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Lista della Spesa</span>
-                    <span className={`font-bold px-1.5 py-0.5 rounded text-[10px] ${
-                      hasMealPlan && hasFamilyMember ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'
-                    }`}>
-                      {hasMealPlan && hasFamilyMember ? '🔓 VISIBILE' : '🔒 NASCOSTA'}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-[9px] text-slate-500">
-                    <span>Menu: {hasMealPlan ? '✅ Generato' : '❌ Assente'}</span>
-                    <span>Membri: {hasFamilyMember ? '✅ Inseriti' : '❌ Assenti'}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Dynamic current user subscription status bar */}
       <div className="bg-white p-5 rounded-3xl border border-indigo-100 shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div className="flex items-center gap-3">
@@ -670,10 +266,11 @@ export default function BusinessModel({
 
         {currentPlan !== 'free' ? (
           <button 
-            onClick={handleDowngradeToFree}
+            onClick={handleManageSubscription}
+            disabled={billingBusy}
             className="text-xs text-slate-400 hover:text-red-500 font-bold underline transition-colors cursor-pointer"
           >
-            Disdici Abbonamento
+            Gestisci / Disdici Abbonamento
           </button>
         ) : (
           <div className="flex items-center gap-1.5 bg-indigo-50 text-indigo-700 px-3.5 py-1.5 rounded-full text-[10px] font-bold">
@@ -1129,223 +726,6 @@ export default function BusinessModel({
           </div>
         )}
       </div>
-
-      {/* Multi-Option Secure Checkout sliding Modal dialog */}
-      <AnimatePresence>
-        {showCheckout && checkoutPlan && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 15 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 15 }}
-              className="bg-white rounded-3xl shadow-2xl p-6 md:p-8 max-w-md w-full border border-slate-200 relative overflow-hidden"
-            >
-              {/* Modal close */}
-              {!paymentSuccess && !isProcessingPayment && (
-                <button 
-                  onClick={() => setShowCheckout(false)} 
-                  className="absolute right-4 top-4 p-1.5 hover:bg-slate-100 rounded-full text-slate-400 cursor-pointer transition-all z-10"
-                >
-                  <X size={18} />
-                </button>
-              )}
-
-              {/* Payment Success state */}
-              {paymentSuccess ? (
-                <div className="text-center py-8 space-y-4">
-                  <div className="w-16 h-16 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center text-3xl font-bold mx-auto border border-emerald-100 animate-bounce">
-                    ✓
-                  </div>
-                  <div>
-                    <h4 className="font-black text-slate-900 text-base">Pagamento Approvato!</h4>
-                    <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
-                      La transazione è stata completata con successo sul circuito sicuro. Il tuo account Famiglia è stato promosso al livello:
-                      <strong className="uppercase font-black text-indigo-600 block mt-1 text-sm tracking-wide">
-                        {checkoutPlan === 'smart' ? 'Famiglia Smart' : 'Chef IA & OCR Premium'}
-                      </strong>
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-5">
-                  
-                  {/* Header title */}
-                  <div className="flex items-center gap-2">
-                    <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
-                      <CreditCard className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h3 className="font-extrabold text-slate-900 text-sm">Completa l'Abbonamento</h3>
-                      <p className="text-[10px] text-slate-400 font-semibold tracking-wider uppercase">Scegli il metodo di addebito per Android o Web</p>
-                    </div>
-                  </div>
-
-                  {/* Summary card */}
-                  <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 flex justify-between items-center text-xs">
-                    <div>
-                      <span className="text-[9px] font-bold text-slate-400 uppercase block tracking-wider">Sottoscrizione Mensile</span>
-                      <span className="font-black text-slate-800">
-                        {checkoutPlan === 'smart' ? 'Famiglia Smart' : 'Chef IA ed OCR Premium'}
-                      </span>
-                    </div>
-                    <span className="font-extrabold text-indigo-700 text-xs bg-indigo-50 px-2.5 py-1 rounded-xl">
-                      {checkoutPlan === 'smart' ? '€2.99/mese' : '€5.99/mese'}
-                    </span>
-                  </div>
-
-                  {/* Tab selection for Payment Method */}
-                  <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-xl">
-                    <button
-                      type="button"
-                      onClick={() => { setSelectedGateway('gpay'); setCheckoutError(null); }}
-                      className={`py-1.5 text-[10px] font-bold rounded-lg transition-all ${
-                        selectedGateway === 'gpay' ? 'bg-white text-indigo-600 shadow-xs font-black' : 'text-slate-500 hover:text-slate-800'
-                      }`}
-                    >
-                      📱 Google Pay
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setSelectedGateway('googleplay'); setCheckoutError(null); }}
-                      className={`py-1.5 text-[10px] font-bold rounded-lg transition-all ${
-                        selectedGateway === 'googleplay' ? 'bg-white text-indigo-600 shadow-xs font-black' : 'text-slate-500 hover:text-slate-800'
-                      }`}
-                    >
-                      🤖 Google Play IAP
-                    </button>
-                  </div>
-
-                  {checkoutError && (
-                    <div className="p-3 bg-rose-50 text-rose-700 text-[11px] rounded-xl border border-rose-100 font-bold flex items-start gap-1.5">
-                      <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
-                      <span>{checkoutError}</span>
-                    </div>
-                  )}
-
-                  {/* GATEWAY 2: Google Pay Sheet Simulator (Android Focused) */}
-                  {selectedGateway === 'gpay' && (
-                    <div className="space-y-4 animate-fade-in">
-                      <div className="bg-slate-900 text-white p-5 rounded-2xl border border-slate-800 space-y-4 relative overflow-hidden">
-                        <div className="flex justify-between items-center border-b border-white/10 pb-3">
-                          <span className="text-[11px] font-black tracking-widest text-slate-300">GPay</span>
-                          <span className="text-xs text-white/80">{profile?.email}</span>
-                        </div>
-                        
-                        <div className="space-y-2">
-                          <div className="flex justify-between text-xs">
-                            <span className="text-slate-400">Carta predefinita</span>
-                            <span className="font-bold text-white">Google Smart Wallet (•••• 4242)</span>
-                          </div>
-                          <div className="flex justify-between text-xs">
-                            <span className="text-slate-400">Importo</span>
-                            <span className="font-black text-yellow-400">€{checkoutPlan === 'smart' ? '2.99' : '5.99'}</span>
-                          </div>
-                        </div>
-
-                        {/* Interactive Fingerprint scanner */}
-                        <div className="text-center py-4 space-y-3 relative">
-                          <button
-                            onMouseDown={handleGPayTouchStart}
-                            onMouseUp={handleGPayTouchEnd}
-                            onTouchStart={handleGPayTouchStart}
-                            onTouchEnd={handleGPayTouchEnd}
-                            className={`mx-auto w-16 h-16 rounded-full flex items-center justify-center border transition-all cursor-pointer ${
-                              isBiometricScanning 
-                                ? 'bg-indigo-600/20 border-indigo-400 scale-105 shadow-lg shadow-indigo-500/20' 
-                                : 'bg-white/5 border-white/10 hover:bg-white/10 active:scale-95'
-                            }`}
-                          >
-                            <Fingerprint className={`w-8 h-8 text-white ${isBiometricScanning ? 'animate-pulse text-indigo-400' : ''}`} />
-                          </button>
-                          
-                          <div>
-                            <p className="text-[10px] font-extrabold text-white">Tieni premuto per autorizzare biometricamente</p>
-                            <p className="text-[9px] text-slate-400 mt-0.5">Scansione impronta digitale Android integrata</p>
-                          </div>
-
-                          {isBiometricScanning && (
-                            <div className="w-32 bg-slate-800 h-1 mx-auto rounded-full overflow-hidden mt-2">
-                              <div className="bg-indigo-500 h-1 transition-all duration-70" style={{ width: `${biometricProgress}%` }} />
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      <button
-                        onClick={() => setShowCheckout(false)}
-                        className="w-full py-2.5 border border-slate-200 text-slate-500 text-xs font-bold rounded-xl hover:bg-slate-50 cursor-pointer"
-                      >
-                        Annulla
-                      </button>
-                    </div>
-                  )}
-
-                  {/* GATEWAY 3: Google Play IAP Bottom Sheet Simulator */}
-                  {selectedGateway === 'googleplay' && (
-                    <div className="space-y-4 animate-fade-in">
-                      <div className="bg-slate-50 border border-slate-150 rounded-2xl p-4 text-xs space-y-4 shadow-2xs">
-                        <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
-                          <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center font-bold text-white text-md">
-                            G
-                          </div>
-                          <div>
-                            <h4 className="font-extrabold text-slate-900 text-xs">Google Play Billing</h4>
-                            <p className="text-[9px] text-slate-400">Pagamento In-App sicuro</p>
-                          </div>
-                        </div>
-
-                        <div className="space-y-2">
-                          <div className="flex justify-between">
-                            <span className="text-slate-500">Prodotto:</span>
-                            <span className="font-extrabold text-slate-800">{checkoutPlan === 'smart' ? 'Smart Family Monthly' : 'Chef IA Monthly'}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-slate-500">Prezzo:</span>
-                            <span className="font-extrabold text-slate-800">€{checkoutPlan === 'smart' ? '2.99' : '5.99'} / mese</span>
-                          </div>
-                          <div className="flex justify-between text-[9px] text-slate-400">
-                            <span>Tassazione:</span>
-                            <span>IVA 22% inclusa</span>
-                          </div>
-                        </div>
-
-                        <div className="p-2.5 bg-yellow-50 rounded-xl border border-yellow-100 text-[10px] text-yellow-800 leading-snug">
-                          🤖 Questo simula l'interfaccia nativa del Google Play Store per le transazioni in-app di Android.
-                        </div>
-
-                        <button
-                          onClick={handleGooglePlaySubscribe}
-                          disabled={isPlayBillingLoading}
-                          className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl shadow-md transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
-                        >
-                          {isPlayBillingLoading ? (
-                            <>
-                              <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                              <span>Connessione Google Play...</span>
-                            </>
-                          ) : (
-                            <>
-                              <span>Abbonati con 1-Click</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
-
-                      <button
-                        onClick={() => setShowCheckout(false)}
-                        className="w-full py-2.5 border border-slate-200 text-slate-500 text-xs font-bold rounded-xl hover:bg-slate-50 cursor-pointer"
-                      >
-                        Annulla
-                      </button>
-                    </div>
-                  )}
-
-                </div>
-              )}
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }

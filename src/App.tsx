@@ -35,7 +35,8 @@ import BusinessModel from './components/BusinessModel';
 import AdminDashboard from './components/AdminDashboard';
 import WelcomeTour from './components/WelcomeTour';
 import PWAInstallPrompt from './components/PWAInstallPrompt';
-import { auth, db } from './lib/firebase';
+import { auth, db, functions } from './lib/firebase';
+import { httpsCallable } from 'firebase/functions';
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import { doc, onSnapshot, collection } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from './lib/firebaseUtils';
@@ -106,65 +107,28 @@ export default function App() {
     const uDoc = doc(db, profilePath);
 
     const unsubProfile = onSnapshot(uDoc, async (snapshot) => {
-      const emailLower = user.email?.toLowerCase() || '';
-      const isDefaultDbAdmin = 
-        emailLower === 'debora.dibellucci12@gmail.com' || 
-        emailLower === 'debora.dibellucci12@gmail.co' || 
-        emailLower === 'info.mondogadgets@gmail.com' ||
-        emailLower.includes('admin');
-
-      console.debug('[ADMIN DEBUG] onSnapshot triggered:', {
-        uid: user.uid,
-        email: user.email,
-        emailLower,
-        isDefaultDbAdmin,
-        snapshotExists: snapshot.exists(),
-        snapId: snapshot.id
-      });
-
       if (snapshot.exists()) {
         const data = snapshot.data() || {};
-        console.debug('[ADMIN DEBUG] Profile document data found:', data);
-
-        if (isDefaultDbAdmin && !data.isAdmin) {
-          console.debug('[ADMIN DEBUG] User qualifies as default DB Admin but is NOT marked as Admin in database. Attempting to updateDoc in Firestore...');
-          try {
-            const { updateDoc } = await import('firebase/firestore');
-            await updateDoc(uDoc, { isAdmin: true });
-            console.debug('[ADMIN DEBUG] successfully executed updateDoc for isAdmin: true');
-          } catch (e: any) {
-            console.error("[ADMIN DEBUG] Error upgrading profile to admin in Firestore:", e);
-          }
-        }
-        
-        const finalProfile = { id: snapshot.id, ...data, isAdmin: isDefaultDbAdmin ? true : !!data.isAdmin } as UserProfile;
-        console.debug('[ADMIN DEBUG] Setting profile local state to:', finalProfile);
-        setProfile(finalProfile);
+        setProfile({ id: snapshot.id, ...data } as UserProfile);
       } else {
-        console.debug('[ADMIN DEBUG] Profile document does not exist. Creating default profile with isAdmin:', isDefaultDbAdmin);
-        // Automatically default roles/plans on first registration
+        // Piano, ruoli e abbonamento li gestisce solo il server: qui niente di tutto ciò
         const defaultProfile: Partial<UserProfile> = {
           name: user.displayName || 'Nuova Famiglia spesa',
           email: user.email || '',
           dietaryRestrictions: [],
           excludedIngredients: [],
-          plan: 'free',
-          isAdmin: isDefaultDbAdmin,
-          isSuspended: false,
-          createdAt: new Date().toISOString(),
-          aiInteractionsThisMonth: 0
+          createdAt: new Date().toISOString()
         };
 
         try {
           const { setDoc } = await import('firebase/firestore');
           await setDoc(uDoc, defaultProfile);
-          console.debug('[ADMIN DEBUG] Default profile successfully created with setDoc.');
         } catch (e: any) {
-          console.error("[ADMIN DEBUG] Error creating default profile:", e);
+          console.error("Error creating default profile:", e);
         }
       }
     }, (error) => {
-      console.error("[ADMIN DEBUG] Profile onSnapshot error listener failed:", error);
+      console.error("Profile onSnapshot error:", error);
       handleFirestoreError(error, OperationType.GET, profilePath);
     });
 
@@ -352,7 +316,7 @@ export default function App() {
       dietaryRestrictions: [],
       excludedIngredients: [],
       plan: 'premium',
-      isAdmin: cleanEmail === 'debora.dibellucci12@gmail.com' || cleanEmail.includes('admin'),
+      isAdmin: false,
       isSuspended: false,
       createdAt: new Date().toISOString(),
       aiInteractionsThisMonth: 0
@@ -393,29 +357,23 @@ export default function App() {
     }
   };
 
-  // Check Admin flag based on profile or known administrator email
-  const userIsAdmin = useMemo(() => {
-    if (!user || !user.email) {
-      console.debug('[ADMIN DEBUG] userIsAdmin returning false: user or user.email is null/undefined.', { user });
-      return false;
-    }
-    const emailLower = user.email.toLowerCase();
-    const isProfileAdmin = !!profile?.isAdmin;
-    const isExplicitEmailAdmin = 
-      emailLower === 'debora.dibellucci12@gmail.com' || 
-      emailLower === 'debora.dibellucci12@gmail.co' || 
-      emailLower === 'info.mondogadgets@gmail.com';
-    
-    const result = isProfileAdmin || isExplicitEmailAdmin;
-    console.debug('[ADMIN DEBUG] userIsAdmin evaluation:', {
-      emailLower,
-      profileIsAdmin: profile?.isAdmin,
-      isProfileAdmin,
-      isExplicitEmailAdmin,
-      result
-    });
-    return result;
-  }, [user, profile]);
+  // Admin = claim assegnato dal server (verificato anche dalle regole del database)
+  const [userIsAdmin, setUserIsAdmin] = useState(false);
+  useEffect(() => {
+    setUserIsAdmin(false);
+    if (!user || user.uid === 'demo-family-user' || user.uid.startsWith('local-')) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { admin } = (await httpsCallable(functions, 'syncAdminClaim')()).data as { admin: boolean };
+        if (admin) await user.getIdToken(true);
+        if (!cancelled) setUserIsAdmin(admin);
+      } catch (e) {
+        console.error('Verifica amministratore non riuscita:', e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
 
   // Auto-switch to Admin Dashboard if admin logs in
   useEffect(() => {
@@ -448,7 +406,7 @@ export default function App() {
 
   if (authLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-slate-50">
+      <div className="flex items-center justify-center min-h-dvh bg-slate-50">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-600"></div>
       </div>
     );
@@ -456,7 +414,7 @@ export default function App() {
 
   if (!user) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+      <div className="min-h-dvh bg-slate-50 flex items-center justify-center p-4">
         <div className="max-w-md w-full bg-white rounded-3xl shadow-xl p-8 border border-slate-100">
           <div className="text-center">
             <div className="bg-indigo-600 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg rotate-3 overflow-hidden">
@@ -637,7 +595,7 @@ export default function App() {
   // Account Suspension Enforcement Screen
   if (profile?.isSuspended) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+      <div className="min-h-dvh bg-slate-50 flex items-center justify-center p-4">
         <div className="max-w-md w-full bg-white rounded-3xl shadow-2xl p-8 text-center border-t-4 border-t-red-600 border border-slate-100 space-y-6">
           <div className="w-16 h-16 bg-red-50 text-red-600 border border-red-150 rounded-2xl flex items-center justify-center mx-auto shadow-sm">
             <ShieldAlert className="w-8 h-8" />
@@ -666,19 +624,19 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
+    <div className="min-h-dvh bg-slate-50 flex flex-col overflow-x-clip">
       {/* Header */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
-        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="bg-indigo-600 p-2 rounded-lg">
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-30 pt-[env(safe-area-inset-top)]">
+        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="bg-indigo-600 p-2 rounded-lg shrink-0">
               <Utensils className="text-white w-6 h-6" />
             </div>
-            <h1 className="text-xl font-bold bg-gradient-to-r from-indigo-600 to-violet-600 bg-clip-text text-transparent">
+            <h1 className="text-lg sm:text-xl font-bold whitespace-nowrap bg-gradient-to-r from-indigo-600 to-violet-600 bg-clip-text text-transparent">
               Che cucino oggi?
             </h1>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-1 sm:gap-4 shrink-0">
             {/* Pulsante per l'Assistente Vocale (Con restrizione licenza Pro) */}
             <button
               onClick={() => {
@@ -744,7 +702,7 @@ export default function App() {
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 max-w-7xl mx-auto w-full p-4 pb-24 md:pb-8 md:pl-24">
+      <main className="flex-1 max-w-7xl mx-auto w-full min-w-0 p-4 pb-[calc(6rem+env(safe-area-inset-bottom))] md:pb-8 md:pl-24">
         <AnimatePresence mode="wait">
           <motion.div
             key={activeTab}
@@ -838,7 +796,7 @@ export default function App() {
       </main>
 
       {/* Bottom Navigation (Mobile) */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-4 pt-2.5 pb-1 flex items-center gap-2 overflow-x-auto z-40 md:hidden [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] snap-x snap-mandatory">
+      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-4 pt-2.5 pb-[max(0.25rem,env(safe-area-inset-bottom))] flex items-center gap-2 overflow-x-auto z-40 md:hidden [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] snap-x snap-mandatory">
         {tabs.map((tab) => (
           <button
             key={tab.id}

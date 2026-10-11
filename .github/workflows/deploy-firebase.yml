@@ -1,0 +1,58 @@
+name: Deploy Firebase (sito, regole, funzioni)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'functions/**'
+      - 'firestore.rules'
+      - 'firebase.json'
+      - 'package.json'
+      - '.github/workflows/deploy-firebase.yml'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm ci
+        working-directory: functions
+
+      - name: Credenziali Firebase
+        run: echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > "$RUNNER_TEMP/sa.json"
+
+      - name: Parametri delle funzioni
+        working-directory: functions
+        run: |
+          {
+            echo "PRICE_SMART=${{ vars.PRICE_SMART }}"
+            echo "PRICE_PRO=${{ vars.PRICE_PRO }}"
+            echo "ADMIN_EMAILS=${{ vars.ADMIN_EMAILS }}"
+            echo "APP_URL=${{ vars.APP_URL }}"
+          } > .env
+
+      - name: Segreti delle funzioni (Stripe, Gemini)
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/sa.json
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          for NAME in STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET GEMINI_API_KEY; do
+            printf '%s' "${!NAME}" | npx --yes firebase-tools@14 functions:secrets:set "$NAME" --data-file - --force --project gen-lang-client-0532460534
+          done
+
+      - name: Deploy
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/sa.json
+        run: npx --yes firebase-tools@14 deploy --only hosting,firestore,functions --force --project gen-lang-client-0532460534

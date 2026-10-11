@@ -182,14 +182,14 @@ export default function RecipeForm({ onSave, onClose }: Props) {
                     placeholder="Q.tà"
                     value={ing.amount || ''}
                     onChange={(e) => updateIngredient(idx, 'amount', parseFloat(e.target.value))}
-                    className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none"
+                    className="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none"
                   />
                   <input
                     type="text"
                     placeholder="Unità"
                     value={ing.unit}
                     onChange={(e) => updateIngredient(idx, 'unit', e.target.value)}
-                    className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none"
+                    className="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none"
                   />
                   <button type="button" onClick={() => removeIngredient(idx)} className="text-slate-300 hover:text-red-500">
                     <Trash2 className="w-4 h-4" />
@@ -210,7 +210,7 @@ export default function RecipeForm({ onSave, onClose }: Props) {
                   <textarea
                     value={inst}
                     onChange={(e) => updateInstruction(idx, e.target.value)}
-                    className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none h-20 resize-none"
+                    className="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none h-20 resize-none"
                     placeholder={`Passaggio ${idx + 1}`}
                   />
                   <button type="button" onClick={() => removeInstruction(idx)} className="text-slate-300 hover:text-red-500 h-fit pt-2">
