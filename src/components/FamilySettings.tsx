@@ -322,9 +322,9 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
 
   const isPaid = !!profile?.plan && profile.plan !== 'free';
   const DIET_OPTIONS = [
-    { id: 'vegan', emoji: '🌱', label: 'Vegani' },
-    { id: 'gluten-free', emoji: '🌾', label: 'Senza glutine' },
-    { id: 'lactose-free', emoji: '🥛', label: 'Senza lattosio' },
+    { id: 'vegan', emoji: '🌱', label: 'Solo piatti vegani' },
+    { id: 'gluten-free', emoji: '🌾', label: 'Solo senza glutine' },
+    { id: 'lactose-free', emoji: '🥛', label: 'Solo senza lattosio' },
   ] as const;
 
   return (
@@ -526,14 +526,21 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
         )}
       </div>
 
-      {/* Da evitare per tutti: diete e allergie in un'unica scheda */}
+      {/* Regole per tutti: alimentazione e allergie in un'unica scheda */}
       <div className="bg-white rounded-3xl border border-slate-200 p-5 space-y-5">
         <div>
-          <h3 className="text-xl font-semibold text-slate-900">Da evitare per tutti</h3>
-          <p className="text-sm text-slate-500 mt-1">Il menù non li proporrà mai.</p>
+          <h3 className="text-xl font-semibold text-slate-900">Regole per tutti</h3>
+          <p className="text-sm text-slate-500 mt-1">Valgono per ogni persona a tavola e per ogni menù.</p>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div>
+          <p className="text-sm font-semibold text-slate-800">Come mangiate?</p>
+          <p className="text-sm text-slate-500 mt-0.5">
+            Se ne scegli una, il menù usa solo piatti adatti. Con «Solo piatti vegani», per esempio, niente carne, pesce, latticini e uova.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap gap-2 -mt-2">
           {DIET_OPTIONS.map(diet => {
             const on = profile?.dietaryRestrictions?.includes(diet.id);
             return (
@@ -553,7 +560,8 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
         </div>
 
         <div>
-          <p className="text-sm font-semibold text-slate-800 mb-2">Allergie o ingredienti da escludere</p>
+          <p className="text-sm font-semibold text-slate-800">Cosa non deve mai comparire?</p>
+          <p className="text-sm text-slate-500 mt-0.5 mb-2">Allergie o ingredienti che nessuno vuole: il menù non li userà mai.</p>
           <div className="flex gap-2">
             <input
               type="text"
