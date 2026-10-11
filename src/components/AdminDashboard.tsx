@@ -5,6 +5,7 @@ import {
   Gift,
   History,
   KeyRound,
+  Trash2,
   Search,
   ShieldAlert,
   ShieldCheck,
@@ -21,7 +22,8 @@ import {
   updateDoc,
 } from 'firebase/firestore';
 import { sendPasswordResetEmail } from 'firebase/auth';
-import { auth, db } from '../lib/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { auth, db, functions } from '../lib/firebase';
 import { PLAN_NAMES, normalizePlan } from '../lib/plans';
 import type { PlanId } from '../lib/plans';
 
@@ -64,6 +66,7 @@ const ACTION_LABELS: Record<string, string> = {
   REACTIVE_USER: 'Account riattivato',
   PASSWORD_RESET: 'Email di reset inviata',
   GIFT_PLAN: 'Piano regalato',
+  DELETE_ACCOUNT: 'Account eliminato',
 };
 
 const currentMonth = () => new Date().toISOString().slice(0, 7);
@@ -233,6 +236,19 @@ export default function AdminDashboard() {
       return `Email di reset inviata a ${user.email}.`;
     });
 
+  const deleteAccount = (user: AdminUser) => {
+    const who = user.email || user.name || 'questo account';
+    const warning = user.hasSubscription ? '\n\nL’abbonamento su Stripe verrà chiuso subito.' : '';
+    if (!window.confirm(`Eliminare definitivamente ${who}?\n\nSi cancellano l’accesso, il menù, la dispensa e la famiglia. Non si può annullare.${warning}`)) {
+      return Promise.resolve();
+    }
+    return run(`delete:${user.id}`, user, async () => {
+      await httpsCallable(functions, 'deleteUserAccount')({ uid: user.id });
+      setOpenId(null);
+      return `${who} eliminato.`;
+    });
+  };
+
   const giftPlan = (user: AdminUser, plan: PlanId) =>
     run(`plan:${user.id}`, user, async () => {
       await updateDoc(doc(db, 'users', user.id), { plan });
@@ -389,6 +405,13 @@ export default function AdminDashboard() {
                           <KeyRound className="w-4 h-4" /> Email per cambiare password
                         </button>
                       )}
+                      <button
+                        onClick={() => deleteAccount(user)}
+                        disabled={busy !== null}
+                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold bg-white border border-red-200 text-red-700 hover:bg-red-50 disabled:opacity-50 cursor-pointer"
+                      >
+                        <Trash2 className="w-4 h-4" /> Elimina account
+                      </button>
                     </div>
 
                     {user.hasSubscription ? (
