@@ -5,6 +5,7 @@ const { getAuth } = require('firebase-admin/auth');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const Stripe = require('stripe');
 const invites = require('./invites');
+const familyShare = require('./familyShare');
 const { isStripeSecretKey, describeStripeKey } = require('./config-checks');
 const { GoogleGenAI, Type } = require('@google/genai');
 
@@ -371,6 +372,113 @@ exports.submitMemberInvite = onRequest({ region: REGION, cors: true }, async (re
   }
 });
 
+
+// ---------------------------------------------------------------------------
+// Menù condiviso: la famiglia è identificata dall'uid di chi la gestisce. I familiari possono solo consultare
+// il menù (con le ricette scritte dalla famiglia): dal web con il link, senza account, oppure dall'app dopo
+// essersi collegati con il codice. Persone, preferenze, dispensa e spesa restano riservati.
+// ---------------------------------------------------------------------------
+
+const familyShareRef = (uid) => userRef(uid).collection('familyShare').doc('current');
+const viewerRef = (ownerUid, viewerUid) => userRef(ownerUid).collection('viewers').doc(viewerUid);
+const shareProblem = {
+  missing: ['not-found', 'Questo codice non è valido. Chiedi un nuovo invito.'],
+  revoked: ['permission-denied', 'Questo invito è stato annullato. Chiedi un nuovo invito.'],
+  expired: ['permission-denied', 'Questo invito è scaduto. Chiedi un nuovo invito.'],
+};
+
+// Chi gestisce la famiglia crea (o rigenera) il codice: quello precedente smette di funzionare subito
+exports.createFamilyShare = onCall({ region: REGION }, async (request) => {
+  const uid = requireAuth(request);
+  const previous = await db.collection('shares').where('uid', '==', uid).where('revoked', '==', false).get();
+  await Promise.all(previous.docs.map((d) => d.ref.update({ revoked: true })));
+  const code = familyShare.newShareCode();
+  const now = Date.now();
+  const expiresAt = now + familyShare.SHARE_DAYS * 24 * 60 * 60 * 1000;
+  await db.collection('shares').doc(familyShare.hashCode(code)).set({ uid, createdAt: now, expiresAt, revoked: false });
+  // Il codice in chiaro sta solo nell'area riservata del proprietario, per poterlo rimandare
+  await familyShareRef(uid).set({ code, createdAt: now, expiresAt, revoked: false });
+  return { code, url: `${SITE_URL.value().replace(/\/$/, '')}/menu#${code}`, expiresAt };
+});
+
+exports.revokeFamilyShare = onCall({ region: REGION }, async (request) => {
+  const uid = requireAuth(request);
+  const active = await db.collection('shares').where('uid', '==', uid).where('revoked', '==', false).get();
+  await Promise.all(active.docs.map((d) => d.ref.update({ revoked: true })));
+  const current = await familyShareRef(uid).get();
+  if (current.exists) await familyShareRef(uid).update({ revoked: true });
+  return { revoked: active.size };
+});
+
+// Pagina pubblica del menù (senza account): solo pasti e ricette del menù, mai dati delle persone
+exports.getSharedMenu = onRequest({ region: REGION, cors: true }, async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const code = familyShare.normalizeCode(body.code);
+  if (!code) return res.status(404).json({ ok: false, error: shareProblem.missing[1] });
+  try {
+    const snap = await db.collection('shares').doc(familyShare.hashCode(code)).get();
+    const share = snap.exists ? snap.data() : null;
+    const state = familyShare.shareState(share);
+    if (state !== 'ok') return res.status(state === 'missing' ? 404 : 410).json({ ok: false, error: shareProblem[state][1] });
+    const plan = await userRef(share.uid).collection('mealPlans').doc('current').get();
+    if (!plan.exists) return res.json({ ok: true, menu: null });
+    const planData = plan.data();
+    const ids = new Set();
+    Object.values(planData.days || {}).forEach((d) => [...((d && d.lunchIds) || []), ...((d && d.dinnerIds) || [])].forEach((id) => typeof id === 'string' && id.length <= 128 && ids.add(id)));
+    const refs = [...ids].slice(0, 120).map((id) => userRef(share.uid).collection('customRecipes').doc(id));
+    const found = refs.length ? await db.getAll(...refs) : [];
+    const custom = {};
+    found.forEach((d) => d.exists && (custom[d.id] = d.data()));
+    return res.json({ ok: true, menu: familyShare.publicMenuView(planData, custom) });
+  } catch (err) {
+    console.error('Errore menù condiviso', err);
+    return res.status(500).json({ ok: false, error: 'Non è stato possibile caricare il menù. Riprova tra poco.' });
+  }
+});
+
+// Collega l'account di chi ha l'app alla famiglia, con il codice: da quel momento vede il menù (sola lettura)
+exports.joinFamily = onCall({ region: REGION }, async (request) => {
+  const uid = requireAuth(request);
+  const code = familyShare.normalizeCode(request.data && request.data.code);
+  if (!code) throw new HttpsError('invalid-argument', 'Il codice non è corretto. Sono 12 caratteri, per esempio ABCD-EFGH-JKMN.');
+  const snap = await db.collection('shares').doc(familyShare.hashCode(code)).get();
+  const share = snap.exists ? snap.data() : null;
+  const state = familyShare.shareState(share);
+  if (state !== 'ok') throw new HttpsError(...shareProblem[state]);
+  if (share.uid === uid) throw new HttpsError('failed-precondition', 'Questa è la tua famiglia: il menù lo gestisci già tu.');
+  const current = await userRef(uid).get();
+  const already = current.exists ? current.data().familyId : null;
+  if (already && already !== share.uid) await viewerRef(already, uid).delete().catch(() => undefined);
+  const count = (await userRef(share.uid).collection('viewers').get()).size;
+  const existing = await viewerRef(share.uid, uid).get();
+  if (!existing.exists && count >= familyShare.MAX_VIEWERS) throw new HttpsError('resource-exhausted', 'Questa famiglia ha raggiunto il numero massimo di persone collegate.');
+  const name = String((request.auth.token && request.auth.token.name) || (request.auth.token && request.auth.token.email) || 'Familiare').split(/[ @]/)[0].slice(0, 40);
+  await viewerRef(share.uid, uid).set({ name, joinedAt: Date.now() }, { merge: true });
+  await userRef(uid).set({ familyId: share.uid }, { merge: true });
+  return { familyId: share.uid };
+});
+
+exports.leaveFamily = onCall({ region: REGION }, async (request) => {
+  const uid = requireAuth(request);
+  const current = await userRef(uid).get();
+  const familyId = current.exists ? current.data().familyId : null;
+  if (familyId) await viewerRef(familyId, uid).delete().catch(() => undefined);
+  await userRef(uid).set({ familyId: FieldValue.delete() }, { merge: true });
+  return { left: !!familyId };
+});
+
+// Chi gestisce la famiglia scollega una persona
+exports.removeFamilyViewer = onCall({ region: REGION }, async (request) => {
+  const uid = requireAuth(request);
+  const viewerUid = request.data && request.data.viewerUid;
+  if (typeof viewerUid !== 'string' || !viewerUid) throw new HttpsError('invalid-argument', 'Persona non valida.');
+  await viewerRef(uid, viewerUid).delete();
+  const viewer = await userRef(viewerUid).get();
+  if (viewer.exists && viewer.data().familyId === uid) await userRef(viewerUid).set({ familyId: FieldValue.delete() }, { merge: true });
+  return { removed: true };
+});
+
 // ---------------------------------------------------------------------------
 // Amministratori: decisi da elenco email (parametro ADMIN_EMAILS), non dal client
 // ---------------------------------------------------------------------------
@@ -407,6 +515,12 @@ async function eraseAccount(targetUid, actor) {
   // Gli inviti ai familiari contengono solo l'impronta del link e il nome della persona: spariscono con l'account
   const owned = await db.collection('invites').where('uid', '==', targetUid).get();
   await Promise.all(owned.docs.map((d) => d.ref.delete()));
+  // Link del menù condiviso: via; chi era collegato a questa famiglia resta senza collegamento; e si esce dalla famiglia di altri
+  const shares = await db.collection('shares').where('uid', '==', targetUid).get();
+  await Promise.all(shares.docs.map((d) => d.ref.delete()));
+  const viewers = await userRef(targetUid).collection('viewers').get();
+  await Promise.all(viewers.docs.map((d) => userRef(d.id).set({ familyId: FieldValue.delete() }, { merge: true }).catch(() => undefined)));
+  if (data.familyId) await userRef(data.familyId).collection('viewers').doc(targetUid).delete().catch(() => undefined);
 
   await db.recursiveDelete(userRef(targetUid));
   try {

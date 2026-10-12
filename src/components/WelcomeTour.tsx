@@ -21,6 +21,7 @@ import { membersWithoutPreferences, PANTRY_STARTERS, pantryItemFor } from '../li
 import FamilySettings from './FamilySettings';
 import { applyAccountName } from '../lib/selfMember';
 import IngredientPicker from './IngredientPicker';
+import JoinFamilyCard from './JoinFamilyCard';
 
 type Tab = 'planner' | 'shopping' | 'pantry' | 'recipes' | 'family' | 'offers' | 'vacation' | 'guide' | 'business' | 'admin';
 
@@ -66,6 +67,7 @@ export default function WelcomeTour({ user, profile, onNavigate, onProfileUpdate
   const [renameValue, setRenameValue] = useState('');
   const [pantry, setPantry] = useState<PantryItem[]>([]);
   const [pantryLimitHit, setPantryLimitHit] = useState(false);
+  const [joining, setJoining] = useState(false);
 
   const isDemo = user?.uid === 'demo-family-user';
   const isLocal = isDemo || !!user?.uid?.startsWith('local-');
@@ -100,10 +102,17 @@ export default function WelcomeTour({ user, profile, onNavigate, onProfileUpdate
     } catch {
       /* storage non disponibile */
     }
-    if (profile.hasCompletedWelcomeTour || localCompleted) return;
+    // Chi si collega alla famiglia di un parente per vedere il menù non deve ricostruire una famiglia da zero
+    if (profile.hasCompletedWelcomeTour || localCompleted || profile.familyId) return;
     const timer = setTimeout(() => setIsOpen(true), 600);
     return () => clearTimeout(timer);
   }, [user, profile]);
+
+  // Collegato con un invito mentre la guida è aperta: la guida è finita, si passa al menù della famiglia
+  useEffect(() => {
+    if (isOpen && profile?.familyId) void finish(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, profile?.familyId]);
 
   // Permette di rivedere la guida dal menù Famiglia
   useEffect(() => {
@@ -355,6 +364,17 @@ export default function WelcomeTour({ user, profile, onNavigate, onProfileUpdate
           </li>
         ))}
       </ol>
+      {interactive && !isLocal && (
+        <div className="mt-6 w-full max-w-xs text-left">
+          {joining ? (
+            <JoinFamilyCard />
+          ) : (
+            <button onClick={() => setJoining(true)} className="text-sm font-semibold text-indigo-700 underline underline-offset-4">
+              Ho ricevuto un invito da un familiare
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 

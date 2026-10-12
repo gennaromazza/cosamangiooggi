@@ -8,11 +8,12 @@ import { handleFirestoreError, OperationType } from '../lib/firebaseUtils';
 import { WeeklyPlan, Recipe, UserProfile, DietaryRestriction, PantryItem, DayPlan } from '../types';
 import { INITIAL_RECIPES } from '../data/recipes';
 import { calculateNutrients } from '../lib/nutritionUtils';
-import { Calendar as CalendarIcon, RefreshCcw, Save, Trash2, ChevronLeft, ChevronRight, X, Clock, Gauge, UtensilsCrossed, ChefHat, Info, Tag, Sparkles, Users, Heart, ShoppingCart, Check, AlertTriangle, Package, SlidersHorizontal } from 'lucide-react';
+import { Calendar as CalendarIcon, RefreshCcw, Save, Trash2, ChevronLeft, ChevronRight, X, Clock, Gauge, UtensilsCrossed, ChefHat, Info, Tag, Sparkles, Users, Heart, ShoppingCart, Check, AlertTriangle, Package, SlidersHorizontal, Share2 } from 'lucide-react';
 import { getCurrentSeason, scaleIngredientAmount, getRawIngredientNames } from '../lib/utils';
 import { checkIngredientMatch, isStaple, calculateMissingFromPantry } from '../lib/pantrySync';
 import { findPlanIssues, issuesKey, rebuildAffectedMeals } from '../lib/planCompatibility';
 import ManualPlanEditor from './ManualPlanEditor';
+import FamilyShare from './FamilyShare';
 import { buildManualPlan, manualDaysFromPlan, WEEK_DAYS, type ManualDays } from '../lib/manualPlan';
 import { hitsExclusion, satisfiesDiet } from '../lib/dietFilters';
 import TipCard from './TipCard';
@@ -1023,6 +1024,7 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
 
   // Menù scritto a mano
   const [showManual, setShowManual] = useState(false);
+  const [showShare, setShowShare] = useState(false);
   const customIds = useMemo(() => new Set(recipes.filter(r => !INITIAL_RECIPES.some(i => i.id === r.id)).map(r => r.id)), [recipes]);
   const createManualDish = async (recipeData: Omit<Recipe, 'id'>): Promise<string | null> => {
     const isLocal = userId === 'demo-family-user' || userId.startsWith('local-');
@@ -1248,6 +1250,16 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
               <span className="hidden sm:inline">Nuovo menù</span>
             </button>
           )}
+          {currentPlan && (
+            <button
+              onClick={() => setShowShare(true)}
+              aria-label="Condividi il menù con la famiglia"
+              className="h-11 px-3.5 rounded-2xl border border-slate-200 bg-white text-slate-700 text-sm font-semibold flex items-center gap-2"
+            >
+              <Share2 className="w-4 h-4" />
+              <span className="hidden sm:inline">Condividi menu</span>
+            </button>
+          )}
           <button
             onClick={() => setShowOptions(o => !o)}
             aria-label="Opzioni del menù"
@@ -1260,6 +1272,15 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
           </button>
         </div>
       </div>
+
+      {showShare && (
+        <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-slate-900/50 p-0 sm:p-4" role="dialog" aria-modal="true" aria-label="Condividi il menù">
+          <div className="w-full max-w-lg max-h-[90dvh] overflow-y-auto bg-slate-50 rounded-t-3xl sm:rounded-3xl p-4 space-y-3">
+            <FamilyShare userId={userId} />
+            <button onClick={() => setShowShare(false)} className="w-full h-12 rounded-2xl bg-white border border-slate-200 text-slate-700 font-bold">Chiudi</button>
+          </div>
+        </div>
+      )}
 
       {showManual && (
         <ManualPlanEditor

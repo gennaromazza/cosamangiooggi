@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Il menù di casa | Che cucino oggi?</title>
+  <meta name="description" content="Il menù della settimana della tua famiglia: pranzo e cena di ogni giorno, con le ricette.">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+  <style>
+    @font-face{font-family:"Fraunces";src:url(/fonts/fraunces.woff2) format("woff2");font-weight:100 900;font-display:swap}
+    @font-face{font-family:"Nunito";src:url(/fonts/nunito.woff2) format("woff2");font-weight:200 1000;font-display:swap}
+    *{box-sizing:border-box}
+    body{margin:0;background:#fbf7f0;color:#2b1a12;font-family:"Nunito",system-ui,sans-serif;font-size:17px;line-height:1.55}
+    main{max-width:560px;margin:0 auto;padding:24px 18px 96px}
+    h1,h2,h3{font-family:"Fraunces",Georgia,serif;line-height:1.2;margin:0 0 8px}
+    h1{font-size:2rem}h2{font-size:1.35rem}
+    h3{font-family:"Nunito",system-ui,sans-serif;font-size:.85rem;text-transform:uppercase;letter-spacing:.06em;color:#a8360b;margin:18px 0 8px}
+    p{margin:0 0 12px}
+    .logo{display:flex;align-items:center;gap:10px;font-family:"Fraunces",Georgia,serif;font-weight:700;color:#c8440f;margin-bottom:18px}
+    .logo img{width:40px;height:40px;border-radius:10px}
+    .hint{font-size:.9rem;color:#6b5a50}
+    .card{background:#fff;border:1px solid #f0e6d8;border-radius:20px;padding:18px;margin-top:14px}
+    .tabs{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:18px 0 12px}
+    .tab,.day{border:1px solid #e3d6c4;background:#fff;border-radius:14px;font:inherit;font-weight:800;color:#4a3a30;cursor:pointer;min-height:46px}
+    .tab[aria-selected="true"]{background:#c8440f;border-color:#c8440f;color:#fff}
+    .days{display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;margin-bottom:6px}
+    .day{flex:none;padding:0 14px;min-height:42px;border-radius:999px;font-weight:700}
+    .day[aria-selected="true"]{background:#2b1a12;border-color:#2b1a12;color:#fff}
+    details{border:1px solid #f4ece0;border-radius:14px;margin-bottom:8px;background:#fff}
+    summary{list-style:none;cursor:pointer;padding:12px 14px;min-height:48px;display:flex;justify-content:space-between;align-items:center;gap:10px;font-weight:700}
+    summary::-webkit-details-marker{display:none}
+    summary::after{content:"▾";color:#a89a8e;flex:none}
+    details[open] summary::after{content:"▴"}
+    summary small{display:block;font-weight:600;color:#6b5a50;font-size:.8rem}
+    .body{padding:0 14px 14px;font-size:.95rem}
+    .body ul,.body ol{margin:6px 0 12px;padding-left:20px}
+    .body li{margin-bottom:4px}
+    .body b{display:block;margin-top:6px}
+    .msg{border-radius:16px;padding:14px 16px;margin-top:16px}
+    .err{background:#fff4ed;border:1px solid #ffd6bd;color:#7a2a08}
+    .empty{text-align:center;padding:26px 18px}
+    .btn{display:inline-block;border:0;border-radius:14px;background:#c8440f;color:#fff;font:inherit;font-weight:800;padding:12px 18px;cursor:pointer;min-height:46px;text-decoration:none}
+    .btn.ghost{background:#fff;color:#4a3a30;border:1px solid #e3d6c4}
+    .app{margin-top:28px;font-size:.95rem}
+    .app code{background:#fff;border:1px solid #e3d6c4;border-radius:8px;padding:2px 8px;font-weight:800;letter-spacing:.04em}
+    .hidden{display:none}
+    a{color:#a8360b}
+  </style>
+</head>
+<body>
+<main>
+  <div class="logo"><img src="/icon-192.png" alt="" width="40" height="40"> Che cucino oggi?</div>
+
+  <div id="loading" role="status"><p>Carico il menù…</p></div>
+  <div id="problem" class="msg err hidden" role="alert"></div>
+  <div id="retry" class="hidden"><button class="btn" type="button" id="retry-btn">Riprova</button></div>
+  <div id="empty" class="card empty hidden">
+    <h2>Il menù non c'è ancora</h2>
+    <p>Appena la famiglia lo prepara lo trovi qui. Riapri questa pagina più tardi.</p>
+  </div>
+
+  <div id="menu" class="hidden">
+    <h1>Il menù di casa</h1>
+    <p class="hint">Si aggiorna da solo quando la famiglia cambia un piatto.</p>
+    <div class="tabs" role="tablist" aria-label="Quale menù vedere">
+      <button class="tab" role="tab" id="tab-today" aria-selected="true" type="button">Oggi</button>
+      <button class="tab" role="tab" id="tab-week" aria-selected="false" type="button">Settimana</button>
+    </div>
+    <div class="days hidden" id="days" role="tablist" aria-label="Giorno"></div>
+    <div class="card">
+      <h2 id="day-title"></h2>
+      <h3>Pranzo</h3><div id="lunch"></div>
+      <h3>Cena</h3><div id="dinner"></div>
+    </div>
+  </div>
+
+  <p class="app hidden" id="app">
+    Usi l'app <b>Che cucino oggi?</b> Aprila, vai in <b>Famiglia</b> e inserisci il codice <code id="code"></code> per vedere il menù anche lì e ricevere le notifiche.
+    <br><br><a class="btn ghost" href="/#download">Scarica l'app</a>
+  </p>
+</main>
+
+<script>
+(function () {
+  var API = 'https://europe-west1-gen-lang-client-0532460534.cloudfunctions.net';
+  var DAYS = ['Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato', 'Domenica'];
+  var ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  var $ = function (id) { return document.getElementById(id); };
+  var state = { menu: null, builtin: null, view: 'today', day: today() };
+
+  function today() { return DAYS[(new Date().getDay() + 6) % 7]; }
+
+  // Il codice sta dopo il # : non viene inviato ai server del sito né registrato
+  function readCode() {
+    var raw = (location.hash || '').replace(/^#/, '').toUpperCase().replace(/[\s-]/g, '');
+    if (raw.length !== 12) return null;
+    for (var i = 0; i < raw.length; i++) if (ALPHABET.indexOf(raw.charAt(i)) < 0) return null;
+    return raw.slice(0, 4) + '-' + raw.slice(4, 8) + '-' + raw.slice(8, 12);
+  }
+  var code = readCode();
+
+  function show(parts) {
+    ['loading', 'problem', 'retry', 'empty', 'menu'].forEach(function (id) {
+      $(id).classList.toggle('hidden', parts.indexOf(id) < 0);
+    });
+  }
+  function problem(text, canRetry) {
+    show(canRetry ? ['problem', 'retry'] : ['problem']);
+    $('problem').textContent = text;
+  }
+
+  function el(tag, text, cls) {
+    var n = document.createElement(tag);
+    if (text != null) n.textContent = text;
+    if (cls) n.className = cls;
+    return n;
+  }
+
+  function recipeFor(id) {
+    var custom = state.menu.customRecipes && state.menu.customRecipes[id];
+    return custom || (state.builtin && state.builtin[id]) || null;
+  }
+
+  function amount(i) {
+    if (!i.amount) return i.name;
+    return (Math.round(i.amount * 10) / 10) + ' ' + (i.unit || '') + ' ' + i.name;
+  }
+
+  function recipeNode(id) {
+    var r = recipeFor(id);
+    if (!r) return null; // piatto non più disponibile: si salta
+    var d = document.createElement('details');
+    var s = document.createElement('summary');
+    var t = el('span', r.title);
+    if (r.timeMin) t.appendChild(el('small', r.timeMin + ' min'));
+    s.appendChild(t);
+    d.appendChild(s);
+    var body = el('div', null, 'body');
+    if (r.ingredients && r.ingredients.length) {
+      body.appendChild(el('b', 'Ingredienti' + (r.servings ? ' (per ' + r.servings + ')' : '')));
+      var ul = document.createElement('ul');
+      r.ingredients.forEach(function (i) { ul.appendChild(el('li', amount(i))); });
+      body.appendChild(ul);
+    }
+    if (r.instructions && r.instructions.length) {
+      body.appendChild(el('b', 'Come si prepara'));
+      var ol = document.createElement('ol');
+      r.instructions.forEach(function (s2) { ol.appendChild(el('li', s2)); });
+      body.appendChild(ol);
+    }
+    d.appendChild(body);
+    return d;
+  }
+
+  function fill(boxId, ids) {
+    var box = $(boxId);
+    box.innerHTML = '';
+    var any = false;
+    (ids || []).forEach(function (id) {
+      var n = recipeNode(id);
+      if (n) { box.appendChild(n); any = true; }
+    });
+    if (!any) box.appendChild(el('p', 'Niente in programma.', 'hint'));
+  }
+
+  function render() {
+    var day = state.view === 'today' ? today() : state.day;
+    $('tab-today').setAttribute('aria-selected', state.view === 'today' ? 'true' : 'false');
+    $('tab-week').setAttribute('aria-selected', state.view === 'week' ? 'true' : 'false');
+    $('days').className = state.view === 'week' ? 'days' : 'days hidden';
+    $('days').innerHTML = '';
+    DAYS.forEach(function (d) {
+      var b = el('button', d.slice(0, 3) + (d === today() ? ' · oggi' : ''), 'day');
+      b.type = 'button';
+      b.setAttribute('role', 'tab');
+      b.setAttribute('aria-selected', d === day ? 'true' : 'false');
+      b.onclick = function () { state.day = d; render(); };
+      $('days').appendChild(b);
+    });
+    $('day-title').textContent = day + (day === today() ? ' (oggi)' : '');
+    var plan = (state.menu.days && state.menu.days[day]) || {};
+    fill('lunch', plan.lunch);
+    fill('dinner', plan.dinner);
+  }
+
+  function post(path, body) {
+    return fetch(API + '/' + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function (r) { return r.json().catch(function () { return { ok: false }; }).then(function (j) { j.status = r.status; return j; }); });
+  }
+
+  function load(quiet) {
+    if (!quiet) show(['loading']);
+    var recipes = state.builtin
+      ? Promise.resolve(state.builtin)
+      : fetch('/recipes.json').then(function (r) { return r.ok ? r.json() : {}; }).catch(function () { return {}; });
+    return Promise.all([post('getSharedMenu', { code: code }), recipes]).then(function (res) {
+      var j = res[0];
+      state.builtin = res[1];
+      if (!j.ok) {
+        // un aggiornamento in secondo piano che fallisce per un guasto del server non toglie il menù già visto
+        if (quiet && state.menu && j.status >= 500) return;
+        problem(j.error || 'Non è stato possibile caricare il menù.', j.status >= 500 || !j.status);
+        return;
+      }
+      // le istruzioni per l'app hanno senso solo se il link funziona
+      $('app').classList.remove('hidden');
+      if (!j.menu) { show(['empty']); return; }
+      state.menu = j.menu;
+      show(['menu']);
+      render();
+    }).catch(function () {
+      if (quiet && state.menu) return;
+      problem('Non riesco a collegarmi. Controlla la connessione e riprova.', true);
+    });
+  }
+
+  if (!code) {
+    problem('Questo link non è completo. Apri di nuovo il link che hai ricevuto, oppure chiedi un nuovo invito.', false);
+    return;
+  }
+  $('code').textContent = code;
+  $('retry-btn').onclick = function () { load(false); };
+  $('tab-today').onclick = function () { state.view = 'today'; render(); };
+  $('tab-week').onclick = function () { state.view = 'week'; state.day = today(); render(); };
+  // Tornando sulla pagina (o riaprendola dal telefono) si rilegge il menù: così vede le modifiche
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible' && state.menu) load(true); });
+  // Un altro link incollato nella stessa scheda cambia solo il # : si ricarica la pagina per leggere il nuovo codice
+  window.addEventListener('hashchange', function () { location.reload(); });
+  load(false);
+})();
+</script>
+</body>
+</html>

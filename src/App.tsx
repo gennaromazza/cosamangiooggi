@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Calendar, 
+  Home,
   Utensils, 
   ShoppingCart, 
   Users, 
@@ -42,6 +43,8 @@ import BusinessModel from './components/BusinessModel';
 import AdminDashboard from './components/AdminDashboard';
 import WelcomeTour from './components/WelcomeTour';
 import AccountSettings from './components/AccountSettings';
+import SharedMenu from './components/SharedMenu';
+import MenuReminderSync from './components/MenuReminderSync';
 import UpdateBanner from './components/UpdateBanner';
 import PWAInstallPrompt from './components/PWAInstallPrompt';
 import { auth, db, functions } from './lib/firebase';
@@ -51,7 +54,7 @@ import { doc, onSnapshot, collection } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from './lib/firebaseUtils';
 import { UserProfile } from './types';
 
-type Tab = 'planner' | 'vacation' | 'pantry' | 'shopping' | 'family' | 'recipes' | 'guide' | 'offers' | 'business' | 'account' | 'admin';
+type Tab = 'planner' | 'shared' | 'vacation' | 'pantry' | 'shopping' | 'family' | 'recipes' | 'guide' | 'offers' | 'business' | 'account' | 'admin';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('planner');
@@ -245,6 +248,15 @@ export default function App() {
     }
   }, [user]);
 
+  // Appena ci si collega a una famiglia si apre il suo menù; se il collegamento finisce si torna al proprio
+  const linkedFamily = profile?.familyId || null;
+  const previousFamily = useRef<string | null>(null);
+  useEffect(() => {
+    if (linkedFamily && !previousFamily.current) setActiveTab('shared');
+    if (!linkedFamily && previousFamily.current) setActiveTab((t) => (t === 'shared' ? 'planner' : t));
+    previousFamily.current = linkedFamily;
+  }, [linkedFamily]);
+
   // Handle activeTab redirection if Shopping List becomes unavailable
   useEffect(() => {
     if (activeTab === 'shopping' && !hasMealPlan) {
@@ -433,6 +445,8 @@ export default function App() {
   const tabs = useMemo(() => {
     const isShoppingVisible = hasMealPlan;
     const list = [
+      // Chi si è collegato alla famiglia di un parente trova qui il suo menù (sola lettura)
+      ...(profile?.familyId ? [{ id: 'shared', label: 'Menù di casa', icon: Home }] : []),
       { id: 'planner', label: 'Menu', icon: Calendar },
       ...(isShoppingVisible ? [{ id: 'shopping', label: 'Spesa', icon: ShoppingCart }] : []),
       { id: 'pantry', label: 'Dispensa', icon: Package },
@@ -450,10 +464,10 @@ export default function App() {
       list.push({ id: 'business', label: 'Abbonamento', icon: Wallet });
     }
     return list;
-  }, [userIsAdmin, hasMealPlan, hasFamilyMember]);
+  }, [userIsAdmin, hasMealPlan, hasFamilyMember, profile?.familyId]);
 
   // Barra in basso: cinque voci principali, il resto sta sotto "Altro"
-  const PRIMARY_TAB_IDS = ['planner', 'shopping', 'pantry', 'recipes', 'family'];
+  const PRIMARY_TAB_IDS = profile?.familyId ? ['shared', 'planner', 'shopping', 'pantry', 'family'] : ['planner', 'shopping', 'pantry', 'recipes', 'family'];
   const primaryTabs = tabs.filter(t => PRIMARY_TAB_IDS.includes(t.id));
   const moreTabs = tabs.filter(t => !PRIMARY_TAB_IDS.includes(t.id));
   const moreDescriptions: Record<string, string> = {
@@ -777,6 +791,7 @@ export default function App() {
                 onNavigateToPantry={() => setActiveTab('pantry')}
               />
             )}
+            {activeTab === 'shared' && profile?.familyId && <SharedMenu familyId={profile.familyId} />}
             {activeTab === 'vacation' && (
               limitsFor(profile?.plan).vacationPlanner ? (
                 <VacationPlanner 
@@ -1032,6 +1047,7 @@ export default function App() {
         onProfileUpdate={setProfile}
       />
 
+      <MenuReminderSync userId={user.uid} familyId={profile?.familyId} />
       <PWAInstallPrompt />
       <UpdateBanner />
     </div>

@@ -42,6 +42,8 @@ export interface UserProfile {
   tempPassword?: string;
   tempPasswordGeneratedAt?: string;
   hasCompletedWelcomeTour?: boolean;
+  /** Famiglia a cui ci si è collegati con un codice (uid di chi la gestisce): sola consultazione del menù. La scrive il server */
+  familyId?: string;
   paymentHistory?: {
     transactionId: string;
     plan: 'smart' | 'pro';

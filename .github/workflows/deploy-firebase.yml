@@ -107,6 +107,14 @@ jobs:
 
       - run: npm ci
       - run: npm test
+      # Regole di sicurezza e funzioni del menù condiviso, provate contro l'emulatore di Firestore (serve Java)
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci --prefix functions
+      - run: npm run test:rules
+        timeout-minutes: 10
       - run: npm run build
 
       - name: Credenziali Firebase
@@ -191,7 +199,13 @@ jobs:
           done
           curl -s -o /dev/null -D "$RUNNER_TEMP/cors.txt" -X OPTIONS -H 'Origin: https://che-cucino-oggi.web.app' -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: content-type' "$BASE/getMemberInvite"
           grep -i 'access-control-allow-origin' "$RUNNER_TEMP/cors.txt" || { echo "::error::Mancano le intestazioni CORS: la pagina dell'invito non potrebbe collegarsi"; exit 1; }
-          echo "Funzioni degli inviti raggiungibili e protette"
+          # Menù condiviso: un codice falso non deve aprire nulla, e la pagina pubblica deve poter chiamare la funzione
+          CODE=$(curl -s -o "$RUNNER_TEMP/out.json" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"code":"AAAA-AAAA-AAAA"}' "$BASE/getSharedMenu")
+          echo "getSharedMenu con un codice falso: HTTP $CODE $(cat "$RUNNER_TEMP/out.json")"
+          [ "$CODE" = "404" ] || { echo "::error::getSharedMenu doveva rispondere 404 a un codice falso"; exit 1; }
+          curl -s -o /dev/null -D "$RUNNER_TEMP/cors2.txt" -X OPTIONS -H 'Origin: https://che-cucino-oggi.web.app' -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: content-type' "$BASE/getSharedMenu"
+          grep -i 'access-control-allow-origin' "$RUNNER_TEMP/cors2.txt" || { echo "::error::Mancano le intestazioni CORS: la pagina del menù condiviso non potrebbe collegarsi"; exit 1; }
+          echo "Funzioni degli inviti e del menù condiviso raggiungibili e protette"
 
       # Se un valore di Stripe era sbagliato, sito e regole sono stati pubblicati ma le funzioni no: il deploy resta rosso finché non si corregge
       - name: Segnala la configurazione sbagliata
