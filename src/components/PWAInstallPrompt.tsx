@@ -1,9 +1,38 @@
 import { useState, useEffect } from 'react';
-import { Smartphone, Download, X } from 'lucide-react';
+import { Smartphone, Download, X, Share } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
+import { shouldShowIosInstallHint } from '../lib/iosInstall';
+
+const IOS_HINT_KEY = 'ios_install_hint_dismissed';
 
 export default function PWAInstallPrompt() {
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [isVisible, setIsVisible] = useState(false);
+  const [iosHint, setIosHint] = useState(false);
+
+  // iPhone: non c'è un pulsante di installazione, si spiega la procedura da Safari (una volta sola)
+  useEffect(() => {
+    let dismissed = false;
+    try {
+      dismissed = localStorage.getItem(IOS_HINT_KEY) === '1';
+    } catch {
+      /* storage non disponibile */
+    }
+    const standalone = (navigator as any).standalone === true || window.matchMedia?.('(display-mode: standalone)').matches;
+    if (!dismissed && shouldShowIosInstallHint({ userAgent: navigator.userAgent, maxTouchPoints: navigator.maxTouchPoints, standalone, native: Capacitor.isNativePlatform() })) {
+      const timer = setTimeout(() => setIosHint(true), 4000);
+      return () => clearTimeout(timer);
+    }
+  }, []);
+
+  const closeIosHint = () => {
+    setIosHint(false);
+    try {
+      localStorage.setItem(IOS_HINT_KEY, '1');
+    } catch {
+      /* storage non disponibile */
+    }
+  };
 
   useEffect(() => {
     const handleBeforeInstallPrompt = (e: Event) => {
@@ -44,6 +73,21 @@ export default function PWAInstallPrompt() {
     setIsVisible(false);
   };
 
+  if (iosHint) {
+    return (
+      <div role="dialog" aria-label="Installa l'app su iPhone" className="fixed bottom-4 left-4 right-4 z-50 max-w-sm mx-auto bg-indigo-600 text-white rounded-2xl shadow-xl p-4 space-y-2">
+        <div className="flex items-start justify-between gap-3">
+          <h4 className="font-extrabold text-sm">Metti l'app sulla schermata Home</h4>
+          <button onClick={closeIosHint} aria-label="Chiudi" className="text-white/70 hover:text-white p-1"><X className="w-4 h-4" /></button>
+        </div>
+        <p className="text-xs text-indigo-100 leading-relaxed">
+          Tocca <Share className="inline w-3.5 h-3.5 -mt-0.5" /> <strong>Condividi</strong> in basso, poi <strong>«Aggiungi alla schermata Home»</strong>. Si aprirà a schermo intero, come un'app.
+        </p>
+        <button onClick={closeIosHint} className="px-3 py-1.5 bg-white text-indigo-600 text-xs font-extrabold rounded-xl">Ho capito</button>
+      </div>
+    );
+  }
+
   if (!isVisible) return null;
 
   return (
@@ -56,7 +100,7 @@ export default function PWAInstallPrompt() {
           <div>
             <h4 className="font-extrabold text-sm text-white">Usa l'App sul tuo Smartphone!</h4>
             <p className="text-xs text-indigo-100 mt-0.5 leading-snug">
-              Installa "Che cucino oggi?" sul tuo smartphone Android per aprire il menù di oggi con un solo tocco.
+              Installa "Che cucino oggi?" sul tuo smartphone per aprire il menù di oggi con un solo tocco.
             </p>
           </div>
         </div>
