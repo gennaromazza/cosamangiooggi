@@ -42,6 +42,8 @@ export interface UserProfile {
   tempPassword?: string;
   tempPasswordGeneratedAt?: string;
   hasCompletedWelcomeTour?: boolean;
+  /** Famiglia a cui ci si è collegati con un codice (uid di chi la gestisce): sola consultazione del menù. La scrive il server */
+  familyId?: string;
   paymentHistory?: {
     transactionId: string;
     plan: 'smart' | 'pro';
@@ -106,6 +108,8 @@ export interface WeeklyPlan {
   id: string;
   startDate: string; // ISO date
   generatedWithoutFamily?: boolean;
+  /** Menù scritto a mano dall'utente (per esempio la dieta del nutrizionista): non si cambia da solo */
+  manual?: boolean;
   days: {
     [key: string]: DayPlan; // 'Monday', 'Tuesday', ...
   };

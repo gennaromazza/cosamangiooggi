@@ -11,7 +11,8 @@
     "lint": "tsc --noEmit",
     "cap:sync": "cap sync",
     "cap:open": "npx cap open android",
-    "test": "tsx --test src/lib/logic.test.ts && node --test functions/invites.test.js functions/config-checks.test.js"
+    "test": "tsx --test src/lib/logic.test.ts && node --test functions/invites.test.js functions/config-checks.test.js functions/familyShare.test.js",
+    "test:rules": "npx --yes firebase-tools@14 emulators:exec --only firestore --project demo-rules \"node --test tests/firestore-rules.test.cjs functions/familyShare.integration.test.js\""
   },
   "dependencies": {
     "@capacitor-firebase/authentication": "^8.5.2",
@@ -42,6 +43,7 @@
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",
     "@capacitor/cli": "^8.4.1",
+    "@firebase/rules-unit-testing": "^5.0.2",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "autoprefixer": "^10.4.21",

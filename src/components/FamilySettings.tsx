@@ -13,6 +13,8 @@ import IngredientPicker from './IngredientPicker';
 import QuickDishModal from './QuickDishModal';
 import TastingGame from './TastingGame';
 import MemberInvite from './MemberInvite';
+import FamilyShare from './FamilyShare';
+import JoinFamilyCard from './JoinFamilyCard';
 import { inviteLabel } from '../lib/inviteStatus';
 import { hasPersonalRules } from '../lib/memberAlternatives';
 import { applyAccountName } from '../lib/selfMember';
@@ -803,6 +805,10 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
           )}
         </div>
       </div>
+
+      {/* Menù condiviso: link per chi non ha l'app, codice per chi ce l'ha */}
+      <FamilyShare userId={userId} />
+      {!(userId === 'demo-family-user' || userId.startsWith('local-')) && <JoinFamilyCard familyId={profile?.familyId} />}
 
       {/* Piano e abbonamento: una riga */}
       <div className="bg-white rounded-3xl border border-slate-200 p-5 flex items-center justify-between gap-3">

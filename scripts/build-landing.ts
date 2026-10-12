@@ -6,6 +6,8 @@ import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync,
 import { basename, join } from 'node:path';
 import { fillPlaceholders } from './landing';
 import { PAGES, renderPage } from './landing-pages';
+import { INITIAL_RECIPES } from '../src/data/recipes';
+import { publicRecipes } from './public-recipes';
 
 const out = 'landing-dist';
 const apkSource = process.env.APK;
@@ -31,6 +33,8 @@ for (const name of readdirSync('landing')) {
 for (const page of PAGES) {
   writeFileSync(join(out, `${page.slug}.html`), renderPage(page, vars.siteUrl.replace(/\/$/, ''), vars.appUrl.replace(/\/$/, '')));
 }
+// Ricette dell'app per la pagina pubblica del menù condiviso (quelle scritte dalla famiglia le manda il server)
+writeFileSync(join(out, 'recipes.json'), JSON.stringify(publicRecipes(INITIAL_RECIPES)));
 for (const icon of ['icon-192.png', 'icon-512.png', 'favicon-32.png', 'apple-touch-icon.png']) {
   copyFileSync(join('public', icon), join(out, icon));
 }

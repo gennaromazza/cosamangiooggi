@@ -24,6 +24,9 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { inviteLabel } from './inviteStatus';
 import { shouldShowIosInstallHint } from './iosInstall';
+import { buildDailyReminders, dayMenu, dayNameOf, formatReminderTime, hasMenu, normalizeShareCode, parseReminderTime, reminderText, shareMessage, shareUrl, weekMenu } from './sharedMenu';
+import { publicRecipes } from '../../scripts/public-recipes';
+import { addToSlot, buildManualPlan, countManualMeals, emptyManualDays, manualDaysFromPlan, removeFromSlot, WEEK_DAYS } from './manualPlan';
 import { isNewer } from './updateCheck';
 import { fillPlaceholders } from '../../scripts/landing';
 import { PAGES, pageText, renderPage } from '../../scripts/landing-pages';
@@ -700,4 +703,225 @@ test('sito: la pagina spiega l\'installazione su iPhone e le domande frequenti n
   assert.ok(page.includes('id="iphone"') && page.includes('Aggiungi alla schermata Home'));
   assert.ok(!page.includes("L'app da installare è per Android. Da iPhone"), 'testo vecchio rimasto');
   assert.ok(page.includes('href="#iphone"'));
+});
+
+// ---- Menù scritto a mano ------------------------------------------------------------
+
+test('menù scritto a mano: si compone giorno per giorno e si corregge', () => {
+  let days = emptyManualDays();
+  assert.deepEqual(Object.keys(days), WEEK_DAYS);
+  assert.equal(countManualMeals(days), 0);
+  days = addToSlot(days, 'Lunedì', 'lunch', 'a');
+  days = addToSlot(days, 'Lunedì', 'lunch', 'b');
+  days = addToSlot(days, 'Lunedì', 'dinner', 'c');
+  assert.deepEqual(days['Lunedì'], { lunchIds: ['a', 'b'], dinnerIds: ['c'] });
+  assert.equal(countManualMeals(days), 2, 'conta i pasti, non i piatti');
+  days = removeFromSlot(days, 'Lunedì', 'lunch', 0);
+  assert.deepEqual(days['Lunedì'].lunchIds, ['b']);
+  assert.deepEqual(emptyManualDays()['Lunedì'], { lunchIds: [], dinnerIds: [] }, 'la settimana vuota non viene modificata');
+});
+
+test('menù scritto a mano: diventa un normale menù, con i piatti scelti e senza cambiarli', () => {
+  const luca = persona('luca', { dislikedMeals: ['meal-x'] });
+  const p1 = recipe('p1', []);
+  const p2 = recipe('p2', ['gluten-free']);
+  const p3 = recipe('p3', ['gluten-free']);
+  let days = emptyManualDays();
+  days = addToSlot(days, 'Martedì', 'lunch', 'p1');
+  days = addToSlot(days, 'Martedì', 'dinner', 'p2');
+  const plan = buildManualPlan({ days, recipes: [p1, p2, p3], members: [luca], pool: [p1, p2, p3], now: new Date('2026-01-05T10:00:00Z'), random: () => 0 });
+  assert.equal(plan.manual, true);
+  assert.equal(plan.id, 'current');
+  assert.deepEqual(plan.days['Martedì'].lunchIds, ['p1']);
+  assert.deepEqual(plan.days['Martedì'].dinnerIds, ['p2']);
+  assert.deepEqual(plan.days['Lunedì'], { lunchIds: [], dinnerIds: [] });
+  assert.equal(plan.days['Martedì'].lunchAlt, undefined, 'un gusto non crea alternative: i piatti li ha scelti l\'utente');
+  // la spesa funziona come per ogni menù
+  assert.deepEqual(planMeals(plan, 2).map((m) => m.recipeId).sort(), ['p1', 'p2']);
+});
+
+test('menù scritto a mano: chi ha una dieta o allergia che il piatto non rispetta ha la sua alternativa', () => {
+  const celiaca = persona('sara', { dietaryRestrictions: ['gluten-free'] });
+  const pasta = recipe('pasta', []);
+  const riso = recipe('riso', ['gluten-free']);
+  const plan = buildManualPlan({ days: addToSlot(emptyManualDays(), 'Lunedì', 'lunch', 'pasta'), recipes: [pasta, riso], members: [celiaca], pool: [pasta, riso], random: () => 0 });
+  assert.deepEqual(plan.days['Lunedì'].lunchIds, ['pasta'], 'il piatto scelto resta');
+  assert.deepEqual(plan.days['Lunedì'].lunchAlt, { sara: 'riso' });
+  // e il controllo di compatibilità non trova problemi
+  assert.deepEqual(findPlanIssues({ plan, recipes: [pasta, riso], rules: null, members: [celiaca] }), []);
+});
+
+test('menù scritto a mano: si riparte dal menù attuale per modificarlo', () => {
+  const plan: WeeklyPlan = { id: 'current', startDate: '2026-01-01', manual: true, days: { Lunedì: { lunchIds: ['a'], dinnerIds: ['b'] } } };
+  const days = manualDaysFromPlan(plan);
+  assert.deepEqual(days['Lunedì'], { lunchIds: ['a'], dinnerIds: ['b'] });
+  assert.deepEqual(days['Domenica'], { lunchIds: [], dinnerIds: [] });
+  days['Lunedì'].lunchIds.push('z');
+  assert.deepEqual(plan.days['Lunedì'].lunchIds, ['a'], 'il menù originale non cambia finché non si salva');
+  assert.deepEqual(manualDaysFromPlan(null), emptyManualDays());
+});
+
+// ---- Menù condiviso e promemoria ----------------------------------------------------
+
+const settimanaCondivisa: WeeklyPlan = {
+  id: 'current',
+  startDate: '2026-10-12T08:00:00Z',
+  days: {
+    Lunedì: { lunchIds: ['p1'], dinnerIds: ['p2', 'p3'] },
+    Martedì: { lunchIds: [], dinnerIds: ['p2'] },
+    Mercoledì: { lunchIds: ['sparito'], dinnerIds: [] },
+  },
+};
+const ricetteCondivise = [piatto('p1', ['Pasta']), piatto('p2', ['Pollo']), piatto('p3', ['Insalata'])].map((r, i) => ({ ...r, title: ['Pasta al sugo', 'Pollo al limone', 'Insalata'][i] }));
+
+test('menù condiviso: vista del giorno e della settimana, con pranzo e cena', () => {
+  const lunedi = dayMenu(settimanaCondivisa, ricetteCondivise, 'Lunedì');
+  assert.deepEqual(lunedi.lunch.map((r) => r.title), ['Pasta al sugo']);
+  assert.deepEqual(lunedi.dinner.map((r) => r.title), ['Pollo al limone', 'Insalata']);
+  const settimana = weekMenu(settimanaCondivisa, ricetteCondivise);
+  assert.deepEqual(settimana.map((d) => d.day), WEEK_DAYS);
+  assert.equal(settimana[6].lunch.length + settimana[6].dinner.length, 0, 'giorno senza piatti');
+  assert.deepEqual(dayMenu(settimanaCondivisa, ricetteCondivise, 'Mercoledì').lunch, [], 'un piatto non più disponibile si salta');
+});
+
+test('menù condiviso: assenza di menù e giorni della settimana', () => {
+  assert.equal(hasMenu(null), false);
+  assert.equal(hasMenu(undefined), false);
+  assert.equal(hasMenu({ id: 'c', startDate: 'x', days: {} }), false);
+  assert.equal(hasMenu({ id: 'c', startDate: 'x', days: { Lunedì: { lunchIds: [], dinnerIds: [] } } }), false);
+  assert.equal(hasMenu(settimanaCondivisa), true);
+  assert.deepEqual(weekMenu(null, []).map((d) => d.lunch.length + d.dinner.length), [0, 0, 0, 0, 0, 0, 0]);
+  assert.equal(dayNameOf(new Date(2026, 9, 12)), 'Lunedì');
+  assert.equal(dayNameOf(new Date(2026, 9, 18)), 'Domenica');
+  assert.equal(dayNameOf(new Date(2026, 9, 14)), 'Mercoledì');
+});
+
+test('promemoria giornaliero: un avviso per ogni giorno con il suo menù, all\'orario scelto', () => {
+  assert.equal(reminderText(dayMenu(settimanaCondivisa, ricetteCondivise, 'Lunedì')), 'Pranzo: Pasta al sugo · Cena: Pollo al limone + Insalata');
+  assert.equal(reminderText(dayMenu(settimanaCondivisa, ricetteCondivise, 'Martedì')), 'Cena: Pollo al limone');
+  assert.equal(reminderText(dayMenu(settimanaCondivisa, ricetteCondivise, 'Domenica')), '');
+  const now = new Date(2026, 9, 12, 9, 0); // lunedì 12 ottobre, ore 9
+  const list = buildDailyReminders({ plan: settimanaCondivisa, recipes: ricetteCondivise, hour: 18, minute: 30, now });
+  assert.deepEqual(list.map((r) => dayNameOf(r.at)), ['Lunedì', 'Martedì'], 'solo i giorni con un menù');
+  assert.equal(list[0].at.getHours(), 18);
+  assert.equal(list[0].at.getMinutes(), 30);
+  assert.match(list[0].body, /^Pranzo: Pasta al sugo/);
+  assert.equal(new Set(list.map((r) => r.id)).size, list.length, 'ogni avviso ha un suo codice');
+  assert.ok(list.every((r) => r.id > 2000 && r.id <= 2007), 'codici riservati ai promemoria del menù');
+});
+
+test('promemoria giornaliero: oggi si salta se l\'orario è già passato; senza menù nessun avviso', () => {
+  const sera = new Date(2026, 9, 12, 19, 0);
+  const list = buildDailyReminders({ plan: settimanaCondivisa, recipes: ricetteCondivise, hour: 18, minute: 0, now: sera });
+  assert.deepEqual(list.map((r) => dayNameOf(r.at)), ['Martedì']);
+  assert.deepEqual(buildDailyReminders({ plan: null, recipes: [], hour: 18, minute: 0, now: sera }), []);
+  assert.deepEqual(buildDailyReminders({ plan: { id: 'c', startDate: 'x', days: {} }, recipes: [], hour: 8, minute: 0 }), []);
+});
+
+test('promemoria: orario scelto valido o predefinito', () => {
+  assert.deepEqual(parseReminderTime('07:05'), { hour: 7, minute: 5 });
+  assert.deepEqual(parseReminderTime('23:59'), { hour: 23, minute: 59 });
+  for (const bad of ['', '24:00', '12:60', 'ab:cd', '7', null, undefined]) assert.deepEqual(parseReminderTime(bad as string), { hour: 18, minute: 0 });
+  assert.equal(formatReminderTime({ hour: 7, minute: 5 }), '07:05');
+});
+
+test('condivisione: link e messaggio contengono il codice dopo il # e il codice per l\'app', () => {
+  assert.equal(shareUrl('https://che-cucino-oggi.web.app/', 'ABCD-EFGH-JKMN'), 'https://che-cucino-oggi.web.app/menu#ABCD-EFGH-JKMN');
+  const message = shareMessage('https://che-cucino-oggi.web.app', 'ABCD-EFGH-JKMN');
+  assert.ok(message.includes('https://che-cucino-oggi.web.app/menu#ABCD-EFGH-JKMN'));
+  assert.ok(message.includes('il codice è ABCD-EFGH-JKMN'));
+  const link = new URL(shareUrl('https://che-cucino-oggi.web.app', 'ABCD-EFGH-JKMN'));
+  assert.equal(link.search, '');
+  assert.equal(link.hash, '#ABCD-EFGH-JKMN', 'il codice non va mai nella parte del link che arriva ai server');
+});
+
+test('condivisione: il codice scritto a mano ha le stesse regole nell\'app e sul server', () => {
+  const server = createRequire(import.meta.url)('../../functions/familyShare.js');
+  const inputs = [
+    'ABCD-EFGH-JKMN', 'abcd-efgh-jkmn', 'abcd efgh jkmn', 'ABCDEFGHJKMN', '  ABCD-EFGH-JKMN  ',
+    'https://che-cucino-oggi.web.app/menu#ABCD-EFGH-JKMN', 'ABCD-EFGH-JKM', 'ABCD-EFGH-JKMNP', 'ABCD-EFGH-JKM0', 'ABCD-EFGH-JKMO',
+    'ABCD-EFGH-JKM1', 'ABCD-EFGH-JKML', 'ABCD-EFGH-JKM!', '', 'non-un-codice',
+  ];
+  for (const input of inputs) assert.equal(normalizeShareCode(input), server.normalizeCode(input), `diverso per «${input}»`);
+  assert.equal(normalizeShareCode('abcd efgh jkmn'), 'ABCD-EFGH-JKMN');
+  assert.equal(normalizeShareCode('ABCD-EFGH-JKM0'), null, 'lo zero si confonde con la O: non ammesso');
+  const code = server.newShareCode();
+  assert.equal(normalizeShareCode(code), code);
+});
+
+test('pagina pubblica del menù: ricette ridotte all\'essenziale e tutti i piatti del menù si trovano', () => {
+  const list = publicRecipes(INITIAL_RECIPES);
+  assert.equal(Object.keys(list).length, INITIAL_RECIPES.length);
+  const first = list[INITIAL_RECIPES[0].id];
+  assert.deepEqual(Object.keys(first).sort(), ['ingredients', 'instructions', 'servings', 'timeMin', 'title']);
+  assert.ok(first.title && first.ingredients.length > 0 && first.instructions.length > 0);
+  // i piatti che l'app propone nel menù (anche per i familiari) devono esistere nell'elenco della pagina
+  const cacheFile = JSON.stringify(list);
+  for (const id of ['meal-spaghetti-gamberi', ...NEUTRAL_DISH_IDS]) assert.ok(cacheFile.includes(JSON.stringify(id)) || id in list, `manca ${id}`);
+  assert.ok(!cacheFile.includes('proteinType') && !cacheFile.includes('nutrients'), 'niente dati non necessari');
+});
+
+test('pagina pubblica del menù: riservata, senza account, con tutti gli stati e senza HTML dai dati', () => {
+  const page = readFileSync('landing/menu.html', 'utf8');
+  assert.ok(page.includes('name="robots" content="noindex, nofollow"') && page.includes('name="referrer" content="no-referrer"'));
+  assert.ok(page.includes('location.hash') && !page.includes('location.search'), 'il codice sta dopo il # e non va ai server');
+  assert.ok(page.includes("'getSharedMenu'") && page.includes('europe-west1-gen-lang-client-0532460534.cloudfunctions.net'));
+  assert.ok(page.includes("fetch('/recipes.json')"), 'le ricette dell\'app vengono dal sito');
+  // stati: caricamento, link incompleto, errore di rete con riprova, nessun menù, link annullato/scaduto (il messaggio arriva dal server)
+  for (const needle of ['id="loading"', 'Questo link non è completo', 'Non riesco a collegarmi', 'id="retry-btn"', "Il menù non c'è ancora", 'j.error']) {
+    assert.ok(page.includes(needle), `manca: ${needle}`);
+  }
+  // il testo che arriva dal server si inserisce solo come testo, mai come HTML
+  assert.ok(!/innerHTML\s*=\s*[^'";\s]/.test(page.replace(/innerHTML\s*=\s*''/g, '')), 'niente innerHTML con dati');
+  assert.ok(!/outerHTML|insertAdjacentHTML|document\.write/.test(page));
+  assert.ok(page.includes('visibilitychange'), 'il menù si rilegge quando si riapre la pagina');
+  assert.ok(!/console\.log\(.*code/.test(page));
+  const robots = readFileSync('landing/robots.txt', 'utf8');
+  assert.ok(robots.includes('Disallow: /menu') && !readFileSync('landing/sitemap.xml', 'utf8').includes('/menu'));
+  const hosting = JSON.parse(readFileSync('firebase.landing.json', 'utf8')).hosting.headers as { source: string; headers: { key: string; value: string }[] }[];
+  const menu = hosting.find((h) => h.source === '/menu');
+  assert.ok(menu?.headers.some((h) => h.key === 'Cache-Control' && h.value === 'no-store'));
+  assert.ok(menu?.headers.some((h) => h.key === 'Referrer-Policy' && h.value === 'no-referrer'));
+  assert.ok(menu?.headers.some((h) => h.key === 'X-Robots-Tag'));
+  assert.ok(readFileSync('scripts/build-landing.ts', 'utf8').includes("'recipes.json'"), 'il sito deve pubblicare recipes.json');
+  assert.ok(readFileSync('landing/privacy.html', 'utf8').includes('Menù condiviso'), 'l\'informativa spiega la condivisione');
+});
+
+test('menù condiviso: sicurezza lato server — regole, funzioni e collegamento protetti', () => {
+  const rules = readFileSync('firestore.rules', 'utf8');
+  assert.ok(/protectedFields\(\)[\s\S]{0,900}'familyId'/.test(rules), 'familyId lo scrive solo il server');
+  assert.ok(rules.includes('match /viewers/{viewerUid}') && /match \/viewers[\s\S]{0,260}allow write: if false/.test(rules));
+  assert.ok(/match \/familyShare[\s\S]{0,200}allow write: if false/.test(rules));
+  assert.ok(!rules.includes('/shares') && !rules.includes('/invites'), 'link e inviti si toccano solo dal server');
+  // chi è collegato legge soltanto menù e ricette: nessuna altra sottocartella ha la regola dei collegati
+  assert.equal((rules.match(/isViewerOf\(userId\)/g) || []).length, 2);
+  const functions = readFileSync('functions/index.js', 'utf8');
+  for (const name of ['createFamilyShare', 'revokeFamilyShare', 'joinFamily', 'leaveFamily', 'removeFamilyViewer']) {
+    assert.ok(new RegExp(`exports\\.${name} = onCall[\\s\\S]{0,160}requireAuth`).test(functions), `${name} richiede l'accesso`);
+  }
+  assert.ok(functions.includes('exports.getSharedMenu = onRequest') && functions.includes("res.set('Cache-Control', 'no-store')"));
+  assert.ok(functions.includes("db.collection('shares').where('uid', '==', targetUid)"), 'eliminando un account spariscono anche i link');
+  assert.ok(!functions.includes('console.log(code') && !/console\.(log|error)\([^)]*\bcode\b/.test(functions.slice(functions.indexOf('createFamilyShare'), functions.indexOf('Amministratori'))), 'il codice non va nei registri');
+});
+
+test('menù condiviso nell\'app: voce "Menù di casa" per chi è collegato, promemoria per telefono, entrata dall\'invito', () => {
+  const app = readFileSync('src/App.tsx', 'utf8');
+  assert.ok(app.includes("profile?.familyId ? [{ id: 'shared'") && app.includes('<SharedMenu familyId={profile.familyId} />'));
+  assert.ok(app.includes('<MenuReminderSync userId={user.uid} familyId={profile?.familyId} />'));
+  const shared = readFileSync('src/components/SharedMenu.tsx', 'utf8');
+  for (const needle of ['Carico il menù', "Il menù non c'è ancora", 'Non vedi più questo menù', 'Non riesco a caricare il menù', 'Riprova', 'MenuNotificationsCard']) {
+    assert.ok(shared.includes(needle), `SharedMenu: manca ${needle}`);
+  }
+  assert.ok(!/setDoc|updateDoc|addDoc|deleteDoc/.test(shared), 'chi consulta il menù non scrive nulla');
+  const share = readFileSync('src/components/FamilyShare.tsx', 'utf8');
+  for (const needle of ['createFamilyShare', 'revokeFamilyShare', 'removeFamilyViewer', 'WhatsApp', 'Il link è scaduto', 'Annulla il link']) {
+    assert.ok(share.includes(needle), `FamilyShare: manca ${needle}`);
+  }
+  assert.ok(readFileSync('src/components/MealPlanner.tsx', 'utf8').includes('Condividi menu'));
+  assert.ok(readFileSync('src/components/FamilySettings.tsx', 'utf8').includes('<FamilyShare userId={userId} />'));
+  assert.ok(readFileSync('src/components/AccountSettings.tsx', 'utf8').includes('<MenuNotificationsCard />'));
+  assert.ok(readFileSync('src/components/WelcomeTour.tsx', 'utf8').includes('Ho ricevuto un invito da un familiare'));
+  // le scelte sulle notifiche stanno sul telefono: nessuna scrittura sul database
+  const reminders = readFileSync('src/lib/reminders.ts', 'utf8');
+  assert.ok(reminders.includes("'daily_menu_reminder'") && !/firebase\/firestore/.test(reminders));
 });

@@ -13,6 +13,7 @@ import { httpsCallable } from 'firebase/functions';
 import { auth, db, functions } from '../lib/firebase';
 import { planName } from '../lib/plans';
 import { remindersAvailable, setSundayReminder, sundayReminderEnabled } from '../lib/reminders';
+import MenuNotificationsCard from './MenuNotificationsCard';
 import type { UserProfile } from '../types';
 import { syncSelfMemberName } from '../lib/selfMember';
 
@@ -327,6 +328,8 @@ export default function AccountSettings({
           <Wallet className="w-4 h-4" /> {paid ? 'Gestisci abbonamento' : 'Scopri i piani'}
         </button>
       </Card>
+
+      <MenuNotificationsCard />
 
       {remindersAvailable() && (
         <Card title="Promemoria">

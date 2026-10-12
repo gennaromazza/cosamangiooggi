@@ -20,6 +20,15 @@
         { "key": "Referrer-Policy", "value": "no-referrer" },
         { "key": "X-Robots-Tag", "value": "noindex, nofollow" }
       ] },
+      { "source": "/menu", "headers": [
+        { "key": "Cache-Control", "value": "no-store" },
+        { "key": "Referrer-Policy", "value": "no-referrer" },
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow" }
+      ] },
+      { "source": "/recipes.json", "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=300" },
+        { "key": "X-Robots-Tag", "value": "noindex" }
+      ] },
       { "source": "/version.json", "headers": [
         { "key": "Cache-Control", "value": "no-cache" },
         { "key": "Access-Control-Allow-Origin", "value": "*" }

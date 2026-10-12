@@ -3,15 +3,18 @@ import MemberAlternatives from './MemberAlternatives';
 import { dislikeConsensus, pickAlternatives, planMeals } from '../lib/memberAlternatives';
 import { planTogetherSlot } from '../lib/together';
 import { db } from '../lib/firebase';
-import { collection, query, where, getDocs, setDoc, doc, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, getDocs, setDoc, addDoc, doc, onSnapshot } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firebaseUtils';
 import { WeeklyPlan, Recipe, UserProfile, DietaryRestriction, PantryItem, DayPlan } from '../types';
 import { INITIAL_RECIPES } from '../data/recipes';
 import { calculateNutrients } from '../lib/nutritionUtils';
-import { Calendar as CalendarIcon, RefreshCcw, Save, Trash2, ChevronLeft, ChevronRight, X, Clock, Gauge, UtensilsCrossed, ChefHat, Info, Tag, Sparkles, Users, Heart, ShoppingCart, Check, AlertTriangle, Package, SlidersHorizontal } from 'lucide-react';
+import { Calendar as CalendarIcon, RefreshCcw, Save, Trash2, ChevronLeft, ChevronRight, X, Clock, Gauge, UtensilsCrossed, ChefHat, Info, Tag, Sparkles, Users, Heart, ShoppingCart, Check, AlertTriangle, Package, SlidersHorizontal, Share2 } from 'lucide-react';
 import { getCurrentSeason, scaleIngredientAmount, getRawIngredientNames } from '../lib/utils';
 import { checkIngredientMatch, isStaple, calculateMissingFromPantry } from '../lib/pantrySync';
 import { findPlanIssues, issuesKey, rebuildAffectedMeals } from '../lib/planCompatibility';
+import ManualPlanEditor from './ManualPlanEditor';
+import FamilyShare from './FamilyShare';
+import { buildManualPlan, manualDaysFromPlan, WEEK_DAYS, type ManualDays } from '../lib/manualPlan';
 import { hitsExclusion, satisfiesDiet } from '../lib/dietFilters';
 import TipCard from './TipCard';
 import { motion, AnimatePresence } from 'motion/react';
@@ -23,7 +26,7 @@ interface Props {
   onNavigateToPantry?: () => void;
 }
 
-const DAYS = ['Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato', 'Domenica'];
+const DAYS = WEEK_DAYS;
 
 export default function MealPlanner({ userId, onNavigateToShopping, onNavigateToFamily, onNavigateToPantry }: Props) {
   const [currentPlan, setCurrentPlan] = useState<WeeklyPlan | null>(null);
@@ -268,6 +271,8 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
   }, [userId]);
 
   const generatePlan = async (forceSkipPantryCheck = false, forceSkipFamilyCheck = false) => {
+    // Il menù scritto a mano (per esempio la dieta del nutrizionista) non si sostituisce per sbaglio
+    if (currentPlan?.manual && !window.confirm('Il menù che hai scritto tu verrà sostituito da uno nuovo creato dall\'app. Continuare?')) return;
     if (familyMembers.length === 0 && !forceSkipFamilyCheck) {
       setShowNoFamilyModal(true);
       return;
@@ -1017,6 +1022,34 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
 
   const generateNow = () => generatePlan(true, familyMembers.length === 0);
 
+  // Menù scritto a mano
+  const [showManual, setShowManual] = useState(false);
+  const [showShare, setShowShare] = useState(false);
+  const customIds = useMemo(() => new Set(recipes.filter(r => !INITIAL_RECIPES.some(i => i.id === r.id)).map(r => r.id)), [recipes]);
+  const createManualDish = async (recipeData: Omit<Recipe, 'id'>): Promise<string | null> => {
+    const isLocal = userId === 'demo-family-user' || userId.startsWith('local-');
+    if (isLocal) {
+      const created = { ...recipeData, id: 'custom-' + Date.now() } as Recipe;
+      const saved = (() => { try { return JSON.parse(localStorage.getItem(`customRecipes_${userId}`) || '[]') as Recipe[]; } catch { return []; } })();
+      localStorage.setItem(`customRecipes_${userId}`, JSON.stringify([...saved, created]));
+      setRecipes(list => [...list, created]);
+      return created.id;
+    }
+    const path = `users/${userId}/customRecipes`;
+    try {
+      return (await addDoc(collection(db, path), recipeData)).id;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, path);
+      return null;
+    }
+  };
+  const saveManualPlan = async (days: ManualDays) => {
+    const plan = buildManualPlan({ days, recipes, members: familyMembers, pool: familyPool() });
+    await savePlan(plan);
+    setShowManual(false);
+    setRebuildNotice({ text: 'Il tuo menù è salvato. L\'app non lo cambia da sola.', tone: 'ok' });
+  };
+
   // Ricette valide per tutta la famiglia (stagione, dieta e allergie comuni): da qui si scelgono sostituti e alternative
   const familyPool = () => recipes.filter(r =>
     (r.season === season || r.season === 'all' || favorites.includes(r.id)) &&
@@ -1107,7 +1140,7 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
     await savePlan({ ...currentPlan, days: { ...currentPlan.days, [day]: dayPlan } });
   };
   const togetherControl = (day: string, slot: 'lunch' | 'dinner', info?: DayPlan['lunchTogether']) => {
-    if (familyMembers.length < 2) return null;
+    if (familyMembers.length < 2 || currentPlan?.manual) return null;
     if (!info) {
       return (
         <button
@@ -1196,6 +1229,9 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
           ) : (
             <p className="text-slate-600 mt-1">Pranzi e cene, pronti da cucinare.</p>
           )}
+          {currentPlan?.manual && (
+            <p className="mt-1 text-sm font-semibold text-indigo-700">Il tuo menù, scritto da te: l'app non lo cambia da sola.</p>
+          )}
           {profile?.currentOffers && profile.currentOffers.length > 0 && (
             <p className="mt-1 text-sm font-semibold text-emerald-700 flex items-center gap-1.5">
               <Tag className="w-4 h-4" /> {profile.currentOffers.length} offerte del volantino nel menù
@@ -1214,6 +1250,16 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
               <span className="hidden sm:inline">Nuovo menù</span>
             </button>
           )}
+          {currentPlan && (
+            <button
+              onClick={() => setShowShare(true)}
+              aria-label="Condividi il menù con la famiglia"
+              className="h-11 px-3.5 rounded-2xl border border-slate-200 bg-white text-slate-700 text-sm font-semibold flex items-center gap-2"
+            >
+              <Share2 className="w-4 h-4" />
+              <span className="hidden sm:inline">Condividi menu</span>
+            </button>
+          )}
           <button
             onClick={() => setShowOptions(o => !o)}
             aria-label="Opzioni del menù"
@@ -1227,26 +1273,55 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
         </div>
       </div>
 
+      {showShare && (
+        <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-slate-900/50 p-0 sm:p-4" role="dialog" aria-modal="true" aria-label="Condividi il menù">
+          <div className="w-full max-w-lg max-h-[90dvh] overflow-y-auto bg-slate-50 rounded-t-3xl sm:rounded-3xl p-4 space-y-3">
+            <FamilyShare userId={userId} />
+            <button onClick={() => setShowShare(false)} className="w-full h-12 rounded-2xl bg-white border border-slate-200 text-slate-700 font-bold">Chiudi</button>
+          </div>
+        </div>
+      )}
+
+      {showManual && (
+        <ManualPlanEditor
+          initial={manualDaysFromPlan(currentPlan)}
+          recipes={recipes}
+          customIds={customIds}
+          isEditing={!!currentPlan?.manual}
+          onSave={saveManualPlan}
+          onCreateDish={createManualDish}
+          onClose={() => setShowManual(false)}
+        />
+      )}
+
       {/* Preferenze cambiate: il menù già creato non si modifica da solo, quindi lo diciamo */}
       {currentPlan && showIssues && (
         <div role="alert" className="bg-amber-50 border border-amber-200 rounded-2xl p-4 space-y-3">
-          <p className="font-semibold text-amber-900">Le preferenze sono cambiate: il menù non è più allineato.</p>
+          <p className="font-semibold text-amber-900">{currentPlan.manual ? 'Il tuo menù non rispetta alcune regole che hai indicato.' : 'Le preferenze sono cambiate: il menù non è più allineato.'}</p>
           <p className="text-sm text-amber-900 leading-relaxed">Con le regole di adesso: {issueSummary}.</p>
           <div className="flex flex-wrap gap-2">
-            <button
-              onClick={rebuildAffected}
-              disabled={isRebuilding || isGenerating}
-              className="h-11 px-4 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold disabled:opacity-60"
-            >
-              {isRebuilding ? 'Sistemo…' : 'Sistema solo questi pasti'}
-            </button>
-            <button
-              onClick={generateNow}
-              disabled={isRebuilding || isGenerating}
-              className="h-11 px-4 rounded-xl border border-amber-300 bg-white text-amber-900 font-bold disabled:opacity-60"
-            >
-              Crea di nuovo tutto
-            </button>
+            {currentPlan.manual ? (
+              <button onClick={() => setShowManual(true)} className="h-11 px-4 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold">
+                Modifica il mio menù
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={rebuildAffected}
+                  disabled={isRebuilding || isGenerating}
+                  className="h-11 px-4 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold disabled:opacity-60"
+                >
+                  {isRebuilding ? 'Sistemo…' : 'Sistema solo questi pasti'}
+                </button>
+                <button
+                  onClick={generateNow}
+                  disabled={isRebuilding || isGenerating}
+                  className="h-11 px-4 rounded-xl border border-amber-300 bg-white text-amber-900 font-bold disabled:opacity-60"
+                >
+                  Crea di nuovo tutto
+                </button>
+              </>
+            )}
             <button onClick={dismissIssues} className="h-11 px-3 text-sm font-semibold text-amber-800 underline underline-offset-4">
               Lascia così
             </button>
@@ -1284,6 +1359,12 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
       {/* Opzioni: nascoste finché non servono */}
       {showOptions && (
         <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-1">
+          <button
+            onClick={() => { setShowManual(true); setShowOptions(false); }}
+            className="w-full text-left py-2 text-sm font-semibold text-indigo-700"
+          >
+            {currentPlan?.manual ? 'Modifica il mio menù scritto a mano' : 'Scrivi il tuo menù (per esempio la tua dieta)'}
+          </button>
           <label className="flex items-center justify-between gap-4 py-2 cursor-pointer">
             <span className="text-sm font-medium text-slate-800">Senza piatti vegani</span>
             <input
@@ -1324,6 +1405,12 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
           >
             <RefreshCcw className={`w-5 h-5 ${isGenerating ? 'animate-spin' : ''}`} />
             {isGenerating ? 'Sto preparando…' : 'Crea il menù della settimana'}
+          </button>
+          <button
+            onClick={() => setShowManual(true)}
+            className="mt-3 w-full h-12 rounded-2xl border border-slate-200 bg-white text-slate-700 font-bold"
+          >
+            Ho già una dieta: scrivo io il menù
           </button>
           {familyMembers.length === 0 && onNavigateToFamily && (
             <button onClick={onNavigateToFamily} className="mt-4 text-sm font-semibold text-indigo-600 underline underline-offset-4">

@@ -2,5 +2,7 @@ User-agent: *
 Allow: /
 Disallow: /download/
 Disallow: /invito
+Disallow: /menu
+Disallow: /recipes.json
 
 Sitemap: __SITE_URL__/sitemap.xml

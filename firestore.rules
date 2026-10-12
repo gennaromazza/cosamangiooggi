@@ -26,7 +26,16 @@ service cloud.firestore {
       return ['plan', 'isAdmin', 'isSuspended', 'subscriptionStatus', 'autoRenew',
               'paymentHistory', 'stripeCustomerId', 'stripeSubscriptionId',
               'aiInteractionsThisMonth', 'aiUsage', 'dishUsage', 'hadSubscription', 'tempOTP', 'tempOTPExpires', 'tempOTPGeneratedAt',
-              'tempPassword', 'tempPasswordGeneratedAt'];
+              'tempPassword', 'tempPasswordGeneratedAt',
+              // Collegamento a una famiglia: lo scrive solo il server (funzioni joinFamily / leaveFamily)
+              'familyId'];
+    }
+
+    // Chi si è collegato alla famiglia di ownerId con il codice: può solo consultare menù e ricette.
+    // Il documento viewers/{uid} lo scrivono solo le funzioni del server.
+    function isViewerOf(ownerId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(ownerId)/viewers/$(request.auth.uid));
     }
 
     function isValidId(id) {
@@ -64,10 +73,26 @@ service cloud.firestore {
       
       match /mealPlans/{planId} {
         allow read, write: if isOwner(userId) || isAdmin();
+        // Menù condiviso: i familiari collegati lo leggono soltanto
+        allow read: if isViewerOf(userId);
       }
 
       match /customRecipes/{recipeId} {
         allow read, write: if isOwner(userId) || isAdmin();
+        // Servono per mostrare i piatti scritti dalla famiglia nel menù condiviso
+        allow read: if isViewerOf(userId);
+      }
+
+      // Persone collegate alla famiglia: le vede chi gestisce e ognuno vede solo sé stesso. Le scrive solo il server.
+      match /viewers/{viewerUid} {
+        allow read: if isOwner(userId) || isAdmin() || (isSignedIn() && request.auth.uid == viewerUid);
+        allow write: if false;
+      }
+
+      // Codice di condivisione in chiaro: solo per chi gestisce (per rimandarlo). Lo scrive solo il server.
+      match /familyShare/{docId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow write: if false;
       }
 
       match /favorites/{recipeId} {
