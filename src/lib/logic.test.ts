@@ -23,6 +23,7 @@ import type { PantryItem, Recipe } from '../types';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { inviteLabel } from './inviteStatus';
+import { shouldShowIosInstallHint } from './iosInstall';
 import { isNewer } from './updateCheck';
 import { fillPlaceholders } from '../../scripts/landing';
 import { PAGES, pageText, renderPage } from '../../scripts/landing-pages';
@@ -678,4 +679,25 @@ test('pagamenti: il client Stripe si crea solo dopo aver controllato che la chia
   const workflow = readFileSync('.github/workflows/deploy-firebase.yml', 'utf8');
   assert.ok(workflow.includes('sk_live_*|sk_test_*|rk_live_*|rk_test_*'), 'il deploy rifiuta chiavi che non sono segrete');
   assert.ok(workflow.includes('whsec_*'));
+});
+
+test('iPhone: l\'istruzione per aggiungere l\'app alla Home compare solo in Safari, non già installata', () => {
+  const safari = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
+  const chrome = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/126.0 Mobile/15E148 Safari/604.1';
+  const android = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36';
+  const ipadMac = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15';
+  assert.equal(shouldShowIosInstallHint({ userAgent: safari }), true);
+  assert.equal(shouldShowIosInstallHint({ userAgent: safari, standalone: true }), false, 'già installata');
+  assert.equal(shouldShowIosInstallHint({ userAgent: safari, native: true }), false);
+  assert.equal(shouldShowIosInstallHint({ userAgent: chrome }), false, 'da Chrome su iPhone non si può installare');
+  assert.equal(shouldShowIosInstallHint({ userAgent: android }), false);
+  assert.equal(shouldShowIosInstallHint({ userAgent: ipadMac, maxTouchPoints: 5 }), true, 'iPad');
+  assert.equal(shouldShowIosInstallHint({ userAgent: ipadMac, maxTouchPoints: 0 }), false, 'Mac vero');
+});
+
+test('sito: la pagina spiega l\'installazione su iPhone e le domande frequenti non dicono più il contrario', () => {
+  const page = readFileSync('landing/index.html', 'utf8');
+  assert.ok(page.includes('id="iphone"') && page.includes('Aggiungi alla schermata Home'));
+  assert.ok(!page.includes("L'app da installare è per Android. Da iPhone"), 'testo vecchio rimasto');
+  assert.ok(page.includes('href="#iphone"'));
 });
