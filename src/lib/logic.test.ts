@@ -24,6 +24,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { inviteLabel } from './inviteStatus';
 import { shouldShowIosInstallHint } from './iosInstall';
+import { addToSlot, buildManualPlan, countManualMeals, emptyManualDays, manualDaysFromPlan, removeFromSlot, WEEK_DAYS } from './manualPlan';
 import { isNewer } from './updateCheck';
 import { fillPlaceholders } from '../../scripts/landing';
 import { PAGES, pageText, renderPage } from '../../scripts/landing-pages';
@@ -700,4 +701,60 @@ test('sito: la pagina spiega l\'installazione su iPhone e le domande frequenti n
   assert.ok(page.includes('id="iphone"') && page.includes('Aggiungi alla schermata Home'));
   assert.ok(!page.includes("L'app da installare è per Android. Da iPhone"), 'testo vecchio rimasto');
   assert.ok(page.includes('href="#iphone"'));
+});
+
+// ---- Menù scritto a mano ------------------------------------------------------------
+
+test('menù scritto a mano: si compone giorno per giorno e si corregge', () => {
+  let days = emptyManualDays();
+  assert.deepEqual(Object.keys(days), WEEK_DAYS);
+  assert.equal(countManualMeals(days), 0);
+  days = addToSlot(days, 'Lunedì', 'lunch', 'a');
+  days = addToSlot(days, 'Lunedì', 'lunch', 'b');
+  days = addToSlot(days, 'Lunedì', 'dinner', 'c');
+  assert.deepEqual(days['Lunedì'], { lunchIds: ['a', 'b'], dinnerIds: ['c'] });
+  assert.equal(countManualMeals(days), 2, 'conta i pasti, non i piatti');
+  days = removeFromSlot(days, 'Lunedì', 'lunch', 0);
+  assert.deepEqual(days['Lunedì'].lunchIds, ['b']);
+  assert.deepEqual(emptyManualDays()['Lunedì'], { lunchIds: [], dinnerIds: [] }, 'la settimana vuota non viene modificata');
+});
+
+test('menù scritto a mano: diventa un normale menù, con i piatti scelti e senza cambiarli', () => {
+  const luca = persona('luca', { dislikedMeals: ['meal-x'] });
+  const p1 = recipe('p1', []);
+  const p2 = recipe('p2', ['gluten-free']);
+  const p3 = recipe('p3', ['gluten-free']);
+  let days = emptyManualDays();
+  days = addToSlot(days, 'Martedì', 'lunch', 'p1');
+  days = addToSlot(days, 'Martedì', 'dinner', 'p2');
+  const plan = buildManualPlan({ days, recipes: [p1, p2, p3], members: [luca], pool: [p1, p2, p3], now: new Date('2026-01-05T10:00:00Z'), random: () => 0 });
+  assert.equal(plan.manual, true);
+  assert.equal(plan.id, 'current');
+  assert.deepEqual(plan.days['Martedì'].lunchIds, ['p1']);
+  assert.deepEqual(plan.days['Martedì'].dinnerIds, ['p2']);
+  assert.deepEqual(plan.days['Lunedì'], { lunchIds: [], dinnerIds: [] });
+  assert.equal(plan.days['Martedì'].lunchAlt, undefined, 'un gusto non crea alternative: i piatti li ha scelti l\'utente');
+  // la spesa funziona come per ogni menù
+  assert.deepEqual(planMeals(plan, 2).map((m) => m.recipeId).sort(), ['p1', 'p2']);
+});
+
+test('menù scritto a mano: chi ha una dieta o allergia che il piatto non rispetta ha la sua alternativa', () => {
+  const celiaca = persona('sara', { dietaryRestrictions: ['gluten-free'] });
+  const pasta = recipe('pasta', []);
+  const riso = recipe('riso', ['gluten-free']);
+  const plan = buildManualPlan({ days: addToSlot(emptyManualDays(), 'Lunedì', 'lunch', 'pasta'), recipes: [pasta, riso], members: [celiaca], pool: [pasta, riso], random: () => 0 });
+  assert.deepEqual(plan.days['Lunedì'].lunchIds, ['pasta'], 'il piatto scelto resta');
+  assert.deepEqual(plan.days['Lunedì'].lunchAlt, { sara: 'riso' });
+  // e il controllo di compatibilità non trova problemi
+  assert.deepEqual(findPlanIssues({ plan, recipes: [pasta, riso], rules: null, members: [celiaca] }), []);
+});
+
+test('menù scritto a mano: si riparte dal menù attuale per modificarlo', () => {
+  const plan: WeeklyPlan = { id: 'current', startDate: '2026-01-01', manual: true, days: { Lunedì: { lunchIds: ['a'], dinnerIds: ['b'] } } };
+  const days = manualDaysFromPlan(plan);
+  assert.deepEqual(days['Lunedì'], { lunchIds: ['a'], dinnerIds: ['b'] });
+  assert.deepEqual(days['Domenica'], { lunchIds: [], dinnerIds: [] });
+  days['Lunedì'].lunchIds.push('z');
+  assert.deepEqual(plan.days['Lunedì'].lunchIds, ['a'], 'il menù originale non cambia finché non si salva');
+  assert.deepEqual(manualDaysFromPlan(null), emptyManualDays());
 });
