@@ -44,6 +44,7 @@ import AdminDashboard from './components/AdminDashboard';
 import WelcomeTour from './components/WelcomeTour';
 import AccountSettings from './components/AccountSettings';
 import SharedMenu from './components/SharedMenu';
+import WhatsNew from './components/WhatsNew';
 import MenuReminderSync from './components/MenuReminderSync';
 import UpdateBanner from './components/UpdateBanner';
 import PWAInstallPrompt from './components/PWAInstallPrompt';
@@ -1047,6 +1048,7 @@ export default function App() {
         onProfileUpdate={setProfile}
       />
 
+      <WhatsNew userId={user.uid} profile={profile} />
       <MenuReminderSync userId={user.uid} familyId={profile?.familyId} />
       <PWAInstallPrompt />
       <UpdateBanner />

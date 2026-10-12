@@ -14,6 +14,7 @@ import { auth, db, functions } from '../lib/firebase';
 import { planName } from '../lib/plans';
 import { remindersAvailable, setSundayReminder, sundayReminderEnabled } from '../lib/reminders';
 import MenuNotificationsCard from './MenuNotificationsCard';
+import { OPEN_WHATS_NEW_EVENT } from './WhatsNew';
 import type { UserProfile } from '../types';
 import { syncSelfMemberName } from '../lib/selfMember';
 
@@ -347,6 +348,13 @@ export default function AccountSettings({
           <Message notice={reminderNotice} />
         </Card>
       )}
+
+      <Card title="Novità dell’app">
+        <p className="text-sm text-slate-600 leading-relaxed">Cosa è cambiato negli ultimi aggiornamenti.</p>
+        <button onClick={() => window.dispatchEvent(new CustomEvent(OPEN_WHATS_NEW_EVENT))} className={secondaryButton}>
+          Vedi le novità
+        </button>
+      </Card>
 
       <p className="text-center text-sm text-slate-500">
         Versione dell’app: <strong className="text-slate-700">{__APP_VERSION__}</strong>

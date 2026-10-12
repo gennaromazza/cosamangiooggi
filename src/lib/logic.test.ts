@@ -26,6 +26,8 @@ import { inviteLabel } from './inviteStatus';
 import { shouldShowIosInstallHint } from './iosInstall';
 import { buildDailyReminders, dayMenu, dayNameOf, formatReminderTime, hasMenu, normalizeShareCode, parseReminderTime, reminderText, shareMessage, shareUrl, weekMenu } from './sharedMenu';
 import { publicRecipes } from '../../scripts/public-recipes';
+import { CHANGELOG, LATEST_NEWS_ID } from '../data/changelog';
+import { pendingNews } from './whatsNew';
 import { addToSlot, buildManualPlan, countManualMeals, emptyManualDays, manualDaysFromPlan, removeFromSlot, WEEK_DAYS } from './manualPlan';
 import { isNewer } from './updateCheck';
 import { fillPlaceholders } from '../../scripts/landing';
@@ -924,4 +926,46 @@ test('menù condiviso nell\'app: voce "Menù di casa" per chi è collegato, prom
   // le scelte sulle notifiche stanno sul telefono: nessuna scrittura sul database
   const reminders = readFileSync('src/lib/reminders.ts', 'utf8');
   assert.ok(reminders.includes("'daily_menu_reminder'") && !/firebase\/firestore/.test(reminders));
+});
+
+test('novità: ogni voce ha un identificativo unico, un titolo e testi leggibili', () => {
+  assert.ok(CHANGELOG.length >= 2);
+  assert.equal(new Set(CHANGELOG.map((e) => e.id)).size, CHANGELOG.length, 'identificativi doppi');
+  assert.equal(LATEST_NEWS_ID, CHANGELOG[0].id, 'la voce più recente sta in cima');
+  for (const entry of CHANGELOG) {
+    assert.ok(entry.title.length > 5 && entry.date.length > 5 && entry.items.length > 0, entry.id);
+    for (const item of entry.items) assert.ok(item.emoji && item.title.length > 3 && item.text.length > 20, `${entry.id}: ${item.title}`);
+  }
+});
+
+test('novità: si mostra una volta sola dopo l\'aggiornamento, e non a chi è nuovo', () => {
+  const [nuova, media, vecchia] = CHANGELOG;
+  assert.deepEqual(pendingNews(CHANGELOG, nuova.id, true), [], 'già vista: niente');
+  assert.deepEqual(pendingNews(CHANGELOG, media.id, true).map((e) => e.id), [nuova.id], 'solo ciò che è uscito dopo');
+  assert.deepEqual(pendingNews(CHANGELOG, vecchia.id, true).map((e) => e.id), [nuova.id, media.id]);
+  assert.deepEqual(pendingNews(CHANGELOG, null, false), [], 'chi installa adesso ha già la guida iniziale');
+  assert.deepEqual(pendingNews(CHANGELOG, null, true).map((e) => e.id), CHANGELOG.slice(0, 3).map((e) => e.id), 'chi usa già l\'app vede le ultime');
+  assert.deepEqual(pendingNews(CHANGELOG, 'versione-sconosciuta', true).map((e) => e.id), CHANGELOG.slice(0, 3).map((e) => e.id));
+  assert.equal(pendingNews(CHANGELOG, null, true, 1).length, 1, 'si può limitare quante mostrarne');
+  assert.deepEqual(pendingNews([], null, true), []);
+});
+
+test('novità: la schermata è nell\'app e si rivede dall\'account', () => {
+  assert.ok(readFileSync('src/App.tsx', 'utf8').includes('<WhatsNew userId={user.uid} profile={profile} />'));
+  const account = readFileSync('src/components/AccountSettings.tsx', 'utf8');
+  assert.ok(account.includes('Novità dell’app') && account.includes('OPEN_WHATS_NEW_EVENT'));
+  const screen = readFileSync('src/components/WhatsNew.tsx', 'utf8');
+  assert.ok(screen.includes('Ho capito') && screen.includes('writeSeen(LATEST_NEWS_ID)'));
+});
+
+test('famiglia: ogni persona ha una scheda a tutto schermo, non più una riga da espandere', () => {
+  const page = readFileSync('src/components/FamilySettings.tsx', 'utf8');
+  assert.ok(!page.includes('aria-expanded') && !page.includes('ChevronDown'), 'niente più fisarmonica');
+  assert.ok(page.includes('Apri la scheda di') && page.includes('Gusti <ChevronRight'), 'la riga dice che si apre');
+  for (const needle of ['Torna alla famiglia', 'Cambia il nome di', 'Rimuovere ${person.name} dalla famiglia?', 'role="dialog"']) {
+    assert.ok(page.includes(needle), `scheda: manca ${needle}`);
+  }
+  assert.ok(page.includes("e.key === 'Escape' && closeMember()") && page.includes("document.body.style.overflow = 'hidden'"));
+  // la guida iniziale continua a usare la stessa scheda, senza fisarmonica
+  assert.ok(page.includes('onlyMemberId') && readFileSync('src/components/WelcomeTour.tsx', 'utf8').includes('onlyMemberId'));
 });

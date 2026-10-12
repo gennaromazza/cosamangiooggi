@@ -7,7 +7,7 @@ import { Browser } from '@capacitor/browser';
 import { collection, query, onSnapshot, addDoc, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firebaseUtils';
 import { FamilyMember, DietaryRestriction, UserProfile, Recipe } from '../types';
-import { Plus, Trash2, ChevronDown, X, Search, Pencil } from 'lucide-react';
+import { Plus, Trash2, ChevronRight, ArrowLeft, X, Search, Pencil } from 'lucide-react';
 import { INITIAL_RECIPES } from '../data/recipes';
 import IngredientPicker from './IngredientPicker';
 import QuickDishModal from './QuickDishModal';
@@ -49,6 +49,24 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
   const [memberTab, setMemberTab] = useState<'like' | 'dislike' | 'meals' | 'diet' | 'tasting'>('dislike');
 
   const allRecipes = [...INITIAL_RECIPES, ...customRecipes];
+
+  const closeMember = () => {
+    setOpenMemberId(null);
+    setRenamingId(null);
+  };
+
+  // La scheda occupa tutto lo schermo: la pagina sotto non scorre e Esc la chiude
+  useEffect(() => {
+    if (!openMemberId) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && closeMember();
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = previous;
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [openMemberId]);
 
   useEffect(() => {
     if (userId === 'demo-family-user' || userId.startsWith('local-')) {
@@ -434,7 +452,7 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
   const renderMemberPanel = (member: FamilyMember) => (
                     <div className="px-4 pb-5 space-y-4 bg-slate-50/60">
       <MemberInvite member={member} userId={userId} />
-                      <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-2xl" role="group" aria-label="Gusti di questa persona">
+                      <div className="flex gap-1 bg-slate-100 p-1 rounded-2xl overflow-x-auto" role="group" aria-label="Gusti di questa persona">
                         {([
                           ['dislike', 'Non mangia'],
                           ['like', 'Ama'],
@@ -446,7 +464,7 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
                             key={id}
                             onClick={() => setMemberTab(id)}
                             aria-pressed={memberTab === id}
-                            className={`h-10 rounded-xl text-sm font-semibold ${
+                            className={`h-10 px-4 shrink-0 rounded-xl text-sm font-semibold whitespace-nowrap ${
                               memberTab === id ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'
                             }`}
                           >
@@ -657,79 +675,39 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
         ) : (
           <div className="divide-y divide-slate-100 border border-slate-100 rounded-2xl overflow-hidden">
             {members.map(member => {
-              const open = openMemberId === member.id;
               const dislikes = (member.dislikedIngredients?.length || 0) + (member.dislikedMeals?.length || 0);
               const likes = (member.likedIngredients?.length || 0) + (member.likedMeals?.length || 0);
               return (
-                <div key={member.id}>
-                  <div className="flex items-center">
-                    {renamingId === member.id ? (
-                      <form
-                        onSubmit={(e) => { e.preventDefault(); renameMember(member.id); }}
-                        className="flex-1 min-w-0 flex items-center gap-2 px-4 py-3"
-                      >
-                        <input
-                          autoFocus
-                          value={renameValue}
-                          onChange={(e) => setRenameValue(e.target.value)}
-                          onKeyDown={(e) => e.key === 'Escape' && setRenamingId(null)}
-                          aria-label={`Nome di ${member.name}`}
-                          maxLength={40}
-                          className="flex-1 min-w-0 h-11 bg-white border border-slate-200 rounded-xl px-3 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                        />
-                        <button type="submit" aria-label="Salva il nome" className="shrink-0 h-11 px-4 rounded-xl bg-indigo-600 text-white font-bold">
-                          Salva
-                        </button>
-                      </form>
-                    ) : (
-                    <button
-                      onClick={() => setOpenMemberId(open ? null : member.id)}
-                      aria-expanded={open}
-                      className="flex-1 min-w-0 flex items-center gap-3 px-4 py-4 text-left active:bg-slate-50"
-                    >
-                      <span className="w-11 h-11 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center shrink-0">
-                        {member.name.charAt(0).toUpperCase()}
-                      </span>
-                      <span className="flex-1 min-w-0">
-                        <span className="block font-semibold text-slate-900 truncate">{member.name}</span>
-                        <span className="block text-sm text-slate-500">
-                          {likes + dislikes === 0 ? 'Nessun gusto indicato' : `${likes} piace · ${dislikes} da evitare`}
-                        </span>
-                        {inviteLabel(member) && (
-                          <span className="block text-sm text-slate-500">{inviteLabel(member)}</span>
-                        )}
-                        {hasPersonalRules(member) && (
-                          <span className="block text-sm font-semibold text-indigo-700">
-                            {[
-                              ...(member.dietaryRestrictions || []).map(d => ({ vegan: 'Vegano', 'gluten-free': 'Senza glutine', 'lactose-free': 'Senza lattosio' }[d])),
-                              ...(member.allergies || []).map(a => `senza ${a.toLowerCase()}`),
-                            ].filter(Boolean).join(' · ')}
-                          </span>
-                        )}
-                      </span>
-                      <ChevronDown className={`w-5 h-5 text-slate-400 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
-                    </button>
+                <button
+                  key={member.id}
+                  onClick={() => { setOpenMemberId(member.id); setMemberTab('dislike'); }}
+                  aria-label={`Apri la scheda di ${member.name}`}
+                  className="w-full flex items-center gap-3 px-4 py-4 text-left active:bg-slate-50"
+                >
+                  <span className="w-11 h-11 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center shrink-0">
+                    {member.name.charAt(0).toUpperCase()}
+                  </span>
+                  <span className="flex-1 min-w-0">
+                    <span className="block font-semibold text-slate-900 truncate">{member.name}</span>
+                    <span className="block text-sm text-slate-500">
+                      {likes + dislikes === 0 ? 'Nessun gusto indicato' : `${likes} piace · ${dislikes} da evitare`}
+                    </span>
+                    {inviteLabel(member) && (
+                      <span className="block text-sm text-slate-500">{inviteLabel(member)}</span>
                     )}
-                    {renamingId !== member.id && (
-                      <button
-                        onClick={() => { setRenamingId(member.id); setRenameValue(member.name); }}
-                        aria-label={`Cambia il nome di ${member.name}`}
-                        className="shrink-0 w-11 h-11 rounded-full flex items-center justify-center text-slate-300 hover:text-indigo-600"
-                      >
-                        <Pencil className="w-5 h-5" />
-                      </button>
+                    {hasPersonalRules(member) && (
+                      <span className="block text-sm font-semibold text-indigo-700">
+                        {[
+                          ...(member.dietaryRestrictions || []).map(d => ({ vegan: 'Vegano', 'gluten-free': 'Senza glutine', 'lactose-free': 'Senza lattosio' }[d])),
+                          ...(member.allergies || []).map(a => `senza ${a.toLowerCase()}`),
+                        ].filter(Boolean).join(' · ')}
+                      </span>
                     )}
-                    <button
-                      onClick={() => deleteMember(member.id)}
-                      aria-label={`Rimuovi ${member.name}`}
-                      className="shrink-0 w-11 h-11 mr-2 rounded-full flex items-center justify-center text-slate-300 hover:text-red-500"
-                    >
-                      <Trash2 className="w-5 h-5" />
-                    </button>
-                  </div>
-
-                  {open && renderMemberPanel(member)}
-                </div>
+                  </span>
+                  <span className="shrink-0 flex items-center gap-1 text-sm font-semibold text-indigo-700">
+                    Gusti <ChevronRight className="w-5 h-5" />
+                  </span>
+                </button>
               );
             })}
           </div>
@@ -844,6 +822,57 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
       >
         Rivedi la guida iniziale
       </button>
+      {/* Scheda della persona: a tutto schermo, con il nome, le azioni e le schede dei gusti */}
+      {openMemberId && (() => {
+        const person = members.find(m => m.id === openMemberId);
+        if (!person) return null;
+        return (
+          <div className="fixed inset-0 z-[55] bg-slate-50 overflow-y-auto" role="dialog" aria-modal="true" aria-label={`Scheda di ${person.name}`}>
+            <div className="sticky top-0 z-10 bg-white border-b border-slate-200 px-2 pt-[env(safe-area-inset-top)]">
+              <div className="flex items-center gap-1 h-14 max-w-2xl mx-auto">
+                <button onClick={closeMember} aria-label="Torna alla famiglia" className="shrink-0 w-11 h-11 rounded-full flex items-center justify-center text-slate-700 active:bg-slate-100">
+                  <ArrowLeft className="w-6 h-6" />
+                </button>
+                {renamingId === person.id ? (
+                  <form onSubmit={(e) => { e.preventDefault(); renameMember(person.id); }} className="flex-1 min-w-0 flex items-center gap-2">
+                    <input
+                      autoFocus
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Escape' && setRenamingId(null)}
+                      aria-label={`Nome di ${person.name}`}
+                      maxLength={40}
+                      className="flex-1 min-w-0 h-11 bg-white border border-slate-200 rounded-xl px-3 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                    <button type="submit" className="shrink-0 h-11 px-4 rounded-xl bg-indigo-600 text-white font-bold">Salva</button>
+                  </form>
+                ) : (
+                  <>
+                    <h3 className="flex-1 min-w-0 text-xl font-semibold text-slate-900 truncate">{person.name}</h3>
+                    <button
+                      onClick={() => { setRenamingId(person.id); setRenameValue(person.name); }}
+                      aria-label={`Cambia il nome di ${person.name}`}
+                      className="shrink-0 h-11 px-3 rounded-full flex items-center gap-1.5 text-sm font-semibold text-slate-600 active:bg-slate-100"
+                    >
+                      <Pencil className="w-4 h-4" /> Nome
+                    </button>
+                    <button
+                      onClick={() => { if (window.confirm(`Rimuovere ${person.name} dalla famiglia?`)) { deleteMember(person.id); closeMember(); } }}
+                      aria-label={`Rimuovi ${person.name}`}
+                      className="shrink-0 w-11 h-11 rounded-full flex items-center justify-center text-slate-400 hover:text-red-500"
+                    >
+                      <Trash2 className="w-5 h-5" />
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+            <div className="max-w-2xl mx-auto pb-[calc(2rem+env(safe-area-inset-bottom))]">
+              {renderMemberPanel(person)}
+            </div>
+          </div>
+        );
+      })()}
       {dishFor && (
         <QuickDishModal
           initialTitle={mealSearch.trim()}
