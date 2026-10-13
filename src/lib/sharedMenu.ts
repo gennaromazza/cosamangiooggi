@@ -5,6 +5,10 @@ export interface DayMenu {
   day: string;
   lunch: Recipe[];
   dinner: Recipe[];
+  /** Colazione e merende: vuote se il menù non le comprende */
+  breakfast: Recipe[];
+  snackAm: Recipe[];
+  snackPm: Recipe[];
 }
 
 /** Nome del giorno in italiano (la settimana parte dal lunedì, come nel menù). */
@@ -15,7 +19,14 @@ export function dayMenu(plan: WeeklyPlan | null | undefined, recipes: Recipe[], 
   const byId = new Map(recipes.map((r) => [r.id, r]));
   const source = plan?.days?.[day];
   const pick = (ids: string[] | undefined) => (ids || []).map((id) => byId.get(id)).filter((r): r is Recipe => !!r);
-  return { day, lunch: pick(source?.lunchIds), dinner: pick(source?.dinnerIds) };
+  return {
+    day,
+    lunch: pick(source?.lunchIds),
+    dinner: pick(source?.dinnerIds),
+    breakfast: pick(source?.breakfastIds),
+    snackAm: pick(source?.snackAmIds),
+    snackPm: pick(source?.snackPmIds),
+  };
 }
 
 export const weekMenu = (plan: WeeklyPlan | null | undefined, recipes: Recipe[]): DayMenu[] =>
@@ -23,14 +34,20 @@ export const weekMenu = (plan: WeeklyPlan | null | undefined, recipes: Recipe[])
 
 /** Il menù ha almeno un piatto. */
 export const hasMenu = (plan: WeeklyPlan | null | undefined): boolean =>
-  !!plan?.days && Object.values(plan.days).some((d) => (d.lunchIds?.length || 0) + (d.dinnerIds?.length || 0) > 0);
+  !!plan?.days &&
+  Object.values(plan.days).some(
+    (d) => (d.lunchIds?.length || 0) + (d.dinnerIds?.length || 0) + (d.breakfastIds?.length || 0) + (d.snackAmIds?.length || 0) + (d.snackPmIds?.length || 0) > 0,
+  );
 
 const titles = (list: Recipe[]) => list.map((r) => r.title).join(' + ');
 
 /** Testo del promemoria: "Pranzo: … · Cena: …". Vuoto se quel giorno non c'è nulla. */
 export function reminderText(menu: DayMenu): string {
   const parts: string[] = [];
+  if (menu.breakfast.length > 0) parts.push(`Colazione: ${titles(menu.breakfast)}`);
+  if (menu.snackAm.length > 0) parts.push(`Spuntino: ${titles(menu.snackAm)}`);
   if (menu.lunch.length > 0) parts.push(`Pranzo: ${titles(menu.lunch)}`);
+  if (menu.snackPm.length > 0) parts.push(`Merenda: ${titles(menu.snackPm)}`);
   if (menu.dinner.length > 0) parts.push(`Cena: ${titles(menu.dinner)}`);
   return parts.join(' · ');
 }

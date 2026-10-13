@@ -425,7 +425,7 @@ exports.getSharedMenu = onRequest({ region: REGION, cors: true }, async (req, re
     if (!plan.exists) return res.json({ ok: true, menu: null });
     const planData = plan.data();
     const ids = new Set();
-    Object.values(planData.days || {}).forEach((d) => [...((d && d.lunchIds) || []), ...((d && d.dinnerIds) || [])].forEach((id) => typeof id === 'string' && id.length <= 128 && ids.add(id)));
+    Object.values(planData.days || {}).forEach((d) => ['lunchIds', 'dinnerIds', 'breakfastIds', 'snackAmIds', 'snackPmIds'].flatMap((k) => (d && Array.isArray(d[k]) ? d[k] : [])).forEach((id) => typeof id === 'string' && id.length <= 128 && ids.add(id)));
     const refs = [...ids].slice(0, 120).map((id) => userRef(share.uid).collection('customRecipes').doc(id));
     const found = refs.length ? await db.getAll(...refs) : [];
     const custom = {};

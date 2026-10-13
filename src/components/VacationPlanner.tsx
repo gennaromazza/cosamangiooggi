@@ -1,3 +1,4 @@
+import { isMorningCategory } from '../data/mornings';
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../lib/firebase';
 import { collection, query, where, getDocs, doc, setDoc, onSnapshot } from 'firebase/firestore';
@@ -94,6 +95,7 @@ export default function VacationPlanner({ userId, onNavigateToShopping }: Props)
   // Filter recipes suitable for beach lunch (takeaway, cold, make-ahead)
   const beachLunchRecipes = useMemo(() => {
     return recipes.filter(r => {
+      if (isMorningCategory(r.category)) return false;
       const isBeachTag = r.tags?.some(t => t.toLowerCase() === 'beach' || t.toLowerCase() === 'cold' || t.toLowerCase() === 'make-ahead');
       const isTakeaway = r.category === 'takeaway' || r.category === 'cold';
       const titleLower = r.title.toLowerCase();
@@ -105,6 +107,7 @@ export default function VacationPlanner({ userId, onNavigateToShopping }: Props)
   // Filter recipes suitable for post-beach dinner (fast, <= 20 mins, 0 stress)
   const beachDinnerRecipes = useMemo(() => {
     return recipes.filter(r => {
+      if (isMorningCategory(r.category)) return false;
       if (onlyNoCook) {
         return r.timeMin <= 10 || r.tags?.includes('fast') || r.title.toLowerCase().includes('carpaccio') || r.title.toLowerCase().includes('caprese') || r.title.toLowerCase().includes('prosciutto');
       }

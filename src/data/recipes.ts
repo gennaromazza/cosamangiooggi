@@ -1,6 +1,7 @@
 import { Recipe } from '../types';
+import { MORNING_RECIPES } from './mornings';
 
-export const INITIAL_RECIPES: Recipe[] = [
+const BASE_RECIPES: Recipe[] = [
   {
     id: 'meal-spaghetti-gamberi',
     title: 'Spaghetti ai gamberi',
@@ -10009,3 +10010,6 @@ export const INITIAL_RECIPES: Recipe[] = [
     nutrients: { calories: 310, protein: 14, carbs: 10, fat: 22 }
   }
 ];
+
+/** Tutti i piatti dell'app: pranzi e cene, contorni, dolci e le colazioni e merende pensate per una persona. */
+export const INITIAL_RECIPES: Recipe[] = [...BASE_RECIPES, ...MORNING_RECIPES];

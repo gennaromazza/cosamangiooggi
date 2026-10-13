@@ -1,10 +1,19 @@
 import type { FamilyMember, Recipe, WeeklyPlan } from '../types';
 import { fitsMember, isMain, pickAlternatives } from './memberAlternatives';
+import type { MealSlot } from './calories';
+import { DAY_SLOTS, SLOT_KEY } from './morningMeals';
 
 export const WEEK_DAYS = ['Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato', 'Domenica'];
 
-export type ManualDays = Record<string, { lunchIds: string[]; dinnerIds: string[] }>;
-export type ManualSlot = 'lunch' | 'dinner';
+export interface ManualDay {
+  lunchIds: string[];
+  dinnerIds: string[];
+  breakfastIds?: string[];
+  snackAmIds?: string[];
+  snackPmIds?: string[];
+}
+export type ManualDays = Record<string, ManualDay>;
+export type ManualSlot = MealSlot;
 
 export const emptyManualDays = (): ManualDays =>
   Object.fromEntries(WEEK_DAYS.map((day) => [day, { lunchIds: [], dinnerIds: [] }]));
@@ -15,32 +24,37 @@ export function manualDaysFromPlan(plan: WeeklyPlan | null): ManualDays {
   if (!plan) return days;
   for (const day of WEEK_DAYS) {
     const source = plan.days[day];
-    if (source) days[day] = { lunchIds: [...(source.lunchIds || [])], dinnerIds: [...(source.dinnerIds || [])] };
+    if (!source) continue;
+    const entry: ManualDay = { lunchIds: [...(source.lunchIds || [])], dinnerIds: [...(source.dinnerIds || [])] };
+    for (const slot of ['breakfast', 'snackAm', 'snackPm'] as const) {
+      const key = SLOT_KEY[slot];
+      if (source[key]?.length) entry[key] = [...(source[key] as string[])];
+    }
+    days[day] = entry;
   }
   return days;
 }
 
+export const idsOf = (day: ManualDay | undefined, slot: ManualSlot): string[] => (day ? ((day[SLOT_KEY[slot]] as string[] | undefined) ?? []) : []);
+
 export const addToSlot = (days: ManualDays, day: string, slot: ManualSlot, recipeId: string): ManualDays => {
   const current = days[day] || { lunchIds: [], dinnerIds: [] };
-  const key = slot === 'lunch' ? 'lunchIds' : 'dinnerIds';
-  return { ...days, [day]: { ...current, [key]: [...current[key], recipeId] } };
+  return { ...days, [day]: { ...current, [SLOT_KEY[slot]]: [...idsOf(current, slot), recipeId] } };
 };
 
 export const removeFromSlot = (days: ManualDays, day: string, slot: ManualSlot, index: number): ManualDays => {
   const current = days[day] || { lunchIds: [], dinnerIds: [] };
-  const key = slot === 'lunch' ? 'lunchIds' : 'dinnerIds';
-  return { ...days, [day]: { ...current, [key]: current[key].filter((_, i) => i !== index) } };
+  return { ...days, [day]: { ...current, [SLOT_KEY[slot]]: idsOf(current, slot).filter((_, i) => i !== index) } };
 };
 
 /** Cambia il piatto in una posizione (per esempio con la versione modificata), senza spostare gli altri. */
 export const replaceInSlot = (days: ManualDays, day: string, slot: ManualSlot, index: number, recipeId: string): ManualDays => {
   const current = days[day] || { lunchIds: [], dinnerIds: [] };
-  const key = slot === 'lunch' ? 'lunchIds' : 'dinnerIds';
-  return { ...days, [day]: { ...current, [key]: current[key].map((id, i) => (i === index ? recipeId : id)) } };
+  return { ...days, [day]: { ...current, [SLOT_KEY[slot]]: idsOf(current, slot).map((id, i) => (i === index ? recipeId : id)) } };
 };
 
 export const countManualMeals = (days: ManualDays): number =>
-  Object.values(days).reduce((n, d) => n + (d.lunchIds.length > 0 ? 1 : 0) + (d.dinnerIds.length > 0 ? 1 : 0), 0);
+  Object.values(days).reduce((n, d) => n + DAY_SLOTS.filter((slot) => idsOf(d, slot).length > 0).length, 0);
 
 /**
  * Il menù scritto a mano diventa un normale menù della settimana: spesa, dispensa e porzioni funzionano come sempre.
@@ -61,7 +75,12 @@ export function buildManualPlan(args: {
   for (const day of WEEK_DAYS) {
     const source = days[day] || { lunchIds: [], dinnerIds: [] };
     const entry: WeeklyPlan['days'][string] = { lunchIds: [...source.lunchIds], dinnerIds: [...source.dinnerIds] };
-    for (const slot of ['lunch', 'dinner'] as ManualSlot[]) {
+    // Colazione e merende restano come scritte: non hanno alternative per persona
+    for (const slot of ['breakfast', 'snackAm', 'snackPm'] as const) {
+      const ids = idsOf(source, slot);
+      if (ids.length > 0) entry[SLOT_KEY[slot]] = [...ids];
+    }
+    for (const slot of ['lunch', 'dinner'] as const) {
       const ids = slot === 'lunch' ? source.lunchIds : source.dinnerIds;
       const mains = ids.map((id) => byId.get(id)).filter((r): r is Recipe => !!r && isMain(r));
       if (mains.length === 0) continue;

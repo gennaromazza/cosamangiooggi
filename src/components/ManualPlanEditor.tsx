@@ -3,12 +3,16 @@ import { Pencil, Plus, Search, Trash2, X } from 'lucide-react';
 import type { Recipe } from '../types';
 import QuickDishModal from './QuickDishModal';
 import DayKcalCard from './DayKcalCard';
+import { DAY_SLOTS, SLOT_TITLES, slotCategory, type MorningSlot } from '../lib/morningMeals';
+import { isMorningCategory } from '../data/mornings';
 import {
   addToSlot,
   countManualMeals,
   removeFromSlot,
   replaceInSlot,
+  idsOf,
   WEEK_DAYS,
+  type ManualDay,
   type ManualDays,
   type ManualSlot,
 } from '../lib/manualPlan';
@@ -21,6 +25,8 @@ interface Props {
   isEditing: boolean;
   /** Limite di calorie al giorno per persona, se attivato */
   kcalTarget?: number | null;
+  /** Il menù comprende colazione e merende */
+  includeMorning?: boolean;
   onSave: (days: ManualDays) => Promise<void> | void;
   /** Salva un piatto scritto a mano e restituisce il suo id */
   onCreateDish: (recipe: Omit<Recipe, 'id'>) => Promise<string | null>;
@@ -29,13 +35,9 @@ interface Props {
   onClose: () => void;
 }
 
-const SLOTS: { id: ManualSlot; label: string }[] = [
-  { id: 'lunch', label: 'Pranzo' },
-  { id: 'dinner', label: 'Cena' },
-];
 
 /** Scrivi il tuo menù: per ogni giorno, pranzo e cena, scegli i piatti dell'app o scrivine di tuoi (per esempio la dieta del nutrizionista). */
-export default function ManualPlanEditor({ initial, recipes, customIds, isEditing, kcalTarget = null, onSave, onCreateDish, onEditDish, onClose }: Props) {
+export default function ManualPlanEditor({ initial, recipes, customIds, isEditing, kcalTarget = null, includeMorning = false, onSave, onCreateDish, onEditDish, onClose }: Props) {
   const [days, setDays] = useState<ManualDays>(initial);
   const [day, setDay] = useState(WEEK_DAYS[0]);
   const [picker, setPicker] = useState<ManualSlot | null>(null);
@@ -47,11 +49,21 @@ export default function ManualPlanEditor({ initial, recipes, customIds, isEditin
   const [saving, setSaving] = useState(false);
 
   const byId = useMemo(() => new Map(recipes.map((r) => [r.id, r])), [recipes]);
+  const morning = (slot: ManualSlot | null) => slot === 'breakfast' || slot === 'snackAm' || slot === 'snackPm';
   const results = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return recipes.filter((r) => customIds.has(r.id)).slice(0, 20);
-    return recipes.filter((r) => r.title.toLowerCase().includes(term)).slice(0, 40);
-  }, [recipes, customIds, search]);
+    if (picker && morning(picker)) {
+      // Colazione e merende: prima i piatti pensati per quel momento, poi quelli scritti da te
+      const fits = (r: Recipe) => r.category === slotCategory(picker as MorningSlot);
+      if (!term) return [...recipes.filter(fits), ...recipes.filter((r) => customIds.has(r.id) && !fits(r))].slice(0, 40);
+      return recipes.filter((r) => r.title.toLowerCase().includes(term)).sort((a, b) => Number(fits(b)) - Number(fits(a))).slice(0, 40);
+    }
+    const mains = recipes.filter((r) => !isMorningCategory(r.category));
+    if (!term) return mains.filter((r) => customIds.has(r.id)).slice(0, 20);
+    return mains.filter((r) => r.title.toLowerCase().includes(term)).slice(0, 40);
+  }, [recipes, customIds, search, picker]);
+  // Si mostrano pranzo e cena, e colazione e merende se il menù le comprende (o se ci sono già dei piatti)
+  const slots = DAY_SLOTS.filter((slot) => slot === 'lunch' || slot === 'dinner' || includeMorning || (Object.values(days) as ManualDay[]).some((d) => idsOf(d, slot).length > 0));
 
   const meals = countManualMeals(days);
   const current = days[day];
@@ -111,8 +123,9 @@ export default function ManualPlanEditor({ initial, recipes, customIds, isEditin
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
         <h3 className="text-lg font-semibold text-slate-900">{day}</h3>
         <DayKcalCard day={current} recipes={recipes} target={kcalTarget} />
-        {SLOTS.map(({ id, label }) => {
-          const ids = id === 'lunch' ? current.lunchIds : current.dinnerIds;
+        {slots.map((id) => {
+          const label = SLOT_TITLES[id];
+          const ids = idsOf(current, id);
           return (
             <div key={id} className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
               <p className="text-sm font-bold text-slate-500 uppercase tracking-wide">{label}</p>
@@ -239,6 +252,7 @@ export default function ManualPlanEditor({ initial, recipes, customIds, isEditin
       {writing && (
         <QuickDishModal
           initialTitle={search.trim()}
+          defaultCategory={writing === 'breakfast' ? 'breakfast' : writing === 'snackAm' || writing === 'snackPm' ? 'snack' : undefined}
           offlineOnly
           onSave={async (recipe) => {
             const id = await onCreateDish(recipe);

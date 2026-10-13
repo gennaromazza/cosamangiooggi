@@ -10,6 +10,8 @@ interface Props {
   initialTitle?: string;
   /** Piatto da correggere (già scritto da te o dell'app): si parte dai suoi dati invece che da zero */
   initial?: Recipe;
+  /** Tipo di piatto proposto all'inizio (per esempio «Colazione» quando si scrive la colazione) */
+  defaultCategory?: Recipe['category'];
   /** Account senza accesso (demo/locale): niente riconoscimento con l'IA */
   offlineOnly?: boolean;
   /** Riconoscimenti IA rimasti questo mese (null se non si sa) */
@@ -27,6 +29,8 @@ const CATEGORIES: { id: Recipe['category']; label: string }[] = [
   { id: 'fast', label: 'Piatto unico' },
   { id: 'side', label: 'Contorno' },
   { id: 'dessert', label: 'Dolce' },
+  { id: 'breakfast', label: 'Colazione' },
+  { id: 'snack', label: 'Merenda' },
 ];
 const UNITS = ['g', 'kg', 'ml', 'l', 'pz', 'cucchiai', 'cucchiaini', 'spicchi'];
 
@@ -40,13 +44,13 @@ interface Suggestion {
 }
 
 /** Aggiunta rapida di un piatto di famiglia: nome, ingredienti riconosciuti in automatico, controllo finale. */
-export default function QuickDishModal({ initialTitle = '', initial, offlineOnly = false, aiLeft = null, isPro = false, onUpgrade, onSave, onClose }: Props) {
+export default function QuickDishModal({ initialTitle = '', initial, defaultCategory, offlineOnly = false, aiLeft = null, isPro = false, onUpgrade, onSave, onClose }: Props) {
   const [left, setLeft] = useState<number | null>(aiLeft);
   const editing = !!initial;
   const [title, setTitle] = useState(initial?.title ?? initialTitle);
   const [notes, setNotes] = useState('');
   const [ingredients, setIngredients] = useState<Ingredient[]>(initial ? initial.ingredients.map((i) => ({ ...i })) : []);
-  const [category, setCategory] = useState<Recipe['category']>(initial?.category ?? 'lunch');
+  const [category, setCategory] = useState<Recipe['category']>(initial?.category ?? defaultCategory ?? 'lunch');
   const [extra, setExtra] = useState<Pick<Suggestion, 'difficulty' | 'timeMin' | 'steps'>>({ difficulty: initial?.difficulty ?? 'easy', timeMin: initial?.timeMin ?? 30, steps: [] });
   const [stepsText, setStepsText] = useState((initial?.instructions ?? []).join('\n'));
   const [busy, setBusy] = useState(false);

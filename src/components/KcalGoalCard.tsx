@@ -1,8 +1,6 @@
 import { useState } from 'react';
-import { doc, updateDoc } from 'firebase/firestore';
 import { Flame, Minus, Plus } from 'lucide-react';
-import { db } from '../lib/firebase';
-import { handleFirestoreError, OperationType } from '../lib/firebaseUtils';
+import { saveProfileFields } from '../lib/profileSave';
 import { clampKcal, dailyKcalTarget, DEFAULT_DAILY_KCAL, MEAL_LABELS, mealBudgets, type MealSlot } from '../lib/calories';
 import type { UserProfile } from '../types';
 
@@ -14,7 +12,6 @@ interface Props {
 }
 
 const PRESETS = [1600, 1800, 2000, 2200, 2500];
-const isLocalUser = (uid: string) => uid === 'demo-family-user' || uid.startsWith('local-');
 
 /** Limite di calorie al giorno per persona: il menù lo rispetta e il giorno mostra quanto manca o si supera. */
 export default function KcalGoalCard({ userId, profile, onLocalChange }: Props) {
@@ -27,20 +24,9 @@ export default function KcalGoalCard({ userId, profile, onLocalChange }: Props) 
     setBusy(true);
     setError(null);
     try {
-      if (isLocalUser(userId)) {
-        const next = { ...profile, dailyKcalTarget: value };
-        localStorage.setItem(`profile_${userId}`, JSON.stringify(next));
-        onLocalChange(next);
-      } else {
-        await updateDoc(doc(db, `users/${userId}`), { dailyKcalTarget: value });
-      }
-    } catch (e) {
+      await saveProfileFields(userId, profile, { dailyKcalTarget: value }, onLocalChange);
+    } catch {
       setError('Non è stato possibile salvare. Riprova.');
-      try {
-        handleFirestoreError(e, OperationType.UPDATE, `users/${userId}`);
-      } catch {
-        /* già registrato */
-      }
     } finally {
       setBusy(false);
     }

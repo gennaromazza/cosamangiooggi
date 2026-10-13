@@ -71,8 +71,7 @@
     <div class="days hidden" id="days" role="tablist" aria-label="Giorno"></div>
     <div class="card">
       <h2 id="day-title"></h2>
-      <h3>Pranzo</h3><div id="lunch"></div>
-      <h3>Cena</h3><div id="dinner"></div>
+      <div id="slots"></div>
     </div>
   </div>
 
@@ -154,15 +153,28 @@
     return d;
   }
 
-  function fill(boxId, ids) {
-    var box = $(boxId);
+  // Pasti del giorno in ordine; colazione e merende compaiono solo se il menù le comprende
+  var SLOTS = [
+    ['breakfast', 'Colazione', false], ['snackAm', 'Spuntino di metà mattina', false], ['lunch', 'Pranzo', true],
+    ['snackPm', 'Merenda', false], ['dinner', 'Cena', true]
+  ];
+
+  function fill(plan) {
+    var box = $('slots');
     box.innerHTML = '';
-    var any = false;
-    (ids || []).forEach(function (id) {
-      var n = recipeNode(id);
-      if (n) { box.appendChild(n); any = true; }
+    SLOTS.forEach(function (slot) {
+      var ids = plan[slot[0]] || [];
+      if (!ids.length && !slot[2]) return;
+      box.appendChild(el('h3', slot[1]));
+      var list = document.createElement('div');
+      var any = false;
+      ids.forEach(function (id) {
+        var n = recipeNode(id);
+        if (n) { list.appendChild(n); any = true; }
+      });
+      if (!any) list.appendChild(el('p', 'Niente in programma.', 'hint'));
+      box.appendChild(list);
     });
-    if (!any) box.appendChild(el('p', 'Niente in programma.', 'hint'));
   }
 
   function render() {
@@ -181,8 +193,7 @@
     });
     $('day-title').textContent = day + (day === today() ? ' (oggi)' : '');
     var plan = (state.menu.days && state.menu.days[day]) || {};
-    fill('lunch', plan.lunch);
-    fill('dinner', plan.dinner);
+    fill(plan);
   }
 
   function post(path, body) {
