@@ -14,6 +14,7 @@ import { auth, db, functions } from '../lib/firebase';
 import { planName } from '../lib/plans';
 import { remindersAvailable, setSundayReminder, sundayReminderEnabled } from '../lib/reminders';
 import MenuNotificationsCard from './MenuNotificationsCard';
+import AppVersionCard from './AppVersionCard';
 import { OPEN_WHATS_NEW_EVENT } from './WhatsNew';
 import type { UserProfile } from '../types';
 import { syncSelfMemberName } from '../lib/selfMember';
@@ -356,9 +357,7 @@ export default function AccountSettings({
         </button>
       </Card>
 
-      <p className="text-center text-sm text-slate-500">
-        Versione dell’app: <strong className="text-slate-700">{__APP_VERSION__}</strong>
-      </p>
+      <AppVersionCard />
 
       <Card title="Esci">
         <button onClick={onLogout} className={secondaryButton}>

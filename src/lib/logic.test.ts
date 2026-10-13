@@ -30,7 +30,7 @@ import { CHANGELOG, LATEST_NEWS_ID } from '../data/changelog';
 import { pendingNews } from './whatsNew';
 import { editedDish, parseSteps } from './dishEdit';
 import { addToSlot, buildManualPlan, countManualMeals, emptyManualDays, manualDaysFromPlan, removeFromSlot, replaceInSlot, WEEK_DAYS } from './manualPlan';
-import { isNewer } from './updateCheck';
+import { compareBuilds, isNewer } from './updateCheck';
 import { fillPlaceholders } from '../../scripts/landing';
 import { PAGES, pageText, renderPage } from '../../scripts/landing-pages';
 import { dishSuggestionsLeft, limitsFor, normalizePlan, planName, PRICES, yearlySavingPercent, PLAN_LIMITS } from './plans';
@@ -1030,4 +1030,19 @@ test('modifica piatto: dall\'editor del menù si corregge un piatto tuo o dell\'
   assert.ok(planner.includes('setDoc(doc(db, path, original.id), edited)'), 'un piatto tuo si aggiorna sullo stesso identificativo');
   const modal = readFileSync('src/components/QuickDishModal.tsx', 'utf8');
   assert.ok(modal.includes('Modifica il piatto') && modal.includes('Salva le modifiche') && modal.includes('editedDish('));
+});
+
+test('versione: l\'app dice se quella installata è l\'ultima, più vecchia o di prova', () => {
+  assert.equal(compareBuilds(42, 42), 'latest');
+  assert.equal(compareBuilds(43, 42), 'outdated');
+  assert.equal(compareBuilds(41, 42), 'ahead');
+  assert.equal(compareBuilds(0, 42), 'unknown');
+  assert.equal(compareBuilds(Number.NaN, 42), 'unknown');
+  const card = readFileSync('src/components/AppVersionCard.tsx', 'utf8');
+  for (const needle of ['Hai l’ultima versione', 'Quella che hai non è l’ultima', 'Scarica e installa', 'Controlla aggiornamenti', 'Non riesco a controllare ora', '__APP_VERSION__']) {
+    assert.ok(card.includes(needle), `scheda versione: manca ${needle}`);
+  }
+  assert.ok(readFileSync('src/components/AccountSettings.tsx', 'utf8').includes('<AppVersionCard />'));
+  assert.ok(readFileSync('src/components/WhatsNew.tsx', 'utf8').includes('versione installata {__APP_VERSION__}'));
+  assert.ok(readFileSync('firebase.landing.json', 'utf8').includes('"/version.json"'), 'il sito pubblica sempre un version.json senza cache');
 });

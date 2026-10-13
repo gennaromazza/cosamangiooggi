@@ -54,7 +54,7 @@ export default function WhatsNew({ userId, profile }: Props) {
           <span className="w-11 h-11 rounded-2xl bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0"><Sparkles className="w-6 h-6" /></span>
           <div>
             <h2 className="text-2xl font-semibold text-slate-900 leading-tight">Novità</h2>
-            <p className="text-sm text-slate-500">Cosa c'è di nuovo nell'app</p>
+            <p className="text-sm text-slate-500">Cosa c'è di nuovo nell'app · versione installata {__APP_VERSION__}</p>
           </div>
         </div>
         <div className="px-5 pb-4 overflow-y-auto space-y-6">
