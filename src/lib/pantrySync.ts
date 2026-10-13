@@ -152,7 +152,7 @@ const UNIT_ALIASES: Record<string, string> = {
   gr: 'g', grammi: 'g', grammo: 'g',
   kilo: 'kg', chili: 'kg', kilogrammi: 'kg',
   lt: 'l', litro: 'l', litri: 'l',
-  pezzo: 'pz', pezzi: 'pz',
+  pezzo: 'pz', pezzi: 'pz', piccola: 'pz', piccolo: 'pz', media: 'pz', medio: 'pz', grande: 'pz', mezzo: 'pz', intero: 'pz', misto: 'pz', '': 'pz',
 };
 const UNIT_TO_GRAMS: Record<string, number> = { g: 1, kg: 1000, ml: 1, l: 1000, pz: 150 };
 
@@ -179,26 +179,76 @@ export function convertIngredientUnit(val: number, from: string, to: string): nu
   return (val * fromGrams) / toGrams;
 }
 
+// Unità "a occhio" con un peso medio, per sommare lo stesso ingrediente scritto in modi diversi (es. 3 spicchi + 5 g di aglio)
+const LOOSE_UNIT_GRAMS: Record<string, number> = {
+  spicchio: 4, spicchi: 4, cucchiaio: 14, cucchiai: 14, cchiaio: 14, cucchiaino: 5, cuchiaino: 5, pizzico: 1, pizzichi: 1,
+  ciuffo: 4, ciuffetto: 2, rametto: 1.5, rametti: 1.5, foglia: 0.5, foglie: 0.5, manciata: 20, fetta: 25, fette: 25,
+  bustina: 16, noce: 10, filo: 5, spruzzata: 3, mazzetto: 10, costa: 40, rotolo: 230, pezzetto: 15,
+};
+const NO_QUANTITY = new Set(['q.b.', 'qb', 'q.b', 'a piacere']);
+
+const isMass = (u: string) => u === 'g' || u === 'kg';
+const isVolume = (u: string) => u === 'ml' || u === 'l';
+
+/**
+ * Riunisce in una sola riga lo stesso ingrediente richiesto da più piatti, anche se scritto con unità diverse
+ * (g e kg, spicchi e grammi, "q.b." e una quantità). Unità che non si possono confrontare restano separate.
+ */
+export function aggregateRequirements(
+  requirements: { name: string; amount: number; unit: string }[],
+): { name: string; amount: number; unit: string }[] {
+  const groups: { name: string; items: { amount: number; unit: string }[] }[] = [];
+  for (const req of requirements) {
+    if (isStaple(req.name)) continue;
+    const unit = normalizeUnit(req.unit) || 'pz';
+    const group = groups.find(g => checkIngredientMatch(g.name, req.name));
+    if (group) group.items.push({ amount: req.amount, unit });
+    else groups.push({ name: req.name.charAt(0).toUpperCase() + req.name.slice(1), items: [{ amount: req.amount, unit }] });
+  }
+
+  const out: { name: string; amount: number; unit: string }[] = [];
+  for (const group of groups) {
+    const counted = group.items.filter(i => !NO_QUANTITY.has(i.unit));
+    // Solo "quanto basta": una riga sola
+    if (counted.length === 0) {
+      out.push({ name: group.name, amount: group.items[0].amount, unit: group.items[0].unit });
+      continue;
+    }
+    const units = new Set(counted.map(i => i.unit));
+    // Unità da usare: peso, poi volume, poi pezzi, poi quella più usata
+    const comparable = [...units].every(u => u in UNIT_TO_GRAMS || u in LOOSE_UNIT_GRAMS);
+    const target = [...units].find(isMass) ? 'g' : [...units].find(isVolume) ? 'ml' : units.has('pz') ? 'pz' : comparable ? 'g' : undefined;
+    if (units.size === 1 || !target) {
+      // Stessa unità: si somma. Unità diverse e non confrontabili: una riga per unità.
+      const byUnit = new Map<string, number>();
+      counted.forEach(i => byUnit.set(i.unit, (byUnit.get(i.unit) || 0) + i.amount));
+      byUnit.forEach((amount, unit) => out.push({ name: group.name, amount, unit }));
+      continue;
+    }
+    const toTarget = (amount: number, unit: string): number | null => {
+      if (unit === target) return amount;
+      const grams = UNIT_TO_GRAMS[unit] ?? LOOSE_UNIT_GRAMS[unit];
+      if (grams === undefined) return null;
+      const targetGrams = UNIT_TO_GRAMS[target];
+      return (amount * grams) / targetGrams;
+    };
+    const converted = counted.map(i => ({ ...i, value: toTarget(i.amount, i.unit) }));
+    const total = converted.filter(i => i.value !== null).reduce((sum, i) => sum + (i.value as number), 0);
+    out.push({ name: group.name, amount: total, unit: target });
+    // Quello che non si sa convertire resta in una riga a parte
+    const rest = new Map<string, number>();
+    converted.filter(i => i.value === null).forEach(i => rest.set(i.unit, (rest.get(i.unit) || 0) + i.amount));
+    rest.forEach((amount, unit) => out.push({ name: group.name, amount, unit }));
+  }
+  return out;
+}
+
 export function calculateMissingFromPantry(
   requirements: { name: string; amount: number; unit: string }[],
   pantryItems: PantryItem[]
 ): { name: string; amount: number; unit: string; needed: boolean }[] {
-  // 1. Aggregate requirements by matching ingredient identity
-  const aggregated: { name: string; amount: number; unit: string }[] = [];
-  
-  for (const req of requirements) {
-    if (isStaple(req.name)) continue;
-    const existing = aggregated.find(ex => checkIngredientMatch(ex.name, req.name) && ex.unit === req.unit);
-    if (existing) {
-      existing.amount += req.amount;
-    } else {
-      aggregated.push({
-        name: req.name.charAt(0).toUpperCase() + req.name.slice(1),
-        amount: req.amount,
-        unit: req.unit
-      });
-    }
-  }
+  // 1. Una sola riga per ingrediente, anche se i piatti lo scrivono con unità diverse
+  const aggregated = aggregateRequirements(requirements);
 
   // 2. Simulate multi-item consumption against available pantry inventory
   const simulatedPantry = pantryItems.map(p => ({ ...p }));

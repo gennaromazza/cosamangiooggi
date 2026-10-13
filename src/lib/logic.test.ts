@@ -15,8 +15,12 @@ import {
   planConsumption,
   matchesExclusion,
   findPantryDuplicate,
+  aggregateRequirements,
+  isStaple,
 } from './pantrySync';
+import { getRawIngredientNames, scaleIngredientAmount } from './utils';
 import { hitsExclusion } from './dietFilters';
+import { excludesVeganDishes, isVeganDish } from './veganDishes';
 import { extractVoiceArgument } from './voiceText';
 import { INITIAL_RECIPES } from '../data/recipes';
 import type { PantryItem, Recipe } from '../types';
@@ -1302,4 +1306,84 @@ test('colazione e merende: interruttore in Famiglia, generazione, swap, pagina p
   const page = readFileSync('landing/menu.html', 'utf8');
   for (const needle of ["'snackAm'", "'snackPm'", "'breakfast'", 'Colazione', 'Merenda']) assert.ok(page.includes(needle), `menu.html: manca ${needle}`);
   assert.ok(readFileSync('src/components/SharedMenu.tsx', 'utf8').includes('selected.breakfast'));
+});
+
+test('piatti vegani: si tolgono se la dieta vegana non è scelta', () => {
+  assert.equal(excludesVeganDishes(null), true);
+  assert.equal(excludesVeganDishes({ dietaryRestrictions: [] }), true);
+  assert.equal(excludesVeganDishes({ dietaryRestrictions: ['gluten-free'] }), true);
+  assert.equal(excludesVeganDishes({ dietaryRestrictions: ['vegan'] }), false);
+  const vegani = INITIAL_RECIPES.filter(isVeganDish);
+  assert.ok(vegani.length >= 3, 'ci sono piatti da togliere');
+  assert.ok(vegani.every((r) => /vegan/i.test(r.title) || r.ingredients.some((i) => /tofu|seitan|tempeh/i.test(i.name))));
+  // una pasta al pomodoro è "senza carne" ma non è un piatto pensato come alternativa vegana
+  assert.equal(isVeganDish({ title: 'Pasta al pomodoro', ingredients: [{ name: 'Pasta', amount: 100, unit: 'g' }, { name: 'Pomodoro', amount: 200, unit: 'g' }] }), false);
+  assert.equal(isVeganDish({ title: 'Burger vegano', ingredients: [] }), true);
+  assert.equal(isVeganDish({ title: 'Stufato', ingredients: [{ name: 'Seitan a pezzi', amount: 100, unit: 'g' }] }), true);
+  const planner = readFileSync('src/components/MealPlanner.tsx', 'utf8');
+  for (const needle of ['excludesVeganDishes(profile)', 'availableRecipes.filter(r => !isVeganDish(r))', 'poolForAlternatives', 'avoid: veganIds()']) {
+    assert.ok(planner.includes(needle), `MealPlanner: manca ${needle}`);
+  }
+  assert.ok(!planner.includes('Senza piatti vegani'), 'non c\'è più l\'opzione da attivare a mano');
+});
+
+test('spesa: lo stesso ingrediente compare una sola volta, anche con unità diverse', () => {
+  const merged = aggregateRequirements([
+    { name: 'Aglio', amount: 2, unit: 'spicchio' },
+    { name: 'Aglio', amount: 3, unit: 'spicchi' },
+    { name: 'aglio', amount: 8, unit: 'g' },
+    { name: 'Parmigiano reggiano', amount: 50, unit: 'g' },
+    { name: 'Parmigiano', amount: 0.05, unit: 'kg' },
+    { name: 'Parmigiano reggiano grattugiato', amount: 1, unit: 'q.b.' },
+    { name: 'Latte', amount: 200, unit: 'ml' },
+    { name: 'Latte', amount: 0.3, unit: 'l' },
+    { name: 'Cipolla', amount: 1, unit: 'piccola' },
+    { name: 'Cipolla', amount: 2, unit: 'pz' },
+    { name: 'Prezzemolo', amount: 2, unit: 'ciuffo' },
+    { name: 'Prezzemolo', amount: 1, unit: 'cucchiaio' },
+  ]);
+  const by = (name: string) => merged.filter((m) => m.name.toLowerCase().startsWith(name));
+  assert.equal(by('agli').length, 1);
+  assert.equal(by('agli')[0].unit, 'g');
+  assert.equal(Math.round(by('agli')[0].amount), 28, '5 spicchi da 4 g + 8 g');
+  assert.deepEqual(by('parmigiano').map((m) => [m.unit, Math.round(m.amount)]), [['g', 100]], 'q.b. non aggiunge una riga');
+  assert.deepEqual(by('latte').map((m) => [m.unit, Math.round(m.amount)]), [['ml', 500]]);
+  assert.deepEqual(by('cipolla').map((m) => [m.unit, m.amount]), [['pz', 3]]);
+  assert.equal(by('prezzemolo').length, 1);
+  // cose diverse restano diverse
+  const diverse = aggregateRequirements([{ name: 'Mela', amount: 1, unit: 'pz' }, { name: 'Melanzane', amount: 200, unit: 'g' }, { name: 'Sale', amount: 1, unit: 'q.b.' }]);
+  assert.deepEqual(diverse.map((m) => m.name).sort(), ['Mela', 'Melanzane']);
+  // solo "quanto basta": una riga
+  assert.equal(aggregateRequirements([{ name: 'Basilico', amount: 1, unit: 'q.b.' }, { name: 'Basilico', amount: 1, unit: 'q.b.' }]).length, 1);
+});
+
+test('spesa: in una settimana vera gli ingredienti non si ripetono', () => {
+  const mains = INITIAL_RECIPES.filter((r) => r.category === 'lunch' || r.category === 'dinner');
+  let seed = 11;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+  let repeated = 0;
+  for (let week = 0; week < 30; week++) {
+    const requirements: { name: string; amount: number; unit: string }[] = [];
+    for (let i = 0; i < 14; i++) {
+      const recipe = mains[Math.floor(rnd() * mains.length)];
+      recipe.ingredients.forEach((ing) => {
+        if (isStaple(ing.name)) return;
+        getRawIngredientNames(ing.name).forEach((name) => {
+          if (!isStaple(name)) requirements.push({ name, amount: scaleIngredientAmount(ing.amount, recipe.servings || 2, 4), unit: ing.unit });
+        });
+      });
+    }
+    const list = aggregateRequirements(requirements);
+    for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) if (checkIngredientMatch(list[i].name, list[j].name)) repeated++;
+  }
+  assert.ok(repeated <= 5, `ingredienti ripetuti in 30 settimane: ${repeated}`);
+  // e la lista della spesa usa davvero questa riunione
+  assert.ok(readFileSync('src/lib/pantrySync.ts', 'utf8').includes('const aggregated = aggregateRequirements(requirements)'));
+});
+
+test('menù del giorno: le calorie si leggono in un solo punto, senza numeri diversi', () => {
+  const planner = readFileSync('src/components/MealPlanner.tsx', 'utf8');
+  assert.ok(!planner.includes("label: 'Calorie', value: Math.round(totalCal)"), 'niente seconda cifra delle calorie nei valori nutrizionali');
+  assert.ok(planner.includes('Le calorie a persona sono nella scheda qui sopra'));
+  assert.ok(planner.includes("const savedProfile = localStorage.getItem(`profile_${userId}`)"), 'le scelte di un account senza accesso arrivano al menù');
 });
