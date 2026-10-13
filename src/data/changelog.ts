@@ -18,6 +18,16 @@ export interface NewsEntry {
 
 export const CHANGELOG: NewsEntry[] = [
   {
+    id: '2026-10-13-calorie',
+    date: '13 ottobre 2026',
+    title: 'Un limite di calorie al giorno',
+    items: [
+      { emoji: '🔥', title: 'Scegli il tuo limite', text: 'In «Famiglia», «Calorie al giorno»: attivi il limite (di solito 2000 kcal a persona) e il menù lo rispetta, contando anche colazione e due merende.' },
+      { emoji: '📊', title: 'Le calorie di ogni giorno', text: 'Nel menù, sotto ogni giorno, vedi le calorie a persona di pranzo e cena e quanto manca al limite. Se un giorno lo supera, te lo diciamo.' },
+      { emoji: '✍️', title: 'Anche nel tuo menù', text: 'Se scrivi tu il menù, vedi subito le calorie di ogni giorno mentre aggiungi i piatti.' },
+    ],
+  },
+  {
     id: '2026-10-13-modifica-piatti',
     date: '13 ottobre 2026',
     title: 'Correggi i piatti del tuo menù',

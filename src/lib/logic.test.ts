@@ -29,6 +29,7 @@ import { publicRecipes } from '../../scripts/public-recipes';
 import { CHANGELOG, LATEST_NEWS_ID } from '../data/changelog';
 import { pendingNews } from './whatsNew';
 import { editedDish, parseSteps } from './dishEdit';
+import { capPool, clampKcal, dailyKcalTarget, dayKcal, estimateIngredients, fitMeal, kcalOfIds, mealBudgets, MEAL_SHARES, recipeKcal, reservedKcal } from './calories';
 import { addToSlot, buildManualPlan, countManualMeals, emptyManualDays, manualDaysFromPlan, removeFromSlot, replaceInSlot, WEEK_DAYS } from './manualPlan';
 import { compareBuilds, isNewer } from './updateCheck';
 import { fillPlaceholders } from '../../scripts/landing';
@@ -1060,4 +1061,98 @@ test('aggiornamento app: la pagina si chiede sempre prima alla rete, mai la vecc
   assert.ok(sw.includes('hadOldVersion') && sw.includes('client.navigate(client.url)') && sw.includes('self.clients.claim()') && sw.includes('self.skipWaiting()'));
   // vite pubblica i file con l'impronta nel nome
   assert.ok(readFileSync('vite.config.ts', 'utf8').length > 0);
+});
+
+test('calorie: la divisione della giornata fa 100% e a 2000 kcal dà 300/100/800/100/700', () => {
+  assert.equal(Object.values(MEAL_SHARES).reduce((a, b) => a + b, 0), 1);
+  assert.deepEqual(mealBudgets(2000), { breakfast: 300, snackAm: 100, lunch: 800, snackPm: 100, dinner: 700 });
+  const b = mealBudgets(1800);
+  assert.equal(b.breakfast + b.snackAm + b.lunch + b.snackPm + b.dinner, 1800);
+  assert.equal(reservedKcal(2000), 500, 'colazione e due merende');
+  assert.equal(clampKcal(500), 1200);
+  assert.equal(clampKcal(9000), 4000);
+  assert.equal(clampKcal(2012), 2000);
+  assert.equal(clampKcal(Number.NaN), 2000);
+});
+
+test('calorie: il limite è attivo solo se scelto, e rientra nei valori sensati', () => {
+  assert.equal(dailyKcalTarget(null), null);
+  assert.equal(dailyKcalTarget({}), null);
+  assert.equal(dailyKcalTarget({ dailyKcalTarget: 0 }), null);
+  assert.equal(dailyKcalTarget({ dailyKcalTarget: 2000 }), 2000);
+  assert.equal(dailyKcalTarget({ dailyKcalTarget: 100 }), 1200);
+});
+
+test('calorie: le stime dagli ingredienti sono credibili per i piatti dell\'app', () => {
+  const gamberi = INITIAL_RECIPES.find((r) => r.id === 'meal-spaghetti-gamberi')!;
+  const kcal = recipeKcal(gamberi).perServing;
+  assert.ok(kcal >= 380 && kcal <= 560, `spaghetti ai gamberi: ${kcal}`);
+  // 100 g di pasta a crudo valgono circa 355 kcal; l'olio 884 per 100 g
+  assert.equal(Math.round(estimateIngredients([{ name: 'Spaghetti', amount: 100, unit: 'g' }]).total), 355);
+  assert.equal(Math.round(estimateIngredients([{ name: 'Olio EVO', amount: 10, unit: 'ml' }]).total), 88);
+  assert.equal(Math.round(estimateIngredients([{ name: 'Uova', amount: 2, unit: '' }]).total), 157, 'due uova');
+  assert.equal(estimateIngredients([{ name: 'Sale', amount: 1, unit: 'q.b.' }]).total, 0);
+  assert.ok(estimateIngredients([{ name: 'Olio extravergine d\'oliva', amount: 500, unit: 'ml' }]).total < 1200, 'l\'olio per friggere non finisce tutto nel piatto');
+  // quasi tutti gli ingredienti vengono riconosciuti, e nessun piatto da pranzo o cena ha valori assurdi
+  const poor = INITIAL_RECIPES.filter((r) => recipeKcal(r).coverage < 0.6);
+  assert.ok(poor.length <= 3, `ricette con pochi ingredienti riconosciuti: ${poor.map((r) => r.title).join(', ')}`);
+  for (const r of INITIAL_RECIPES) {
+    const k = recipeKcal(r).perServing;
+    assert.ok(k >= 30 && k <= 1800, `${r.title}: ${k} kcal`);
+  }
+  const mains = INITIAL_RECIPES.filter((r) => r.category === 'lunch' || r.category === 'dinner').map((r) => recipeKcal(r).perServing).sort((a, b) => a - b);
+  const median = mains[Math.floor(mains.length / 2)];
+  assert.ok(median >= 200 && median <= 600, `mediana di pranzi e cene: ${median}`);
+});
+
+test('calorie: i piatti candidati restano nei limiti del pasto, e se nessuno ci sta si prendono i più leggeri', () => {
+  const lunches = INITIAL_RECIPES.filter((r) => r.category === 'lunch');
+  const fitting = capPool(lunches, 600);
+  assert.ok(fitting.length > 20 && fitting.length < lunches.length);
+  assert.ok(fitting.every((r) => recipeKcal(r).perServing <= 600));
+  const none = capPool(lunches, 50);
+  assert.equal(none.length, 8, 'meglio un piatto un po\' sopra che nessun piatto');
+  const lightest = Math.min(...lunches.map((r) => recipeKcal(r).perServing));
+  assert.ok(none.some((r) => recipeKcal(r).perServing === lightest));
+  // con un limite di 1500 kcal al giorno (pranzo 600, cena 525) ogni giorno possibile resta dentro 1500 + riservate
+  for (const target of [1500, 1800, 2000, 2500]) {
+    const b = mealBudgets(target);
+    const l = capPool(INITIAL_RECIPES.filter((r) => r.category === 'lunch'), b.lunch);
+    const d = capPool(INITIAL_RECIPES.filter((r) => r.category === 'dinner'), b.dinner);
+    assert.ok(Math.max(...l.map((r) => recipeKcal(r).perServing)) <= b.lunch, `pranzo a ${target}`);
+    assert.ok(Math.max(...d.map((r) => recipeKcal(r).perServing)) <= b.dinner, `cena a ${target}`);
+  }
+});
+
+test('calorie: se piatto e contorni superano il pasto si tolgono i contorni più pesanti, mai il piatto', () => {
+  const mk = (id: string, grams: number) => ({ id, title: id, category: 'side', servings: 1, ingredients: [{ name: 'Olio', amount: grams, unit: 'g' }] }) as unknown as Recipe;
+  const byId = new Map<string, Recipe>([['main', mk('main', 50)], ['a', mk('a', 10)], ['b', mk('b', 30)]]);
+  const total = kcalOfIds(['main', 'a', 'b'], byId);
+  assert.ok(total > 0);
+  assert.deepEqual(fitMeal(['main', 'a', 'b'], total + 1, byId), ['main', 'a', 'b'], 'ci sta già');
+  assert.deepEqual(fitMeal(['main', 'a', 'b'], total - 1, byId), ['main', 'a'], 'via il contorno più pesante');
+  assert.deepEqual(fitMeal(['main', 'a', 'b'], 1, byId), ['main'], 'il piatto principale resta');
+  assert.deepEqual(fitMeal([], 100, byId), []);
+});
+
+test('calorie: il totale del giorno somma i pasti che ci sono', () => {
+  const byId = new Map<string, Recipe>(INITIAL_RECIPES.map((r) => [r.id, r] as [string, Recipe]));
+  const day = { lunchIds: ['meal-spaghetti-gamberi'], dinnerIds: [] as string[] };
+  const k = dayKcal(day, byId);
+  assert.equal(k.byMeal.lunch, recipeKcal(byId.get('meal-spaghetti-gamberi')!).perServing);
+  assert.equal(k.byMeal.dinner, undefined);
+  assert.equal(k.total, k.byMeal.lunch);
+  assert.equal(dayKcal(undefined, byId).total, 0);
+});
+
+test('calorie: nell\'app il limite è scelto in Famiglia, rispettato dal menù e mostrato nel giorno', () => {
+  const planner = readFileSync('src/components/MealPlanner.tsx', 'utf8');
+  for (const needle of ['dailyKcalTarget(profile)', 'withinBudget(lunchPool, budgets?.lunch)', 'withinBudget(dinnerPool, budgets?.dinner)', 'fitToBudget(completeMeal(lunchMain', '<DayKcalCard']) {
+    assert.ok(planner.includes(needle), `MealPlanner: manca ${needle}`);
+  }
+  assert.ok(readFileSync('src/components/FamilySettings.tsx', 'utf8').includes('<KcalGoalCard'));
+  const card = readFileSync('src/components/KcalGoalCard.tsx', 'utf8');
+  assert.ok(card.includes('role="switch"') && card.includes('non sostituiscono il parere di un medico'));
+  assert.ok(readFileSync('src/components/DayKcalCard.tsx', 'utf8').includes('supera il tuo limite'));
+  assert.ok(readFileSync('src/components/ManualPlanEditor.tsx', 'utf8').includes('<DayKcalCard'));
 });

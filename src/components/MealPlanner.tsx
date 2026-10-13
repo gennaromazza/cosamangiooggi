@@ -16,6 +16,8 @@ import ManualPlanEditor from './ManualPlanEditor';
 import FamilyShare from './FamilyShare';
 import { buildManualPlan, manualDaysFromPlan, WEEK_DAYS, type ManualDays } from '../lib/manualPlan';
 import { hitsExclusion, satisfiesDiet } from '../lib/dietFilters';
+import { capPool, dailyKcalTarget, fitMeal, mealBudgets } from '../lib/calories';
+import DayKcalCard from './DayKcalCard';
 import TipCard from './TipCard';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -795,6 +797,13 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
     const findRecipes = (ids: string[]) =>
       ids.map(id => recipes.find(r => r.id === id)).filter((r): r is Recipe => !!r);
 
+    // Limite di calorie al giorno (se attivato): ogni pasto sta nelle sue calorie, il resto è per colazione e merende
+    const kcalTarget = dailyKcalTarget(profile);
+    const budgets = kcalTarget ? mealBudgets(kcalTarget) : null;
+    const recipeLookup = new Map<string, Recipe>(recipes.map(r => [r.id, r] as [string, Recipe]));
+    const withinBudget = (pool: Recipe[], budget?: number) => (budgets && budget ? capPool(pool, budget) : pool);
+    const fitToBudget = (ids: string[], budget?: number) => (budgets && budget ? fitMeal(ids, budget, recipeLookup) : ids);
+
     DAYS.forEach((day, index) => {
       // Current day ingredients to track and avoid for the NEXT day
       const currentDayIngredients = new Set<string>();
@@ -804,13 +813,13 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
       if (!lunchMain) {
         const lunchType = remainingProteinPool[remainingPoolIndex++];
         const lunchPool = getRecipesForType(lunchType, Math.random() > 0.5 ? 'cold' : 'lunch', prevDayIngredients);
-        lunchMain = pickRandom(lunchPool);
+        lunchMain = pickRandom(withinBudget(lunchPool, budgets?.lunch));
       }
       
       // Absolute fallback if lunch recipe cannot be found
       if (!lunchMain) {
         const generalPool = availableRecipes.filter(r => r.category !== 'side' && r.category !== 'dessert');
-        lunchMain = pickRandom(generalPool);
+        lunchMain = pickRandom(withinBudget(generalPool, budgets?.lunch));
       }
       
       if (lunchMain) {
@@ -821,7 +830,7 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
           if (mainPart.length > 3) currentDayIngredients.add(mainPart);
         });
       }
-      const lunchIds = completeMeal(lunchMain, prevDayIngredients);
+      const lunchIds = fitToBudget(completeMeal(lunchMain, prevDayIngredients), budgets?.lunch);
 
       // Dinner
       let dinnerMain = preAssigned[day].dinner;
@@ -829,13 +838,13 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
         const dinnerType = remainingProteinPool[remainingPoolIndex++];
         const combinedExclusions = new Set([...prevDayIngredients, ...currentDayIngredients]);
         let dinnerPool = getRecipesForType(dinnerType, 'dinner', combinedExclusions);
-        dinnerMain = pickRandom(dinnerPool);
+        dinnerMain = pickRandom(withinBudget(dinnerPool, budgets?.dinner));
       }
 
       // Absolute fallback if dinner recipe cannot be found
       if (!dinnerMain) {
         const generalPool = availableRecipes.filter(r => r.category !== 'side' && r.category !== 'dessert' && r.id !== lunchMain?.id);
-        dinnerMain = pickRandom(generalPool) || lunchMain;
+        dinnerMain = pickRandom(withinBudget(generalPool, budgets?.dinner)) || lunchMain;
       }
       
       if (dinnerMain) {
@@ -846,7 +855,7 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
           if (mainPart.length > 3) currentDayIngredients.add(mainPart);
         });
       }
-      const dinnerIds = completeMeal(dinnerMain, new Set([...prevDayIngredients, ...currentDayIngredients]));
+      const dinnerIds = fitToBudget(completeMeal(dinnerMain, new Set([...prevDayIngredients, ...currentDayIngredients])), budgets?.dinner);
 
       // Chi ha una dieta o un'allergia personale riceve un piatto alternativo quando quello di tutti non va bene
       const lunchAlt = pickAlternatives({ mains: findRecipes(lunchIds), members: familyMembers, pool: availableRecipes, used: usedAlternatives });
@@ -1308,6 +1317,7 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
           recipes={recipes}
           customIds={customIds}
           isEditing={!!currentPlan?.manual}
+          kcalTarget={dailyKcalTarget(profile)}
           onSave={saveManualPlan}
           onCreateDish={createManualDish}
           onEditDish={editManualDish}
@@ -1763,6 +1773,8 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
                 </div>
               </motion.div>
             </AnimatePresence>
+
+            <DayKcalCard day={plan} recipes={recipes} target={dailyKcalTarget(profile)} />
 
             {/* Valori nutrizionali: chiusi finché non servono */}
             {(lunchRecipes.length > 0 || dinnerRecipes.length > 0) && (
