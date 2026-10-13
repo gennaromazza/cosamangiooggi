@@ -80,14 +80,16 @@ export function rebuildAffectedMeals(args: {
   recipes: Recipe[];
   pool: Recipe[];
   members: FamilyMember[];
+  /** Piatti che non si devono usare come sostituti (per esempio i piatti vegani, se la dieta non è vegana) */
+  avoid?: Set<string>;
   random?: () => number;
 }): { plan: WeeklyPlan; replaced: number; slots: number } {
-  const { plan, issues, recipes, pool, members, random = Math.random } = args;
+  const { plan, issues, recipes, pool, members, avoid, random = Math.random } = args;
   const byId = new Map(recipes.map((r) => [r.id, r]));
   const memberIds = new Set(members.map((m) => m.id));
   const days: WeeklyPlan['days'] = Object.fromEntries(Object.entries(plan.days).map(([k, v]) => [k, { ...v }]));
 
-  const used = new Set<string>();
+  const used = new Set<string>(avoid || []);
   Object.values(days).forEach((d) => [...(d.lunchIds || []), ...(d.dinnerIds || [])].forEach((id) => used.add(id)));
 
   const softDislikes = members.flatMap((m) => m.dislikedIngredients || []);

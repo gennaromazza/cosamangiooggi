@@ -4,6 +4,7 @@ import MorningMeals from './MorningMeals';
 import { dislikeConsensus, isMain, pickAlternatives, planMeals } from '../lib/memberAlternatives';
 import { buildMorningDay, pickMorningMeal, SLOT_KEY, type MorningSlot } from '../lib/morningMeals';
 import { isMorningCategory } from '../data/mornings';
+import { excludesVeganDishes, isVeganDish } from '../lib/veganDishes';
 import { planTogetherSlot } from '../lib/together';
 import { db } from '../lib/firebase';
 import { collection, query, where, getDocs, setDoc, addDoc, doc, onSnapshot } from 'firebase/firestore';
@@ -89,7 +90,7 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
   };
 
   const [isGenerating, setIsGenerating] = useState(false);
-  const [excludeVeganAlternatives, setExcludeVeganAlternatives] = useState(false);
+  const veganOff = excludesVeganDishes(profile);
   const [favorites, setFavorites] = useState<string[]>([]);
   const [useOnlyFavorites, setUseOnlyFavorites] = useState(false);
 
@@ -191,6 +192,11 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
         const savedFavs = localStorage.getItem(`favorites_${userId}`);
         if (savedFavs) {
           try { setFavorites(JSON.parse(savedFavs)); } catch (e) {}
+        }
+        // Le scelte della famiglia (limite di calorie, colazione e merende, diete) di un account senza accesso
+        const savedProfile = localStorage.getItem(`profile_${userId}`);
+        if (savedProfile) {
+          try { setProfile(JSON.parse(savedProfile)); } catch (e) {}
         }
       };
       loadLocalData();
@@ -298,26 +304,7 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
     // If a recipe is explicitly marked as favorite, bypass season restriction so the user can always plan their favorite dishes
     let availableRecipes = recipes.filter(r => r.season === season || r.season === 'all' || favorites.includes(r.id));
     
-    // Feature: Exclude vegan dishes/alternatives entirely
-    if (excludeVeganAlternatives) {
-      availableRecipes = availableRecipes.filter(r => {
-        const titleLower = r.title.toLowerCase();
-        const isVeganAlternative = titleLower.includes('vegano') || 
-                                   titleLower.includes('vegana') || 
-                                   titleLower.includes('vegan') ||
-                                   r.ingredients.some(ing => {
-                                     const nameLower = ing.name.toLowerCase();
-                                     return nameLower.includes('tofu') || nameLower.includes('seitan') || nameLower.includes('tempeh');
-                                   });
-        return !isVeganAlternative;
-      });
-    }
-    
-    let activeRestrictions = profile?.dietaryRestrictions || [];
-    if (excludeVeganAlternatives) {
-      // If we are strictly excluding vegan alternatives, skip conflicts with vegan dietary restrictions
-      activeRestrictions = activeRestrictions.filter(r => r !== 'vegan');
-    }
+    const activeRestrictions = profile?.dietaryRestrictions || [];
 
     if (activeRestrictions.length > 0) {
       availableRecipes = availableRecipes.filter(r => {
@@ -365,6 +352,11 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
       console.warn("Available recipes pool too small due to preferences. Relaxing ingredient dislikes (allergies stay enforced).");
       availableRecipes = availableRecipes.filter(r => !dislikedMealIds.has(r.id));
     }
+
+    // Piatti vegani (tofu, seitan…) solo se è scelta la dieta vegana. Chi ha una dieta vegana personale riceve comunque
+    // un'alternativa vegana: per le alternative si usa l'elenco completo.
+    const poolForAlternatives = availableRecipes;
+    if (veganOff) availableRecipes = availableRecipes.filter(r => !isVeganDish(r));
 
     // Protein requirements based on WHO Pyramid proportions (Total 14 meals/week)
     const requirements: Record<string, number> = {
@@ -861,8 +853,8 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
       const dinnerIds = fitToBudget(completeMeal(dinnerMain, new Set([...prevDayIngredients, ...currentDayIngredients])), budgets?.dinner);
 
       // Chi ha una dieta o un'allergia personale riceve un piatto alternativo quando quello di tutti non va bene
-      const lunchAlt = pickAlternatives({ mains: findRecipes(lunchIds), members: familyMembers, pool: availableRecipes, used: usedAlternatives });
-      const dinnerAlt = pickAlternatives({ mains: findRecipes(dinnerIds), members: familyMembers, pool: availableRecipes, used: usedAlternatives });
+      const lunchAlt = pickAlternatives({ mains: findRecipes(lunchIds), members: familyMembers, pool: poolForAlternatives, used: usedAlternatives });
+      const dinnerAlt = pickAlternatives({ mains: findRecipes(dinnerIds), members: familyMembers, pool: poolForAlternatives, used: usedAlternatives });
       // Colazione e due merende, se il menù le comprende: adatte a tutti e nelle calorie di ogni pasto
       const morning = profile?.includeMorningMeals
         ? buildMorningDay({
@@ -983,6 +975,7 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
       // Don't suggest the same recipe
       if (r.id === originalRecipe.id) return false;
       if (isMorningCategory(r.category)) return false;
+      if (veganOff && isVeganDish(r)) return false;
       
       // Filter out recipes already in the plan
       if (currentScheduledIds.has(r.id)) return false;
@@ -1130,7 +1123,7 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
     if (!currentPlan || planIssues.length === 0) return;
     setIsRebuilding(true);
     try {
-      const result = rebuildAffectedMeals({ plan: currentPlan, issues: planIssues, recipes, pool: familyPool(), members: familyMembers });
+      const result = rebuildAffectedMeals({ plan: currentPlan, issues: planIssues, recipes, pool: familyPool(), members: familyMembers, avoid: veganIds() });
       await savePlan(result.plan);
       const left = findPlanIssues({ plan: result.plan, recipes, rules: profile, members: familyMembers }).length;
       setRebuildNotice(
@@ -1143,6 +1136,9 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
     }
   };
 
+  // Piatti vegani da non proporre quando la dieta non è vegana
+  const veganIds = () => new Set<string>(veganOff ? recipes.filter(isVeganDish).map(r => r.id) : []);
+
   // Colazione e merende: si cambia il piatto di un momento con un altro adatto a tutti e nelle sue calorie
   const [morningBusy, setMorningBusy] = useState(false);
   const swapMorningMeal = async (day: string, slot: MorningSlot) => {
@@ -1153,7 +1149,7 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
     const used = new Set<string>();
     (Object.values(currentPlan.days) as DayPlan[]).forEach(d => [...(d.breakfastIds || []), ...(d.snackAmIds || []), ...(d.snackPmIds || [])].forEach(id => used.add(id)));
     const target = dailyKcalTarget(profile);
-    const pick = pickMorningMeal({ recipes: familyPool(), slot, members: familyMembers, used, avoid: current, budget: target ? mealBudgets(target)[slot] : undefined });
+    const pick = pickMorningMeal({ recipes: familyPool().filter(r => !veganOff || !isVeganDish(r)), slot, members: familyMembers, used, avoid: current, budget: target ? mealBudgets(target)[slot] : undefined });
     if (!pick) return;
     setMorningBusy(true);
     try {
@@ -1171,6 +1167,7 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
     setTogetherNotice(null);
     const used = new Set<string>();
     (Object.values(currentPlan.days) as DayPlan[]).forEach(d => [...(d.lunchIds || []), ...(d.dinnerIds || [])].forEach(id => used.add(id)));
+    veganIds().forEach(id => used.add(id));
     const result = planTogetherSlot({ pool: familyPool(), members: familyMembers, exclude: used });
     if (!result) {
       setTogetherNotice('Non trovo un piatto adatto a tutti: controlla le regole in Famiglia.');
@@ -1431,15 +1428,6 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
           >
             {currentPlan?.manual ? 'Modifica il mio menù scritto a mano' : 'Scrivi il tuo menù (per esempio la tua dieta)'}
           </button>
-          <label className="flex items-center justify-between gap-4 py-2 cursor-pointer">
-            <span className="text-sm font-medium text-slate-800">Senza piatti vegani</span>
-            <input
-              type="checkbox"
-              checked={excludeVeganAlternatives}
-              onChange={(e) => setExcludeVeganAlternatives(e.target.checked)}
-              className="w-5 h-5 accent-indigo-600"
-            />
-          </label>
           {favorites.length > 0 && (
             <label className="flex items-center justify-between gap-4 py-2 cursor-pointer border-t border-slate-100">
               <span className="text-sm font-medium text-slate-800">Solo i miei preferiti ({favorites.length})</span>
@@ -1818,11 +1806,10 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
               <details className="bg-white border border-slate-200 rounded-2xl px-4 py-3">
                 <summary className="cursor-pointer list-none flex items-center justify-between text-sm font-semibold text-slate-700">
                   <span>Valori nutrizionali del giorno</span>
-                  <span className="text-xs font-medium text-slate-400">{Math.round(totalCal)} kcal ▾</span>
+                  <span className="text-xs font-medium text-slate-400">proteine, carboidrati, grassi ▾</span>
                 </summary>
-                <div className="grid grid-cols-4 gap-2 mt-4">
+                <div className="grid grid-cols-3 gap-2 mt-4">
                   {[
-                    { label: 'Calorie', value: Math.round(totalCal), unit: 'kcal', color: 'text-slate-800' },
                     { label: 'Proteine', value: Math.round(totalProt), unit: 'g', color: 'text-red-600' },
                     { label: 'Carbo', value: Math.round(totalCarbs), unit: 'g', color: 'text-amber-600' },
                     { label: 'Grassi', value: Math.round(totalFat), unit: 'g', color: 'text-indigo-600' },
@@ -1834,7 +1821,7 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
                     </div>
                   ))}
                 </div>
-                <p className="text-xs text-slate-400 mt-3">Calcolati per {targetServings} porzioni.</p>
+                <p className="text-xs text-slate-400 mt-3">Calcolati per {targetServings} porzioni. Le calorie a persona sono nella scheda qui sopra.</p>
               </details>
             )}
             </div>

@@ -18,6 +18,15 @@ export interface NewsEntry {
 
 export const CHANGELOG: NewsEntry[] = [
   {
+    id: '2026-10-14-spesa-vegani',
+    date: '14 ottobre 2026',
+    title: 'Spesa più ordinata, niente piatti vegani a sorpresa',
+    items: [
+      { emoji: '🛒', title: 'Ogni ingrediente una volta sola', text: 'Nella lista della spesa lo stesso ingrediente non si ripete più: se serve in più piatti, anche con misure diverse (spicchi, grammi, cucchiai), le quantità si sommano in una riga.' },
+      { emoji: '🌱', title: 'Piatti vegani solo se serve', text: 'Tofu, seitan e piatti «vegani» compaiono nel menù solo se hai scelto la dieta vegana. Chi ha una dieta vegana personale riceve comunque la sua alternativa.' },
+    ],
+  },
+  {
     id: '2026-10-14-colazione-merende',
     date: '14 ottobre 2026',
     title: 'Colazione e merende nel menù',
