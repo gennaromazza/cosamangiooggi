@@ -15,6 +15,7 @@ import TastingGame from './TastingGame';
 import MemberInvite from './MemberInvite';
 import FamilyShare from './FamilyShare';
 import KcalGoalCard from './KcalGoalCard';
+import MorningMealsCard from './MorningMealsCard';
 import JoinFamilyCard from './JoinFamilyCard';
 import { inviteLabel } from '../lib/inviteStatus';
 import { hasPersonalRules } from '../lib/memberAlternatives';
@@ -715,6 +716,7 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
         )}
       </div>
 
+      <MorningMealsCard userId={userId} profile={profile} onLocalChange={setProfile} />
       <KcalGoalCard userId={userId} profile={profile} onLocalChange={setProfile} />
 
       {/* Regole per tutti: alimentazione e allergie in un'unica scheda */}

@@ -3,7 +3,7 @@ import type { Ingredient, Recipe } from '../types';
 const word = (words: string) => new RegExp(`(?:^|[^a-zà-ú])(?:${words})`);
 
 const GLUTEN = word(
-  'pasta|spaghett|penne|rigaton|fusill|tagliatell|lasagn|gnocch|farina|pane|pangrattato|panin|pizza|focaccia|piadina|cous ?cous|orzo|farro|semola|segale|seitan|biscott|cracker|grissin|crostin|besciamella|pancarr|cornett|tortellin|ravioli|cannellon|bulgur',
+  'pasta|spaghett|penne|rigaton|fusill|tagliatell|lasagn|gnocch|farina|pane|pangrattato|panin|pizza|focaccia|piadina|cous ?cous|orzo|farro|semola|segale|seitan|biscott|cracker|grissin|crostin|besciamella|pancarr|cornett|tortellin|ravioli|cannellon|bulgur|avena|cereali|cornflake|muesli|granola|panbauletto|toast|frumento|grano duro|pasta sfoglia',
 );
 const DAIRY = word(
   'latte|burro|formaggi|formaggio|parmigiano|grana|mozzarella|ricotta|panna|yogurt|mascarpone|pecorino|gorgonzola|caprino|provola|stracchino|besciamella|philadelphia|fontina|emmental|scamorza|burrata|feta|caciotta|gelato',
@@ -14,7 +14,7 @@ const RED_MEAT = word('manzo|vitello|maiale|agnello|salsiccia|salame|prosciutto|
 const WHITE_MEAT = word('pollo|tacchino|coniglio|anatra|petto di|cotoletta');
 const OTHER_ANIMAL = word('carne|miele|gelatina|strutto|brodo di carne|dado di carne');
 const LEGUMES = word('ceci|fagioli|lenticchie|piselli|fave|soia|legumi|lupini|tofu|tempeh');
-const CARBS = word('pasta|riso|pane|patat|farina|couscous|orzo|farro|gnocch|polenta|semola|spaghett|penne|lasagn|pizza');
+const CARBS = word('pasta|riso|avena|cereali|cornflake|muesli|granola|biscott|cracker|gallett|pane|patat|farina|couscous|orzo|farro|gnocch|polenta|semola|spaghett|penne|lasagn|pizza');
 const VEG = word('verdur|pomodor|zucchin|melanzan|spinaci|carot|insalat|peperon|broccol|cavol|funghi|cipoll|fagiolin|zucca|finocch|asparag|carciof|radicch|bietol|sedano');
 
 export interface DishInfo {
@@ -28,9 +28,11 @@ export interface DishInfo {
 
 /** Capisce da ingredienti e titolo se il piatto è vegano, senza glutine o senza lattosio, e di che tipo è. */
 export function inferDishInfo(ingredients: Pick<Ingredient, 'name'>[], title = ''): DishInfo {
-  const text = [title, ...ingredients.map((i) => i.name)].map((s) => s.toLowerCase());
+  // "Latte di soia", "yogurt vegetale"… non sono latticini
+  const plantBased = (value: string) => value.replace(/(latte|yogurt|bevanda|panna|burro|formaggio)\s+(di\s+)?(soia|mandorl\w*|avena|riso|cocco|vegetale|vegano)/g, 'bevanda-vegetale');
+  const text = [title, ...ingredients.map((i) => i.name)].map((s) => plantBased(s.toLowerCase()));
   const any = (pattern: RegExp) => text.some((t) => pattern.test(t));
-  const names = ingredients.map((i) => i.name.toLowerCase());
+  const names = ingredients.map((i) => plantBased(i.name.toLowerCase()));
   const anyIng = (pattern: RegExp) => names.some((t) => pattern.test(t));
 
   const gluten = any(GLUTEN);

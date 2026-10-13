@@ -72,9 +72,16 @@ function publicMenuView(plan, customRecipesById) {
     const source = plan.days[day] || {};
     const lunch = idList(source.lunchIds);
     const dinner = idList(source.dinnerIds);
+    // Colazione e merende: compaiono solo se il menù le comprende
+    const breakfast = idList(source.breakfastIds);
+    const snackAm = idList(source.snackAmIds);
+    const snackPm = idList(source.snackPmIds);
     days[day] = { lunch, dinner };
-    meals += (lunch.length ? 1 : 0) + (dinner.length ? 1 : 0);
-    for (const id of [...lunch, ...dinner]) {
+    if (breakfast.length) days[day].breakfast = breakfast;
+    if (snackAm.length) days[day].snackAm = snackAm;
+    if (snackPm.length) days[day].snackPm = snackPm;
+    meals += [lunch, dinner, breakfast, snackAm, snackPm].filter((ids) => ids.length > 0).length;
+    for (const id of [...lunch, ...dinner, ...breakfast, ...snackAm, ...snackPm]) {
       const recipe = customRecipesById && customRecipesById[id];
       if (recipe && !custom[id]) {
         const clean = publicRecipe(recipe);

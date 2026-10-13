@@ -1,6 +1,9 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import MemberAlternatives from './MemberAlternatives';
-import { dislikeConsensus, pickAlternatives, planMeals } from '../lib/memberAlternatives';
+import MorningMeals from './MorningMeals';
+import { dislikeConsensus, isMain, pickAlternatives, planMeals } from '../lib/memberAlternatives';
+import { buildMorningDay, pickMorningMeal, SLOT_KEY, type MorningSlot } from '../lib/morningMeals';
+import { isMorningCategory } from '../data/mornings';
 import { planTogetherSlot } from '../lib/together';
 import { db } from '../lib/firebase';
 import { collection, query, where, getDocs, setDoc, addDoc, doc, onSnapshot } from 'firebase/firestore';
@@ -383,7 +386,7 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
       preAssigned[day] = {};
     });
 
-    const availableFavs = availableRecipes.filter(r => favorites.includes(r.id) && r.category !== 'side' && r.category !== 'dessert');
+    const availableFavs = availableRecipes.filter(r => favorites.includes(r.id) && isMain(r));
     const shuffledFavs = [...availableFavs].sort(() => Math.random() - 0.5);
 
     shuffledFavs.forEach(fav => {
@@ -520,8 +523,7 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
     const getRecipesForType = (type: string, categoryPreference?: string, currentExclusions?: Set<string>) => {
       let pool = availableRecipes.filter(r => 
         r.proteinType === type && 
-        r.category !== 'side' && 
-        r.category !== 'dessert'
+        isMain(r)
       );
       
       const filteredPool = pool.filter(r => 
@@ -800,6 +802,7 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
     // Limite di calorie al giorno (se attivato): ogni pasto sta nelle sue calorie, il resto è per colazione e merende
     const kcalTarget = dailyKcalTarget(profile);
     const budgets = kcalTarget ? mealBudgets(kcalTarget) : null;
+    const usedMorning = new Set<string>();
     const recipeLookup = new Map<string, Recipe>(recipes.map(r => [r.id, r] as [string, Recipe]));
     const withinBudget = (pool: Recipe[], budget?: number) => (budgets && budget ? capPool(pool, budget) : pool);
     const fitToBudget = (ids: string[], budget?: number) => (budgets && budget ? fitMeal(ids, budget, recipeLookup) : ids);
@@ -818,7 +821,7 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
       
       // Absolute fallback if lunch recipe cannot be found
       if (!lunchMain) {
-        const generalPool = availableRecipes.filter(r => r.category !== 'side' && r.category !== 'dessert');
+        const generalPool = availableRecipes.filter(r => isMain(r));
         lunchMain = pickRandom(withinBudget(generalPool, budgets?.lunch));
       }
       
@@ -843,7 +846,7 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
 
       // Absolute fallback if dinner recipe cannot be found
       if (!dinnerMain) {
-        const generalPool = availableRecipes.filter(r => r.category !== 'side' && r.category !== 'dessert' && r.id !== lunchMain?.id);
+        const generalPool = availableRecipes.filter(r => isMain(r) && r.id !== lunchMain?.id);
         dinnerMain = pickRandom(withinBudget(generalPool, budgets?.dinner)) || lunchMain;
       }
       
@@ -860,7 +863,17 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
       // Chi ha una dieta o un'allergia personale riceve un piatto alternativo quando quello di tutti non va bene
       const lunchAlt = pickAlternatives({ mains: findRecipes(lunchIds), members: familyMembers, pool: availableRecipes, used: usedAlternatives });
       const dinnerAlt = pickAlternatives({ mains: findRecipes(dinnerIds), members: familyMembers, pool: availableRecipes, used: usedAlternatives });
+      // Colazione e due merende, se il menù le comprende: adatte a tutti e nelle calorie di ogni pasto
+      const morning = profile?.includeMorningMeals
+        ? buildMorningDay({
+            recipes: availableRecipes,
+            members: familyMembers,
+            used: usedMorning,
+            budgets: budgets ? { breakfast: budgets.breakfast, snackAm: budgets.snackAm, snackPm: budgets.snackPm } : undefined,
+          })
+        : {};
       newPlan.days[day] = {
+        ...morning,
         lunchIds,
         dinnerIds,
         ...(Object.keys(lunchAlt).length > 0 ? { lunchAlt } : {}),
@@ -969,6 +982,7 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
     const candidates = recipes.filter(r => {
       // Don't suggest the same recipe
       if (r.id === originalRecipe.id) return false;
+      if (isMorningCategory(r.category)) return false;
       
       // Filter out recipes already in the plan
       if (currentScheduledIds.has(r.id)) return false;
@@ -1126,6 +1140,26 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
       );
     } finally {
       setIsRebuilding(false);
+    }
+  };
+
+  // Colazione e merende: si cambia il piatto di un momento con un altro adatto a tutti e nelle sue calorie
+  const [morningBusy, setMorningBusy] = useState(false);
+  const swapMorningMeal = async (day: string, slot: MorningSlot) => {
+    if (!currentPlan) return;
+    const key = SLOT_KEY[slot];
+    const dayPlan = currentPlan.days[day];
+    const current = (dayPlan?.[key] as string[] | undefined)?.[0];
+    const used = new Set<string>();
+    (Object.values(currentPlan.days) as DayPlan[]).forEach(d => [...(d.breakfastIds || []), ...(d.snackAmIds || []), ...(d.snackPmIds || [])].forEach(id => used.add(id)));
+    const target = dailyKcalTarget(profile);
+    const pick = pickMorningMeal({ recipes: familyPool(), slot, members: familyMembers, used, avoid: current, budget: target ? mealBudgets(target)[slot] : undefined });
+    if (!pick) return;
+    setMorningBusy(true);
+    try {
+      await savePlan({ ...currentPlan, days: { ...currentPlan.days, [day]: { ...dayPlan, [key]: [pick.id] } } });
+    } finally {
+      setMorningBusy(false);
     }
   };
 
@@ -1318,6 +1352,7 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
           customIds={customIds}
           isEditing={!!currentPlan?.manual}
           kcalTarget={dailyKcalTarget(profile)}
+          includeMorning={!!profile?.includeMorningMeals}
           onSave={saveManualPlan}
           onCreateDish={createManualDish}
           onEditDish={editManualDish}
@@ -1569,6 +1604,8 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
                 <ChevronRight className="w-5 h-5 font-bold" />
               </button>
             </div>
+
+            <MorningMeals day={plan} recipes={recipes} onOpen={setSelectedRecipe} onSwap={(slot) => swapMorningMeal(activeDay, slot)} busy={morningBusy} />
 
             {/* Slider day card with slide animation */}
             <AnimatePresence mode="wait">

@@ -9,7 +9,7 @@ export const hasPersonalRules = (member: FamilyMember): boolean =>
 export const fitsMember = (recipe: Recipe, member: FamilyMember): boolean =>
   satisfiesDiet(recipe, member.dietaryRestrictions || []) && !hitsExclusion(recipe, member.allergies || []);
 
-export const isMain = (recipe: Recipe) => recipe.category !== 'side' && recipe.category !== 'dessert';
+export const isMain = (recipe: Recipe) => !['side', 'dessert', 'breakfast', 'snack'].includes(recipe.category);
 
 /** Ingredienti che contano davvero in un piatto: titolo e primi tre ingredienti (non il soffritto o la spolverata). */
 export const hitsMainIngredient = (recipe: Recipe, ingredients: string[]): boolean =>
@@ -113,6 +113,8 @@ export function planMeals(plan: WeeklyPlan, servings: number, memberIds?: Set<st
       [day.lunchIds, day.lunchAlt],
       [day.dinnerIds, day.dinnerAlt],
     ];
+    // Colazione e merende: per tutti lo stesso piatto (si sceglie già adatto a ognuno), quindi niente alternative
+    for (const ids of [day.breakfastIds, day.snackAmIds, day.snackPmIds]) (ids || []).forEach((id) => add(id, servings));
     for (const [ids, alt] of slots) {
       // Le alternative di persone non più a tavola non contano
       const altIds = Object.entries(alt || {}).filter(([memberId]) => !memberIds || memberIds.has(memberId)).map(([, recipeId]) => recipeId);

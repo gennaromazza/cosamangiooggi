@@ -17,6 +17,10 @@ const RULES: Rule[] = [
   [/gomma di guar|colla di pesce|agar|fumet/, 5],
   [/brodo|dado/, 5],
   // Cereali, pasta, pane
+  [/gallette/, 380, 7],
+  [/fette biscottate|biscottate/, 400, 8],
+  [/cracker/, 430, 20],
+  [/granola|muesli|cereali|cornflakes|corn flakes/, 380],
   [/gnocchi/, 150],
   [/tortellini|ravioli|tortelli/, 300],
   [/sfoglia per lasagne|lasagne|tagliatelle|pasta all'uovo/, 350],
@@ -27,7 +31,7 @@ const RULES: Rule[] = [
   [/riso basmati|riso già cotto|riso cotto/, 130],
   [/\briso\b|originario|carnaroli|farro|orzo|quinoa|avena|fiocchi|miglio|grano saraceno|bulgur|polenta|mais per polenta/, 350],
   [/pangrattato|pane grattugiato/, 360],
-  [/grissini/, 430],
+  [/grissini/, 430, 8],
   [/carasau/, 380],
   [/fresell/, 360, 30],
   [/mollica|pane|panbauletto|panino|rosetta|piadina|crostini|focaccia|tramezzino|toast|cassetta/, 270, 40],
@@ -100,11 +104,16 @@ const RULES: Rule[] = [
   [/capperi/, 25, 5],
   [/avocado/, 160, 150],
   [/banan/, 90, 120],
-  [/mele|mela\b|pere|pera\b|pesche|albicocche|fragole|frutti di bosco|kiwi|uva|frutta/, 50, 150],
+  [/clementine|mandarin|kiwi|prugne|albicocche|ciliegie/, 45, 70],
+  [/ananas|melone|anguria|fichi|pompelmo|fragole/, 40, 150],
+  [/mele|mela\b|pere|pera\b|pesche|frutti di bosco|uva|frutta/, 50, 150],
+  [/hummus/, 170],
+  [/^(caffè|caffe|tè|te|tisana)\b/, 1, 100],
   [/arancia|arance|cachi|melone|lamponi|limone|lime|scorza|succo/, 40, 120],
   [/arachidi|sesamo/, 580, 10],
   [/miso/, 200],
   [/uvetta|datteri|fichi secchi/, 290],
+  [/crema di mandorle|crema di nocciole|burro di arachidi|burro di mandorle/, 620],
   [/noci|gherigli|mandorle|nocciole|pistacchi|anacardi/, 620, 5],
   [/pinoli/, 670],
   [/cioccolato|cacao/, 540],
@@ -178,7 +187,7 @@ export function estimateIngredients(ingredients: Ingredient[]): { total: number;
 }
 
 const DEFAULT_PER_CATEGORY: Record<Recipe['category'], number> = {
-  lunch: 520, dinner: 480, dessert: 280, breakfast: 300, cold: 450, takeaway: 650, side: 120, fast: 550,
+  lunch: 520, dinner: 480, dessert: 280, breakfast: 300, snack: 100, cold: 450, takeaway: 650, side: 120, fast: 550,
 };
 
 /** Calorie per persona di un piatto. Se gli ingredienti non bastano per stimare, si usa un valore tipico della categoria. */

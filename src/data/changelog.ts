@@ -18,6 +18,17 @@ export interface NewsEntry {
 
 export const CHANGELOG: NewsEntry[] = [
   {
+    id: '2026-10-14-colazione-merende',
+    date: '14 ottobre 2026',
+    title: 'Colazione e merende nel menù',
+    items: [
+      { emoji: '☕', title: 'Cinque pasti al giorno', text: 'In «Famiglia», «Colazione e merende»: il menù comprende anche la colazione, uno spuntino di metà mattina e la merenda, sempre adatti a tutti.' },
+      { emoji: '🍎', title: 'Dentro il tuo limite di calorie', text: 'Se hai attivato il limite, ogni pasto resta nella sua parte: colazione 15%, spuntini 5%, pranzo 40%, cena 35%. Il giorno mostra il totale e te lo dice se lo supera.' },
+      { emoji: '🔁', title: 'Cambiali quando vuoi', text: 'Tocca la freccia accanto a un piatto per sostituirlo. Colazione e merende compaiono anche nel menù condiviso, nei promemoria e nella spesa.' },
+      { emoji: '✍️', title: 'Anche nel menù scritto a mano', text: 'Se scrivi tu il menù, trovi i campi per colazione e merende.' },
+    ],
+  },
+  {
     id: '2026-10-13-calorie',
     date: '13 ottobre 2026',
     title: 'Un limite di calorie al giorno',

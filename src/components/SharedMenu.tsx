@@ -191,7 +191,10 @@ export default function SharedMenu({ familyId }: Props) {
 
         <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-4">
           <h3 className="text-xl font-semibold text-slate-900">{day}{day === today ? ' (oggi)' : ''}</h3>
+          {selected.breakfast.length > 0 && <Meal label="Colazione" recipes={selected.breakfast} />}
+          {selected.snackAm.length > 0 && <Meal label="Spuntino di metà mattina" recipes={selected.snackAm} />}
           <Meal label="Pranzo" recipes={selected.lunch} />
+          {selected.snackPm.length > 0 && <Meal label="Merenda" recipes={selected.snackPm} />}
           <Meal label="Cena" recipes={selected.dinner} />
         </div>
 

@@ -239,7 +239,7 @@ export default function RecipeList({ userId, voiceSearchQuery, setVoiceSearchQue
 
   const difficultyLabel: Record<string, string> = { easy: 'Facile', medium: 'Media', hard: 'Difficile' };
   const categoryLabel = (c: string) =>
-    c === 'lunch' ? 'Primo' : c === 'dinner' ? 'Secondo' : c === 'dessert' ? 'Dolce' : c === 'side' ? 'Contorno' : c === 'fast' ? 'Veloce' : c;
+    c === 'lunch' ? 'Primo' : c === 'dinner' ? 'Secondo' : c === 'dessert' ? 'Dolce' : c === 'side' ? 'Contorno' : c === 'fast' ? 'Veloce' : c === 'breakfast' ? 'Colazione' : c === 'snack' ? 'Merenda' : c;
   const shownRecipes = filteredRecipes.slice(0, visibleCount);
   const activeDietCount = dietaryFilter.length;
 
@@ -298,6 +298,8 @@ export default function RecipeList({ userId, voiceSearchQuery, setVoiceSearchQue
           { id: 'dessert', label: 'Dolci' },
           { id: 'side', label: 'Contorni' },
           { id: 'fast', label: 'Veloci' },
+          { id: 'breakfast', label: 'Colazioni' },
+          { id: 'snack', label: 'Merende' },
         ].map(filter => (
           <button
             key={filter.id}

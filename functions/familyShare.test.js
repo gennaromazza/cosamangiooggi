@@ -90,6 +90,20 @@ test('vista pubblica: solo pasti e ricette del menù, senza alternative, persone
   assert.ok(!JSON.stringify(v.customRecipes).includes('<'), 'niente codice nei testi');
 });
 
+test('vista pubblica: colazione e merende compaiono solo se il menù le comprende', () => {
+  const con = s.publicMenuView(
+    { days: { Lunedì: { lunchIds: ['a'], dinnerIds: ['b'], breakfastIds: ['breakfast-x'], snackAmIds: [], snackPmIds: ['snack-y'], breakfastNote: 'riservato' } } },
+    { 'breakfast-x': { title: 'Mia colazione', ingredients: [{ name: 'Pane', amount: 2, unit: 'fetta' }], instructions: ['Tostare.'] } },
+  );
+  assert.deepEqual(con.days['Lunedì'], { lunch: ['a'], dinner: ['b'], breakfast: ['breakfast-x'], snackPm: ['snack-y'] });
+  assert.deepEqual(Object.keys(con.customRecipes), ['breakfast-x']);
+  assert.ok(!JSON.stringify(con).includes('riservato'));
+  const senza = s.publicMenuView({ days: { Lunedì: { lunchIds: ['a'], dinnerIds: [] } } }, {});
+  assert.deepEqual(senza.days['Lunedì'], { lunch: ['a'], dinner: [] }, 'senza colazione e merende la vista non cambia');
+  // un menù con solo la colazione è comunque un menù
+  assert.ok(s.publicMenuView({ days: { Lunedì: { lunchIds: [], dinnerIds: [], breakfastIds: ['x'] } } }, {}));
+});
+
 test('vista pubblica: nessun menù (o vuoto) vuol dire niente da mostrare', () => {
   assert.equal(s.publicMenuView(null, {}), null);
   assert.equal(s.publicMenuView({}, {}), null);

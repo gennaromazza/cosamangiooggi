@@ -44,6 +44,8 @@ export interface UserProfile {
   hasCompletedWelcomeTour?: boolean;
   /** Limite di calorie al giorno per persona (stima dagli ingredienti). Assente o 0: nessun limite. */
   dailyKcalTarget?: number;
+  /** Il menù comprende anche colazione e due merende */
+  includeMorningMeals?: boolean;
   /** Famiglia a cui ci si è collegati con un codice (uid di chi la gestisce): sola consultazione del menù. La scrive il server */
   familyId?: string;
   paymentHistory?: {
@@ -70,7 +72,7 @@ export interface Recipe {
   tags: string[];
   season: 'spring' | 'summer' | 'autumn' | 'winter' | 'all';
   isWHOCompliant: boolean;
-  category: 'lunch' | 'dinner' | 'dessert' | 'breakfast' | 'cold' | 'takeaway' | 'side' | 'fast';
+  category: 'lunch' | 'dinner' | 'dessert' | 'breakfast' | 'snack' | 'cold' | 'takeaway' | 'side' | 'fast';
   difficulty: 'easy' | 'medium' | 'hard';
   timeMin: number;
   servings?: number;
@@ -99,6 +101,10 @@ export interface TogetherInfo {
 export interface DayPlan {
   lunchIds: string[];
   dinnerIds: string[];
+  /** Colazione e merende (solo se si è scelto di includerle): un piatto per volta, pensato per una persona */
+  breakfastIds?: string[];
+  snackAmIds?: string[];
+  snackPmIds?: string[];
   lunchTogether?: TogetherInfo;
   dinnerTogether?: TogetherInfo;
   /** Alternative per chi ha una dieta o un'allergia personale: id persona → id ricetta */

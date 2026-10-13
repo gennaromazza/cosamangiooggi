@@ -1,6 +1,6 @@
 import { getSupermarketDepartment } from './departments';
 import { inferDishInfo, parseIngredientText } from './dishInference';
-import { dislikeConsensus, dislikesDish, fitsMember, happyWith, membersNeedingAlternative, pickAlternatives, planMeals } from './memberAlternatives';
+import { dislikeConsensus, dislikesDish, fitsMember, happyWith, isMain, membersNeedingAlternative, pickAlternatives, planMeals } from './memberAlternatives';
 import { FAMOUS_DISH_IDS, pickTastingDishes, suggestIngredients, verdictPatch } from './tasting';
 import { NEUTRAL_DISH_IDS, planTogetherSlot } from './together';
 import { hasAnyPreference, membersWithoutPreferences, pantryItemFor, PANTRY_STARTERS } from './onboarding';
@@ -29,6 +29,8 @@ import { publicRecipes } from '../../scripts/public-recipes';
 import { CHANGELOG, LATEST_NEWS_ID } from '../data/changelog';
 import { pendingNews } from './whatsNew';
 import { editedDish, parseSteps } from './dishEdit';
+import { MORNING_RECIPES } from '../data/mornings';
+import { buildMorningDay, DAY_SLOTS, hasMorningMeals, pickMorningMeal, planHasMorningMeals, SLOT_KEY } from './morningMeals';
 import { capPool, clampKcal, dailyKcalTarget, dayKcal, estimateIngredients, fitMeal, kcalOfIds, mealBudgets, MEAL_SHARES, recipeKcal, reservedKcal } from './calories';
 import { addToSlot, buildManualPlan, countManualMeals, emptyManualDays, manualDaysFromPlan, removeFromSlot, replaceInSlot, WEEK_DAYS } from './manualPlan';
 import { compareBuilds, isNewer } from './updateCheck';
@@ -1155,4 +1157,149 @@ test('calorie: nell\'app il limite è scelto in Famiglia, rispettato dal menù e
   assert.ok(card.includes('role="switch"') && card.includes('non sostituiscono il parere di un medico'));
   assert.ok(readFileSync('src/components/DayKcalCard.tsx', 'utf8').includes('supera il tuo limite'));
   assert.ok(readFileSync('src/components/ManualPlanEditor.tsx', 'utf8').includes('<DayKcalCard'));
+});
+
+const morning = (cat: 'breakfast' | 'snack') => MORNING_RECIPES.filter((r) => r.category === cat);
+const rng = (seed: number) => () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+
+test('colazione e merende: il catalogo è completo, credibile e copre le diete', () => {
+  assert.equal(new Set(MORNING_RECIPES.map((r) => r.id)).size, MORNING_RECIPES.length, 'identificativi doppi');
+  assert.ok(morning('breakfast').length >= 18 && morning('snack').length >= 18);
+  assert.ok(INITIAL_RECIPES.filter((r) => r.category === 'snack').length === morning('snack').length, 'le merende fanno parte dei piatti dell\'app');
+  for (const r of MORNING_RECIPES) {
+    assert.ok(r.title.length > 3 && r.ingredients.length > 0 && r.instructions.length > 0 && r.servings === 1, r.id);
+    assert.ok(r.ingredients.every((i) => i.name && i.amount > 0 && i.unit), `${r.id}: ingrediente incompleto`);
+  }
+  for (const r of morning('breakfast')) {
+    const k = recipeKcal(r).perServing;
+    assert.ok(k >= 150 && k <= 450, `${r.title}: ${k} kcal`);
+  }
+  for (const r of morning('snack')) {
+    const k = recipeKcal(r).perServing;
+    assert.ok(k >= 30 && k <= 160, `${r.title}: ${k} kcal`);
+  }
+  // ogni dieta ha di che scegliere, a colazione e per le merende
+  for (const tag of ['vegan', 'gluten-free', 'lactose-free']) {
+    assert.ok(morning('breakfast').filter((r) => r.tags.includes(tag)).length >= 2, `colazioni ${tag}`);
+    assert.ok(morning('snack').filter((r) => r.tags.includes(tag)).length >= 6, `merende ${tag}`);
+  }
+  assert.ok(morning('breakfast').filter((r) => r.tags.includes('vegan') && r.tags.includes('gluten-free')).length >= 2, 'colazioni vegane e senza glutine');
+  // il latte vegetale non rende un piatto "con latticini" e l'avena contiene glutine
+  assert.ok(morning('breakfast').find((r) => /Porridge vegano/.test(r.title))!.tags.includes('vegan'));
+  assert.ok(!morning('breakfast').find((r) => /Porridge di avena/.test(r.title))!.tags.includes('gluten-free'));
+});
+
+test('colazione e merende: non finiscono tra i piatti principali', () => {
+  assert.ok(MORNING_RECIPES.every((r) => !isMain(r)));
+  assert.ok(INITIAL_RECIPES.filter((r) => r.category === 'breakfast').every((r) => !isMain(r)));
+  const dishes = planMeals({ id: 'c', startDate: 'x', days: { Lunedì: { lunchIds: ['l'], dinnerIds: ['d'], breakfastIds: ['b'], snackAmIds: ['s'], snackPmIds: ['s2'] } } }, 4);
+  const count = Object.fromEntries(dishes.map((d) => [d.recipeId, d.people]));
+  assert.deepEqual(count, { b: 4, s: 4, s2: 4, l: 4, d: 4 }, 'la spesa conta anche colazione e merende, per ogni persona');
+});
+
+test('colazione e merende: il piatto scelto va bene a tutti, sta nelle calorie e non si ripete', () => {
+  const celiaco = persona('c', { dietaryRestrictions: ['gluten-free'] });
+  const vegano = persona('v', { dietaryRestrictions: ['vegan'] });
+  const allergico = persona('a', { allergies: ['Latte'] });
+  const members = [celiaco, vegano, allergico];
+  for (let seed = 1; seed < 40; seed++) {
+    for (const slot of ['breakfast', 'snackAm', 'snackPm'] as const) {
+      const pick = pickMorningMeal({ recipes: INITIAL_RECIPES, slot, members, random: rng(seed) })!;
+      assert.ok(pick, `nessun piatto per ${slot}`);
+      assert.ok(members.every((m) => fitsMember(pick, m)), `${pick.title} non va bene a tutti`);
+    }
+  }
+  // limite di calorie del pasto
+  for (let seed = 1; seed < 40; seed++) {
+    assert.ok(recipeKcal(pickMorningMeal({ recipes: INITIAL_RECIPES, slot: 'snackAm', members: [], budget: 100, random: rng(seed) })!).perServing <= 100);
+    assert.ok(recipeKcal(pickMorningMeal({ recipes: INITIAL_RECIPES, slot: 'breakfast', members: [], budget: 300, random: rng(seed) })!).perServing <= 300);
+  }
+  // piatto da non riproporre e piatti già usati
+  const first = pickMorningMeal({ recipes: INITIAL_RECIPES, slot: 'breakfast', members: [], random: rng(3) })!;
+  for (let seed = 1; seed < 30; seed++) assert.notEqual(pickMorningMeal({ recipes: INITIAL_RECIPES, slot: 'breakfast', members: [], avoid: first.id, random: rng(seed) })!.id, first.id);
+  const target = morning('breakfast')[0];
+  const used = new Set(INITIAL_RECIPES.filter((r) => r.category === 'breakfast' && r.id !== target.id).map((r) => r.id));
+  assert.equal(pickMorningMeal({ recipes: INITIAL_RECIPES, slot: 'breakfast', members: [], used })!.id, target.id, 'si sceglie quello non ancora usato');
+  // se nulla va bene a tutti si sceglie comunque qualcosa (meglio un pasto che nessun pasto)
+  assert.ok(pickMorningMeal({ recipes: INITIAL_RECIPES, slot: 'breakfast', members: [persona('x', { allergies: ['Pane', 'Latte', 'Yogurt', 'Uova', 'Ricotta', 'Banana', 'Mela', 'Pera', 'Avocado', 'Marmellata', 'Frutti'] })] }));
+  assert.equal(pickMorningMeal({ recipes: [], slot: 'breakfast', members: [] }), undefined);
+});
+
+test('colazione e merende: un giorno ha tre pasti diversi e la settimana varia', () => {
+  const used = new Set<string>();
+  const week = Array.from({ length: 7 }, (_, i) => buildMorningDay({ recipes: INITIAL_RECIPES, members: [], used, random: rng(i + 7), budgets: { breakfast: 300, snackAm: 100, snackPm: 100 } }));
+  const ids = week.flatMap((d) => [d.breakfastIds![0], d.snackAmIds![0], d.snackPmIds![0]]);
+  assert.equal(new Set(ids).size, ids.length, 'nessun piatto ripetuto in una settimana');
+  assert.ok(week.every((d) => d.snackAmIds![0] !== d.snackPmIds![0]));
+});
+
+test('colazione e merende: con un limite di 2000 kcal ogni giorno resta nel limite', () => {
+  const lunches = INITIAL_RECIPES.filter((r) => r.category === 'lunch');
+  const dinners = INITIAL_RECIPES.filter((r) => r.category === 'dinner');
+  const budgets = mealBudgets(2000);
+  const byId = new Map<string, Recipe>(INITIAL_RECIPES.map((r) => [r.id, r] as [string, Recipe]));
+  for (let seed = 1; seed <= 60; seed++) {
+    const r = rng(seed);
+    const l = capPool(lunches, budgets.lunch);
+    const d = capPool(dinners, budgets.dinner);
+    const morningDay = buildMorningDay({ recipes: INITIAL_RECIPES, members: [], random: r, budgets });
+    const day = { lunchIds: [l[Math.floor(r() * l.length)].id], dinnerIds: [d[Math.floor(r() * d.length)].id], ...morningDay };
+    const k = dayKcal(day, byId);
+    assert.ok(k.total <= 2000, `giorno da ${Math.round(k.total)} kcal (seed ${seed})`);
+    assert.ok(Object.keys(k.byMeal).length === 5, 'cinque pasti nel giorno');
+  }
+});
+
+test('colazione e merende: nel menù si scrivono tutti e cinque i pasti', () => {
+  let days = emptyManualDays();
+  days = addToSlot(days, 'Lunedì', 'breakfast', 'b1');
+  days = addToSlot(days, 'Lunedì', 'snackAm', 's1');
+  days = addToSlot(days, 'Lunedì', 'snackPm', 's2');
+  days = addToSlot(days, 'Lunedì', 'lunch', 'l1');
+  days = addToSlot(days, 'Lunedì', 'dinner', 'd1');
+  assert.equal(countManualMeals(days), 5);
+  assert.deepEqual(days.Lunedì.breakfastIds, ['b1']);
+  days = replaceInSlot(days, 'Lunedì', 'breakfast', 0, 'b2');
+  assert.deepEqual(days.Lunedì.breakfastIds, ['b2']);
+  days = removeFromSlot(days, 'Lunedì', 'snackAm', 0);
+  assert.equal(countManualMeals(days), 4);
+  assert.deepEqual(days.Lunedì.lunchIds, ['l1'], 'pranzo e cena non cambiano');
+  // diventa un normale menù, con colazione e merende come scritte
+  const plan = buildManualPlan({ days, recipes: INITIAL_RECIPES, members: [], pool: INITIAL_RECIPES });
+  assert.deepEqual(plan.days.Lunedì.breakfastIds, ['b2']);
+  assert.deepEqual(plan.days.Lunedì.snackPmIds, ['s2']);
+  assert.equal(plan.days.Lunedì.snackAmIds, undefined);
+  assert.deepEqual(manualDaysFromPlan(plan).Lunedì.snackPmIds, ['s2'], 'si riparte dal menù attuale');
+  assert.equal(hasMorningMeals(plan.days.Lunedì), true);
+  assert.equal(hasMorningMeals(plan.days.Martedì), false);
+  assert.equal(planHasMorningMeals(plan.days), true);
+  assert.deepEqual(DAY_SLOTS, ['breakfast', 'snackAm', 'lunch', 'snackPm', 'dinner']);
+  assert.equal(SLOT_KEY.snackPm, 'snackPmIds');
+});
+
+test('colazione e merende: condivise e nei promemoria, nell\'ordine della giornata', () => {
+  const recipes = [piatto('b', ['Pane']), piatto('s', ['Mela']), piatto('l', ['Pasta']), piatto('m', ['Yogurt']), piatto('d', ['Pollo'])].map((r, i) => ({ ...r, title: ['Pane e marmellata', 'Mela', 'Pasta al sugo', 'Yogurt', 'Pollo al limone'][i] }));
+  const plan: WeeklyPlan = { id: 'c', startDate: 'x', days: { Lunedì: { lunchIds: ['l'], dinnerIds: ['d'], breakfastIds: ['b'], snackAmIds: ['s'], snackPmIds: ['m'] } } };
+  const day = dayMenu(plan, recipes, 'Lunedì');
+  assert.deepEqual(day.breakfast.map((r) => r.title), ['Pane e marmellata']);
+  assert.equal(reminderText(day), 'Colazione: Pane e marmellata · Spuntino: Mela · Pranzo: Pasta al sugo · Merenda: Yogurt · Cena: Pollo al limone');
+  assert.equal(hasMenu({ id: 'c', startDate: 'x', days: { Lunedì: { lunchIds: [], dinnerIds: [], breakfastIds: ['b'] } } }), true);
+  // senza colazione e merende non cambia nulla
+  assert.equal(reminderText(dayMenu(settimanaCondivisa, ricetteCondivise, 'Lunedì')), 'Pranzo: Pasta al sugo · Cena: Pollo al limone + Insalata');
+});
+
+test('colazione e merende: interruttore in Famiglia, generazione, swap, pagina pubblica', () => {
+  assert.ok(readFileSync('src/components/FamilySettings.tsx', 'utf8').includes('<MorningMealsCard'));
+  const card = readFileSync('src/components/MorningMealsCard.tsx', 'utf8');
+  assert.ok(card.includes('includeMorningMeals') && card.includes('role="switch"'));
+  const planner = readFileSync('src/components/MealPlanner.tsx', 'utf8');
+  for (const needle of ['profile?.includeMorningMeals', 'buildMorningDay(', '<MorningMeals ', 'swapMorningMeal', 'pickMorningMeal(', 'isMain(r)']) {
+    assert.ok(planner.includes(needle), `MealPlanner: manca ${needle}`);
+  }
+  assert.ok(!/r\.category !== 'side' && r\.category !== 'dessert'/.test(planner), 'i piatti principali non pescano più tra colazioni e merende');
+  assert.ok(readFileSync('src/components/ManualPlanEditor.tsx', 'utf8').includes('includeMorning'));
+  assert.ok(readFileSync('src/components/VacationPlanner.tsx', 'utf8').includes('isMorningCategory'));
+  const page = readFileSync('landing/menu.html', 'utf8');
+  for (const needle of ["'snackAm'", "'snackPm'", "'breakfast'", 'Colazione', 'Merenda']) assert.ok(page.includes(needle), `menu.html: manca ${needle}`);
+  assert.ok(readFileSync('src/components/SharedMenu.tsx', 'utf8').includes('selected.breakfast'));
 });
