@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Pencil, Plus, Search, Trash2, X } from 'lucide-react';
 import type { Recipe } from '../types';
 import QuickDishModal from './QuickDishModal';
+import DayKcalCard from './DayKcalCard';
 import {
   addToSlot,
   countManualMeals,
@@ -18,6 +19,8 @@ interface Props {
   /** Ricette che l'utente ha scritto da sé: si propongono per prime */
   customIds: Set<string>;
   isEditing: boolean;
+  /** Limite di calorie al giorno per persona, se attivato */
+  kcalTarget?: number | null;
   onSave: (days: ManualDays) => Promise<void> | void;
   /** Salva un piatto scritto a mano e restituisce il suo id */
   onCreateDish: (recipe: Omit<Recipe, 'id'>) => Promise<string | null>;
@@ -32,7 +35,7 @@ const SLOTS: { id: ManualSlot; label: string }[] = [
 ];
 
 /** Scrivi il tuo menù: per ogni giorno, pranzo e cena, scegli i piatti dell'app o scrivine di tuoi (per esempio la dieta del nutrizionista). */
-export default function ManualPlanEditor({ initial, recipes, customIds, isEditing, onSave, onCreateDish, onEditDish, onClose }: Props) {
+export default function ManualPlanEditor({ initial, recipes, customIds, isEditing, kcalTarget = null, onSave, onCreateDish, onEditDish, onClose }: Props) {
   const [days, setDays] = useState<ManualDays>(initial);
   const [day, setDay] = useState(WEEK_DAYS[0]);
   const [picker, setPicker] = useState<ManualSlot | null>(null);
@@ -107,6 +110,7 @@ export default function ManualPlanEditor({ initial, recipes, customIds, isEditin
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
         <h3 className="text-lg font-semibold text-slate-900">{day}</h3>
+        <DayKcalCard day={current} recipes={recipes} target={kcalTarget} />
         {SLOTS.map(({ id, label }) => {
           const ids = id === 'lunch' ? current.lunchIds : current.dinnerIds;
           return (

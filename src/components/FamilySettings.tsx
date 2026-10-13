@@ -14,6 +14,7 @@ import QuickDishModal from './QuickDishModal';
 import TastingGame from './TastingGame';
 import MemberInvite from './MemberInvite';
 import FamilyShare from './FamilyShare';
+import KcalGoalCard from './KcalGoalCard';
 import JoinFamilyCard from './JoinFamilyCard';
 import { inviteLabel } from '../lib/inviteStatus';
 import { hasPersonalRules } from '../lib/memberAlternatives';
@@ -713,6 +714,8 @@ export default function FamilySettings({ userId, profile: propProfile, onProfile
           </div>
         )}
       </div>
+
+      <KcalGoalCard userId={userId} profile={profile} onLocalChange={setProfile} />
 
       {/* Regole per tutti: alimentazione e allergie in un'unica scheda */}
       <div className="bg-white rounded-3xl border border-slate-200 p-5 space-y-5">

@@ -42,6 +42,8 @@ export interface UserProfile {
   tempPassword?: string;
   tempPasswordGeneratedAt?: string;
   hasCompletedWelcomeTour?: boolean;
+  /** Limite di calorie al giorno per persona (stima dagli ingredienti). Assente o 0: nessun limite. */
+  dailyKcalTarget?: number;
   /** Famiglia a cui ci si è collegati con un codice (uid di chi la gestisce): sola consultazione del menù. La scrive il server */
   familyId?: string;
   paymentHistory?: {
