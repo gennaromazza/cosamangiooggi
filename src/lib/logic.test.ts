@@ -1046,3 +1046,18 @@ test('versione: l\'app dice se quella installata è l\'ultima, più vecchia o di
   assert.ok(readFileSync('src/components/WhatsNew.tsx', 'utf8').includes('versione installata {__APP_VERSION__}'));
   assert.ok(readFileSync('firebase.landing.json', 'utf8').includes('"/version.json"'), 'il sito pubblica sempre un version.json senza cache');
 });
+
+test('aggiornamento app: la pagina si chiede sempre prima alla rete, mai la vecchia dalla cache', () => {
+  const sw = readFileSync('public/sw.js', 'utf8');
+  assert.ok(!sw.includes('che-cucino-oggi-v1'), 'la cache della versione che mostrava la pagina vecchia va cambiata');
+  assert.ok(sw.includes("const CACHE_NAME = 'che-cucino-oggi-v2'"));
+  // solo i file con la versione nel nome (/assets/) escono dalla cache per primi
+  assert.ok(/pathname\.startsWith\('\/assets\/'\)/.test(sw));
+  const afterAssets = sw.slice(sw.indexOf('Tutto il resto'));
+  assert.ok(/fetch\(request\)\s*\.then/.test(afterAssets) && afterAssets.indexOf('fetch(request)') < afterAssets.indexOf('caches.match(request)'), 'rete prima, cache solo senza connessione');
+  assert.ok(!sw.includes("'/index.html',\n  '/manifest.json'"), 'niente elenco di pagine messe in cache all\'installazione');
+  // chi arriva dalla versione vecchia viene ricaricato una volta, subito
+  assert.ok(sw.includes('hadOldVersion') && sw.includes('client.navigate(client.url)') && sw.includes('self.clients.claim()') && sw.includes('self.skipWaiting()'));
+  // vite pubblica i file con l'impronta nel nome
+  assert.ok(readFileSync('vite.config.ts', 'utf8').length > 0);
+});

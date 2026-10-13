@@ -1,56 +1,64 @@
-const CACHE_NAME = 'che-cucino-oggi-v1';
-const ASSETS_TO_CACHE = [
-  '/',
-  '/index.html',
-  '/manifest.json'
-];
+// Cache dell'app per l'uso senza rete.
+// Regola importante: la pagina principale e i file non "impronta" si chiedono SEMPRE prima alla rete (nell'app Android
+// la "rete" è il pacchetto appena installato), così dopo un aggiornamento si vede subito la versione nuova.
+// I file in /assets/ hanno il nome che cambia a ogni versione: quelli si possono tenere in cache.
+const CACHE_NAME = 'che-cucino-oggi-v2';
 
-// Install Event
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE);
-    }).then(() => self.skipWaiting())
-  );
+  event.waitUntil(self.skipWaiting());
 });
 
-// Activate Event
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((cache) => {
-          if (cache !== CACHE_NAME) {
-            return caches.delete(cache);
-          }
-        })
-      );
-    }).then(() => self.clients.claim())
+    (async () => {
+      const names = await caches.keys();
+      const hadOldVersion = names.some((name) => name !== CACHE_NAME);
+      await Promise.all(names.filter((name) => name !== CACHE_NAME).map((name) => caches.delete(name)));
+      await self.clients.claim();
+      // Si arriva da una versione precedente che mostrava la pagina vecchia: si ricarica una volta sola per mostrare quella nuova
+      if (hadOldVersion) {
+        const windows = await self.clients.matchAll({ type: 'window' });
+        windows.forEach((client) => client.navigate(client.url).catch(() => undefined));
+      }
+    })(),
   );
 });
 
-// Fetch Event - Stale-While-Revalidate
 self.addEventListener('fetch', (event) => {
-  // Only handle GET requests and local/http assets
-  if (event.request.method !== 'GET' || !event.request.url.startsWith(self.location.origin)) {
+  const { request } = event;
+  if (request.method !== 'GET' || !request.url.startsWith(self.location.origin)) return;
+  const url = new URL(request.url);
+  // Il servizio dei pagamenti, l'accesso e le funzioni non passano dalla cache
+  if (url.pathname.startsWith('/__/') || url.pathname.startsWith('/api/')) return;
+
+  if (url.pathname.startsWith('/assets/')) {
+    // File con la versione nel nome: prima la cache, poi la rete
+    event.respondWith(
+      caches.match(request).then(
+        (cached) =>
+          cached ||
+          fetch(request).then((response) => {
+            if (response && response.status === 200) {
+              const copy = response.clone();
+              caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+            }
+            return response;
+          }),
+      ),
+    );
     return;
   }
 
+  // Tutto il resto (pagina, manifest…): prima la rete; la cache serve solo se non c'è connessione
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      const fetchPromise = fetch(event.request).then((networkResponse) => {
-        if (networkResponse && networkResponse.status === 200) {
-          const responseToCache = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseToCache);
-          });
+    fetch(request)
+      .then((response) => {
+        if (response && response.status === 200) {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
         }
-        return networkResponse;
-      }).catch(() => {
-        // Fallback or silence network errors if offline
-      });
-
-      return cachedResponse || fetchPromise;
-    })
+        return response;
+      })
+      .catch(() => caches.match(request).then((cached) => cached || caches.match('/index.html'))),
   );
 });
