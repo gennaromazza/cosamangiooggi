@@ -28,8 +28,9 @@ import { buildDailyReminders, dayMenu, dayNameOf, formatReminderTime, hasMenu, n
 import { publicRecipes } from '../../scripts/public-recipes';
 import { CHANGELOG, LATEST_NEWS_ID } from '../data/changelog';
 import { pendingNews } from './whatsNew';
-import { addToSlot, buildManualPlan, countManualMeals, emptyManualDays, manualDaysFromPlan, removeFromSlot, WEEK_DAYS } from './manualPlan';
-import { isNewer } from './updateCheck';
+import { editedDish, parseSteps } from './dishEdit';
+import { addToSlot, buildManualPlan, countManualMeals, emptyManualDays, manualDaysFromPlan, removeFromSlot, replaceInSlot, WEEK_DAYS } from './manualPlan';
+import { compareBuilds, isNewer } from './updateCheck';
 import { fillPlaceholders } from '../../scripts/landing';
 import { PAGES, pageText, renderPage } from '../../scripts/landing-pages';
 import { dishSuggestionsLeft, limitsFor, normalizePlan, planName, PRICES, yearlySavingPercent, PLAN_LIMITS } from './plans';
@@ -968,4 +969,80 @@ test('famiglia: ogni persona ha una scheda a tutto schermo, non più una riga da
   assert.ok(page.includes("e.key === 'Escape' && closeMember()") && page.includes("document.body.style.overflow = 'hidden'"));
   // la guida iniziale continua a usare la stessa scheda, senza fisarmonica
   assert.ok(page.includes('onlyMemberId') && readFileSync('src/components/WelcomeTour.tsx', 'utf8').includes('onlyMemberId'));
+});
+
+test('modifica piatto: i passaggi si scrivono uno per riga, senza numeri né righe vuote', () => {
+  assert.deepEqual(parseSteps('1. Bollire l\'acqua\n\n2) Cuocere la pasta\n- Servire  \n'), ['Bollire l\'acqua', 'Cuocere la pasta', 'Servire']);
+  assert.deepEqual(parseSteps(''), []);
+});
+
+test('modifica piatto: si parte dal piatto di prima e si ricalcola ciò che dipende dagli ingredienti', () => {
+  const base = INITIAL_RECIPES.find((r) => r.id === 'meal-spaghetti-gamberi')!;
+  const edited = editedDish(
+    base,
+    {
+      title: '  Spaghetti ai gamberi di nonna ',
+      ingredients: [{ name: ' Spaghetti ', amount: 200, unit: 'g' }, { name: '', amount: 1, unit: 'g' }, { name: 'Gamberi', amount: 250, unit: 'g' }],
+      category: 'dinner',
+      difficulty: 'medium',
+      timeMin: 35,
+      steps: ['Cuocere.'],
+    },
+    inferDishInfo([{ name: 'Spaghetti' }, { name: 'Gamberi' }], 'Spaghetti ai gamberi di nonna'),
+  );
+  assert.equal(edited.title, 'Spaghetti ai gamberi di nonna');
+  assert.deepEqual(edited.ingredients.map((i) => i.name), ['Spaghetti', 'Gamberi'], 'niente ingredienti vuoti, nomi puliti');
+  assert.equal(edited.ingredients[0].amount, 200);
+  assert.deepEqual(edited.instructions, ['Cuocere.']);
+  assert.equal(edited.category, 'dinner');
+  assert.equal(edited.timeMin, 35);
+  assert.equal(edited.season, base.season, 'il resto del piatto resta com\'era');
+  assert.equal(edited.servings, base.servings || 2);
+  assert.ok(!('id' in edited) && !('nutrients' in edited), 'niente id (ne serve uno nuovo) né valori nutrizionali vecchi');
+  assert.equal(edited.proteinType, 'fish');
+  assert.ok(!edited.tags.includes('gluten-free'), 'gli spaghetti hanno glutine');
+  // il piatto originale non cambia
+  assert.equal(base.title, 'Spaghetti ai gamberi');
+  assert.ok(base.ingredients.some((i) => i.amount === 160));
+  // correggendo un ingrediente cambia l'adattabilità alle diete
+  const vegan = editedDish(base, { title: 'Spaghetti al pomodoro', ingredients: [{ name: 'Spaghetti di riso', amount: 160, unit: 'g' }, { name: 'Pomodoro', amount: 200, unit: 'g' }], category: 'lunch', difficulty: 'easy', timeMin: 15, steps: [] }, inferDishInfo([{ name: 'Spaghetti di riso' }, { name: 'Pomodoro' }], 'Spaghetti al pomodoro'));
+  assert.ok(vegan.tags.includes('vegan'));
+});
+
+test('modifica piatto: nel menù si cambia solo la posizione scelta', () => {
+  let days = emptyManualDays();
+  days = addToSlot(days, 'Lunedì', 'lunch', 'a');
+  days = addToSlot(days, 'Lunedì', 'lunch', 'b');
+  days = addToSlot(days, 'Martedì', 'lunch', 'a');
+  const next = replaceInSlot(days, 'Lunedì', 'lunch', 0, 'copia-di-a');
+  assert.deepEqual(next.Lunedì.lunchIds, ['copia-di-a', 'b']);
+  assert.deepEqual(next.Martedì.lunchIds, ['a'], 'gli altri giorni restano uguali');
+  assert.deepEqual(days.Lunedì.lunchIds, ['a', 'b'], 'l\'originale non viene toccato');
+});
+
+test('modifica piatto: dall\'editor del menù si corregge un piatto tuo o dell\'app', () => {
+  const editor = readFileSync('src/components/ManualPlanEditor.tsx', 'utf8');
+  for (const needle of ['Modifica ${byId.get(rid)!.title}', 'Modifica ${r.title} prima di aggiungerlo', 'onEditDish(recipe, edited)', 'originale resta com', 'initial={fixing.recipe}']) {
+    assert.ok(editor.includes(needle), `editor: manca ${needle}`);
+  }
+  const planner = readFileSync('src/components/MealPlanner.tsx', 'utf8');
+  assert.ok(planner.includes('if (!customIds.has(original.id)) return createManualDish(edited)'), 'un piatto dell\'app non si sovrascrive: se ne crea una copia');
+  assert.ok(planner.includes('setDoc(doc(db, path, original.id), edited)'), 'un piatto tuo si aggiorna sullo stesso identificativo');
+  const modal = readFileSync('src/components/QuickDishModal.tsx', 'utf8');
+  assert.ok(modal.includes('Modifica il piatto') && modal.includes('Salva le modifiche') && modal.includes('editedDish('));
+});
+
+test('versione: l\'app dice se quella installata è l\'ultima, più vecchia o di prova', () => {
+  assert.equal(compareBuilds(42, 42), 'latest');
+  assert.equal(compareBuilds(43, 42), 'outdated');
+  assert.equal(compareBuilds(41, 42), 'ahead');
+  assert.equal(compareBuilds(0, 42), 'unknown');
+  assert.equal(compareBuilds(Number.NaN, 42), 'unknown');
+  const card = readFileSync('src/components/AppVersionCard.tsx', 'utf8');
+  for (const needle of ['Hai l’ultima versione', 'Quella che hai non è l’ultima', 'Scarica e installa', 'Controlla aggiornamenti', 'Non riesco a controllare ora', '__APP_VERSION__']) {
+    assert.ok(card.includes(needle), `scheda versione: manca ${needle}`);
+  }
+  assert.ok(readFileSync('src/components/AccountSettings.tsx', 'utf8').includes('<AppVersionCard />'));
+  assert.ok(readFileSync('src/components/WhatsNew.tsx', 'utf8').includes('versione installata {__APP_VERSION__}'));
+  assert.ok(readFileSync('firebase.landing.json', 'utf8').includes('"/version.json"'), 'il sito pubblica sempre un version.json senza cache');
 });

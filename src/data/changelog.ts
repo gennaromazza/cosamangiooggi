@@ -18,6 +18,16 @@ export interface NewsEntry {
 
 export const CHANGELOG: NewsEntry[] = [
   {
+    id: '2026-10-13-modifica-piatti',
+    date: '13 ottobre 2026',
+    title: 'Correggi i piatti del tuo menù',
+    items: [
+      { emoji: '✏️', title: 'Modifica un piatto senza rifarlo', text: 'Quando scrivi il tuo menù, accanto a ogni piatto c\'è «Modifica»: cambi nome, ingredienti, quantità e preparazione senza cancellare e ricreare.' },
+      { emoji: '📖', title: 'Anche i piatti dell\'app', text: 'Puoi correggere pure un piatto che già esiste: l\'app ne salva una versione tua e l\'originale resta com\'è. Dall\'elenco, tocca la matita prima di aggiungerlo.' },
+      { emoji: '✅', title: 'Sei sull\'ultima versione?', text: 'In «Il mio account», «Versione dell\'app» ti dice se hai l\'ultima versione o se ce n\'è una più nuova da scaricare, con il pulsante per farlo.' },
+    ],
+  },
+  {
     id: '2026-10-12-schede',
     date: '12 ottobre 2026',
     title: 'Più facile gestire chi mangia a tavola',

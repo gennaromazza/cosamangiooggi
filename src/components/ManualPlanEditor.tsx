@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
-import { Plus, Search, Trash2, X } from 'lucide-react';
+import { Pencil, Plus, Search, Trash2, X } from 'lucide-react';
 import type { Recipe } from '../types';
 import QuickDishModal from './QuickDishModal';
 import {
   addToSlot,
   countManualMeals,
   removeFromSlot,
+  replaceInSlot,
   WEEK_DAYS,
   type ManualDays,
   type ManualSlot,
@@ -20,6 +21,8 @@ interface Props {
   onSave: (days: ManualDays) => Promise<void> | void;
   /** Salva un piatto scritto a mano e restituisce il suo id */
   onCreateDish: (recipe: Omit<Recipe, 'id'>) => Promise<string | null>;
+  /** Salva il piatto corretto e restituisce il suo id: lo stesso se era scritto da te, uno nuovo (copia tua) se era dell'app */
+  onEditDish: (original: Recipe, edited: Omit<Recipe, 'id'>) => Promise<string | null>;
   onClose: () => void;
 }
 
@@ -29,12 +32,15 @@ const SLOTS: { id: ManualSlot; label: string }[] = [
 ];
 
 /** Scrivi il tuo menù: per ogni giorno, pranzo e cena, scegli i piatti dell'app o scrivine di tuoi (per esempio la dieta del nutrizionista). */
-export default function ManualPlanEditor({ initial, recipes, customIds, isEditing, onSave, onCreateDish, onClose }: Props) {
+export default function ManualPlanEditor({ initial, recipes, customIds, isEditing, onSave, onCreateDish, onEditDish, onClose }: Props) {
   const [days, setDays] = useState<ManualDays>(initial);
   const [day, setDay] = useState(WEEK_DAYS[0]);
   const [picker, setPicker] = useState<ManualSlot | null>(null);
   const [search, setSearch] = useState('');
   const [writing, setWriting] = useState<ManualSlot | null>(null);
+  // Piatto che si sta correggendo: dove sta nel menù (se già inserito) oppure dove aggiungerlo (se scelto dall'elenco)
+  const [fixing, setFixing] = useState<{ recipe: Recipe; slot: ManualSlot; index: number | null } | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const byId = useMemo(() => new Map(recipes.map((r) => [r.id, r])), [recipes]);
@@ -110,6 +116,15 @@ export default function ManualPlanEditor({ initial, recipes, customIds, isEditin
               {ids.map((rid, i) => (
                 <div key={`${rid}-${i}`} className="flex items-center gap-2 bg-slate-50 border border-slate-100 rounded-xl pl-3 pr-1 py-1">
                   <span className="flex-1 min-w-0 font-semibold text-slate-800 truncate">{byId.get(rid)?.title || 'Piatto non più disponibile'}</span>
+                  {byId.get(rid) && (
+                    <button
+                      onClick={() => setFixing({ recipe: byId.get(rid)!, slot: id, index: i })}
+                      aria-label={`Modifica ${byId.get(rid)!.title}`}
+                      className="h-10 px-2.5 rounded-full flex items-center gap-1 text-sm font-semibold text-indigo-700 active:bg-indigo-50"
+                    >
+                      <Pencil className="w-4 h-4" /> Modifica
+                    </button>
+                  )}
                   <button
                     onClick={() => setDays((d) => removeFromSlot(d, day, id, i))}
                     aria-label={`Togli ${byId.get(rid)?.title || 'il piatto'}`}
@@ -138,9 +153,18 @@ export default function ManualPlanEditor({ initial, recipes, customIds, isEditin
                       <p className="text-sm text-slate-500 p-3">{search.trim() ? 'Nessun piatto con questo nome.' : 'Scrivi il nome di un piatto.'}</p>
                     ) : (
                       results.map((r) => (
-                        <button key={r.id} onClick={() => add(id, r.id)} className="w-full text-left px-3 py-3 text-sm font-medium text-slate-800 active:bg-slate-50">
-                          {r.title}
-                        </button>
+                        <div key={r.id} className="flex items-center">
+                          <button onClick={() => add(id, r.id)} className="flex-1 min-w-0 text-left px-3 py-3 text-sm font-medium text-slate-800 active:bg-slate-50">
+                            {r.title}
+                          </button>
+                          <button
+                            onClick={() => setFixing({ recipe: r, slot: id, index: null })}
+                            aria-label={`Modifica ${r.title} prima di aggiungerlo`}
+                            className="shrink-0 w-11 h-11 mr-1 rounded-full flex items-center justify-center text-slate-400 hover:text-indigo-600"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                        </div>
                       ))
                     )}
                   </div>
@@ -179,6 +203,34 @@ export default function ManualPlanEditor({ initial, recipes, customIds, isEditin
           {saving ? 'Salvo…' : meals === 0 ? 'Aggiungi almeno un piatto' : `Salva il mio menù (${meals} ${meals === 1 ? 'pasto' : 'pasti'})`}
         </button>
       </div>
+
+      {notice && (
+        <div role="status" className="fixed left-4 right-4 bottom-24 z-[58] bg-slate-900 text-white rounded-2xl px-4 py-3 text-sm shadow-xl flex items-start justify-between gap-3">
+          <span className="leading-relaxed">{notice}</span>
+          <button onClick={() => setNotice(null)} aria-label="Chiudi" className="font-bold shrink-0">×</button>
+        </div>
+      )}
+
+      {fixing && (
+        <QuickDishModal
+          initial={fixing.recipe}
+          offlineOnly
+          onSave={async (edited) => {
+            const { recipe, slot, index } = fixing;
+            const id = await onEditDish(recipe, edited);
+            setFixing(null);
+            if (!id) {
+              setNotice('Non è stato possibile salvare il piatto. Riprova.');
+              return;
+            }
+            const copied = id !== recipe.id;
+            if (index === null) add(slot, id);
+            else if (copied) setDays((d) => replaceInSlot(d, day, slot, index, id));
+            setNotice(copied ? 'Ho salvato la tua versione di questo piatto: l\'originale resta com\'è. Ricordati di salvare il menù.' : 'Piatto aggiornato: vale in tutti i giorni in cui lo hai messo. Ricordati di salvare il menù.');
+          }}
+          onClose={() => setFixing(null)}
+        />
+      )}
 
       {writing && (
         <QuickDishModal

@@ -65,3 +65,38 @@ export async function checkForUpdate(force = false): Promise<UpdateInfo | null> 
 }
 
 export const dismissUpdate = (build: number) => write(DISMISSED_KEY, String(build));
+
+export type VersionStatus =
+  | { state: 'latest'; version: string | null }
+  | { state: 'outdated'; update: UpdateInfo }
+  | { state: 'ahead' }
+  | { state: 'offline' };
+
+/** Confronto tra la build sul sito e quella installata. "ahead": l'app installata è più nuova di quella sul sito (prova). */
+export const compareBuilds = (available: number, installed: number): 'outdated' | 'latest' | 'ahead' | 'unknown' => {
+  if (!Number.isFinite(available) || available <= 0) return 'unknown';
+  if (available > installed) return 'outdated';
+  return available === installed ? 'latest' : 'ahead';
+};
+
+/** Controllo richiesto dall'utente: sempre aggiornato, senza attese né versioni rimandate. */
+export async function checkVersionNow(): Promise<VersionStatus> {
+  try {
+    const response = await fetch(`${SITE_URL}/version.json?t=${Date.now()}`, { cache: 'no-store' });
+    if (!response.ok) return { state: 'offline' };
+    const data = await response.json();
+    const build = Number(data.number);
+    const result = compareBuilds(build, __BUILD_NUMBER__);
+    if (result === 'unknown') return { state: 'offline' };
+    if (result === 'ahead') return { state: 'ahead' };
+    const version = typeof data.version === 'string' ? data.version : null;
+    if (result === 'latest') return { state: 'latest', version };
+    const file = typeof data.apk === 'string' && /^[\w.-]+\.apk$/.test(data.apk) ? data.apk : null;
+    return {
+      state: 'outdated',
+      update: { build, date: typeof data.date === 'string' ? data.date : null, version, apkUrl: file ? `${SITE_URL}/download/${file}` : APK_URL },
+    };
+  } catch {
+    return { state: 'offline' };
+  }
+}

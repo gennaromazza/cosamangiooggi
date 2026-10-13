@@ -1043,6 +1043,26 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
       return null;
     }
   };
+  // Correzione di un piatto: se l'hai scritto tu si aggiorna lo stesso, se è dell'app se ne salva una copia tua
+  const editManualDish = async (original: Recipe, edited: Omit<Recipe, 'id'>): Promise<string | null> => {
+    if (!customIds.has(original.id)) return createManualDish(edited);
+    const isLocal = userId === 'demo-family-user' || userId.startsWith('local-');
+    const updated = { ...edited, id: original.id } as Recipe;
+    if (isLocal) {
+      const saved = (() => { try { return JSON.parse(localStorage.getItem(`customRecipes_${userId}`) || '[]') as Recipe[]; } catch { return []; } })();
+      localStorage.setItem(`customRecipes_${userId}`, JSON.stringify(saved.map(r => r.id === original.id ? updated : r)));
+      setRecipes(list => list.map(r => r.id === original.id ? updated : r));
+      return original.id;
+    }
+    const path = `users/${userId}/customRecipes`;
+    try {
+      await setDoc(doc(db, path, original.id), edited);
+      return original.id;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
+      return null;
+    }
+  };
   const saveManualPlan = async (days: ManualDays) => {
     const plan = buildManualPlan({ days, recipes, members: familyMembers, pool: familyPool() });
     await savePlan(plan);
@@ -1290,6 +1310,7 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
           isEditing={!!currentPlan?.manual}
           onSave={saveManualPlan}
           onCreateDish={createManualDish}
+          onEditDish={editManualDish}
           onClose={() => setShowManual(false)}
         />
       )}

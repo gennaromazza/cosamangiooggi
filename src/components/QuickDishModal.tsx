@@ -4,9 +4,12 @@ import { httpsCallable } from 'firebase/functions';
 import { functions } from '../lib/firebase';
 import type { Ingredient, Recipe } from '../types';
 import { inferDishInfo, parseIngredientText } from '../lib/dishInference';
+import { editedDish, parseSteps } from '../lib/dishEdit';
 
 interface Props {
   initialTitle?: string;
+  /** Piatto da correggere (già scritto da te o dell'app): si parte dai suoi dati invece che da zero */
+  initial?: Recipe;
   /** Account senza accesso (demo/locale): niente riconoscimento con l'IA */
   offlineOnly?: boolean;
   /** Riconoscimenti IA rimasti questo mese (null se non si sa) */
@@ -37,13 +40,15 @@ interface Suggestion {
 }
 
 /** Aggiunta rapida di un piatto di famiglia: nome, ingredienti riconosciuti in automatico, controllo finale. */
-export default function QuickDishModal({ initialTitle = '', offlineOnly = false, aiLeft = null, isPro = false, onUpgrade, onSave, onClose }: Props) {
+export default function QuickDishModal({ initialTitle = '', initial, offlineOnly = false, aiLeft = null, isPro = false, onUpgrade, onSave, onClose }: Props) {
   const [left, setLeft] = useState<number | null>(aiLeft);
-  const [title, setTitle] = useState(initialTitle);
+  const editing = !!initial;
+  const [title, setTitle] = useState(initial?.title ?? initialTitle);
   const [notes, setNotes] = useState('');
-  const [ingredients, setIngredients] = useState<Ingredient[]>([]);
-  const [category, setCategory] = useState<Recipe['category']>('lunch');
-  const [extra, setExtra] = useState<Pick<Suggestion, 'difficulty' | 'timeMin' | 'steps'>>({ difficulty: 'easy', timeMin: 30, steps: [] });
+  const [ingredients, setIngredients] = useState<Ingredient[]>(initial ? initial.ingredients.map((i) => ({ ...i })) : []);
+  const [category, setCategory] = useState<Recipe['category']>(initial?.category ?? 'lunch');
+  const [extra, setExtra] = useState<Pick<Suggestion, 'difficulty' | 'timeMin' | 'steps'>>({ difficulty: initial?.difficulty ?? 'easy', timeMin: initial?.timeMin ?? 30, steps: [] });
+  const [stepsText, setStepsText] = useState((initial?.instructions ?? []).join('\n'));
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
@@ -67,7 +72,8 @@ export default function QuickDishModal({ initialTitle = '', offlineOnly = false,
         if (typeof result.data.remaining === 'number') setLeft(result.data.remaining);
         setIngredients(result.data.ingredients);
         setCategory(result.data.category);
-        setExtra({ difficulty: result.data.difficulty, timeMin: result.data.timeMin, steps: result.data.steps });
+        setExtra({ difficulty: result.data.difficulty, timeMin: result.data.timeMin, steps: [] });
+        setStepsText(result.data.steps.join('\n'));
         setMessage({ ok: true, text: 'Ho riconosciuto gli ingredienti: controlla che siano giusti e correggi se serve.' });
         return;
       }
@@ -104,6 +110,10 @@ export default function QuickDishModal({ initialTitle = '', offlineOnly = false,
     if (title.trim().length < 2 || cleanIngredients.length === 0) return;
     setSaving(true);
     try {
+      if (initial) {
+        await onSave(editedDish(initial, { title, ingredients, category, difficulty: extra.difficulty, timeMin: extra.timeMin, steps: parseSteps(stepsText) }, info));
+        return;
+      }
       await onSave({
         title: title.trim(),
         category,
@@ -112,7 +122,7 @@ export default function QuickDishModal({ initialTitle = '', offlineOnly = false,
         servings: 2,
         proteinType: info.proteinType,
         ingredients: cleanIngredients,
-        instructions: extra.steps,
+        instructions: parseSteps(stepsText),
         tags: info.tags,
         season: 'all',
         isWHOCompliant: false,
@@ -136,7 +146,7 @@ export default function QuickDishModal({ initialTitle = '', offlineOnly = false,
       <div className="absolute inset-0 bg-slate-900/60" onClick={onClose} />
       <div className="bg-white w-full sm:max-w-lg rounded-t-3xl sm:rounded-3xl relative z-10 flex flex-col max-h-[92dvh]">
         <div className="p-5 border-b border-slate-100 flex items-center justify-between">
-          <h3 className="font-display text-2xl text-slate-900">Aggiungi un piatto</h3>
+          <h3 className="font-display text-2xl text-slate-900">{editing ? 'Modifica il piatto' : 'Aggiungi un piatto'}</h3>
           <button onClick={onClose} aria-label="Chiudi" className="p-2 text-slate-400 hover:text-slate-600">
             <X className="w-6 h-6" />
           </button>
@@ -154,6 +164,8 @@ export default function QuickDishModal({ initialTitle = '', offlineOnly = false,
             />
           </div>
 
+          {!editing && (
+            <>
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-1.5" htmlFor="dish-notes">
               Cosa c’è dentro? <span className="font-normal text-slate-500">(facoltativo)</span>
@@ -192,6 +204,9 @@ export default function QuickDishModal({ initialTitle = '', offlineOnly = false,
             </p>
           )}
 
+            </>
+          )}
+
           {message && (
             <p role="status" className={`rounded-xl px-4 py-3 text-sm font-semibold ${message.ok ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-900'}`}>
               {message.text}
@@ -201,7 +216,7 @@ export default function QuickDishModal({ initialTitle = '', offlineOnly = false,
           {ingredients.length > 0 && (
             <>
               <div className="space-y-2">
-                <p className="text-sm font-bold text-slate-700">Ingredienti (per 2 persone)</p>
+                <p className="text-sm font-bold text-slate-700">Ingredienti (per {initial?.servings || 2} {(initial?.servings || 2) === 1 ? 'persona' : 'persone'})</p>
                 {ingredients.map((ing, index) => (
                   <div key={index} className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-100 p-2">
                     <input
@@ -264,6 +279,19 @@ export default function QuickDishModal({ initialTitle = '', offlineOnly = false,
                 </div>
               </div>
 
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1.5" htmlFor="dish-steps">
+                  Come si prepara <span className="font-normal text-slate-500">(un passaggio per riga, facoltativo)</span>
+                </label>
+                <textarea
+                  id="dish-steps"
+                  value={stepsText}
+                  onChange={(e) => setStepsText(e.target.value)}
+                  rows={5}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                />
+              </div>
+
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-2">
                 <p className="text-sm font-bold text-slate-700">Adatto a chi? <span className="font-normal text-slate-500">(lo capisco dagli ingredienti)</span></p>
                 <ul className="space-y-1">
@@ -286,7 +314,7 @@ export default function QuickDishModal({ initialTitle = '', offlineOnly = false,
             disabled={saving || title.trim().length < 2 || cleanIngredients.length === 0}
             className="w-full h-14 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-lg disabled:opacity-40"
           >
-            {saving ? 'Salvo…' : 'Salva il piatto'}
+            {saving ? 'Salvo…' : editing ? 'Salva le modifiche' : 'Salva il piatto'}
           </button>
         </div>
       </div>

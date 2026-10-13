@@ -32,6 +32,13 @@ export const removeFromSlot = (days: ManualDays, day: string, slot: ManualSlot, 
   return { ...days, [day]: { ...current, [key]: current[key].filter((_, i) => i !== index) } };
 };
 
+/** Cambia il piatto in una posizione (per esempio con la versione modificata), senza spostare gli altri. */
+export const replaceInSlot = (days: ManualDays, day: string, slot: ManualSlot, index: number, recipeId: string): ManualDays => {
+  const current = days[day] || { lunchIds: [], dinnerIds: [] };
+  const key = slot === 'lunch' ? 'lunchIds' : 'dinnerIds';
+  return { ...days, [day]: { ...current, [key]: current[key].map((id, i) => (i === index ? recipeId : id)) } };
+};
+
 export const countManualMeals = (days: ManualDays): number =>
   Object.values(days).reduce((n, d) => n + (d.lunchIds.length > 0 ? 1 : 0) + (d.dinnerIds.length > 0 ? 1 : 0), 0);
 
