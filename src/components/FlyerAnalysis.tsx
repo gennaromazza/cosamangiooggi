@@ -10,11 +10,15 @@ import { motion, AnimatePresence } from 'motion/react';
 interface Props {
   userId: string;
   profile: UserProfile | null;
+  /** Porta al menù, dove si può rifare con le offerte appena trovate */
+  onNavigateToPlanner?: () => void;
 }
 
-export default function FlyerAnalysis({ userId, profile }: Props) {
+export default function FlyerAnalysis({ userId, profile, onNavigateToPlanner }: Props) {
   const [file, setFile] = useState<File | null>(null);
   const [link, setLink] = useState('');
+  // Dopo una lettura riuscita si chiede se rifare il menù con le offerte: la scelta è sempre dell'utente
+  const [askRebuild, setAskRebuild] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [scansLeft, setScansLeft] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -55,6 +59,7 @@ export default function FlyerAnalysis({ userId, profile }: Props) {
 
         setExtractedOffers(ingredients);
         await saveOffers(ingredients);
+        setAskRebuild(ingredients.length > 0);
       } catch (err: any) {
         console.error("Flyer analysis error:", err);
         setError(`Errore: ${err.message || "Impossibile analizzare il volantino. Prova un'immagine più chiara."}`);
@@ -85,6 +90,7 @@ export default function FlyerAnalysis({ userId, profile }: Props) {
       setScansLeft(result.data.remaining);
       setExtractedOffers(result.data.ingredients);
       await saveOffers(result.data.ingredients);
+      setAskRebuild(result.data.ingredients.length > 0);
     } catch (err: any) {
       console.error('Flyer link error:', err);
       setError(err?.message?.replace(/^.*?: /, '') || 'Non è stato possibile leggere il link. Prova con uno screenshot.');
@@ -104,7 +110,18 @@ export default function FlyerAnalysis({ userId, profile }: Props) {
     }
   };
 
+  const rebuildMenu = () => {
+    try {
+      sessionStorage.setItem('auto_regenerate_plan', '1');
+    } catch {
+      /* storage non disponibile */
+    }
+    setAskRebuild(false);
+    onNavigateToPlanner?.();
+  };
+
   const clearOffers = () => {
+    setAskRebuild(false);
     setExtractedOffers([]);
     saveOffers([]);
     setFile(null);
@@ -262,7 +279,24 @@ export default function FlyerAnalysis({ userId, profile }: Props) {
             )}
           </div>
           
-          {extractedOffers.length > 0 && (
+          {askRebuild && onNavigateToPlanner && (
+            <div role="group" aria-label="Rifare il menù con le offerte" className="mt-6 bg-indigo-50 border border-indigo-100 rounded-2xl p-4 space-y-3">
+              <p className="text-sm font-bold text-indigo-950">Vuoi rifare il menù della settimana con queste offerte?</p>
+              <p className="text-xs text-indigo-900 leading-relaxed">
+                Il nuovo menù userà gli ingredienti in offerta e terrà conto di gusti, diete e allergie di tutte le persone. Il menù di adesso verrà sostituito.
+              </p>
+              <div className="flex gap-2">
+                <button onClick={rebuildMenu} className="flex-1 h-11 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold">
+                  Sì, rifai il menù
+                </button>
+                <button onClick={() => setAskRebuild(false)} className="h-11 px-4 rounded-xl border border-indigo-200 bg-white text-indigo-900 text-sm font-semibold">
+                  No, grazie
+                </button>
+              </div>
+            </div>
+          )}
+
+          {extractedOffers.length > 0 && !askRebuild && (
             <div className="mt-6 pt-6 border-t border-slate-200 border-dashed">
               <div className="flex items-start gap-3 bg-emerald-50 border border-emerald-100 p-4 rounded-2xl">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 mt-0.5" />

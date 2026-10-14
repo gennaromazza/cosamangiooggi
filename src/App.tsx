@@ -810,7 +810,7 @@ export default function App() {
             )}
             {activeTab === 'offers' && (
               limitsFor(profile?.plan).flyerScansPerMonth > 0 ? (
-                <FlyerAnalysis userId={user.uid} profile={profile} />
+                <FlyerAnalysis userId={user.uid} profile={profile} onNavigateToPlanner={() => setActiveTab('planner')} />
               ) : (
                 <UpgradeCard
                   title="Scansiona i volantini"

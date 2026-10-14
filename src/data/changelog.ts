@@ -23,6 +23,7 @@ export const CHANGELOG: NewsEntry[] = [
     title: 'Volantino da un link',
     items: [
       { emoji: '🔗', title: 'Incolla il link del volantino', text: 'In «Offerte» puoi incollare l\'indirizzo di un volantino in PDF o in immagine: lo leggiamo noi, senza scaricarlo sul telefono.' },
+      { emoji: '🍽️', title: 'Rifai il menù con le offerte', text: 'Dopo aver letto un volantino ti chiediamo se vuoi rifare il menù della settimana con quelle offerte, tenendo conto di gusti, diete e allergie di tutti. Decidi tu: se rispondi di no, il menù resta com\'è.' },
       { emoji: '📸', title: 'Se il volantino si sfoglia sul sito', text: 'Molti volantini digitali sono pagine e non file: in quel caso ti diciamo cosa fare, cioè uno screenshot delle pagine da caricare come foto.' },
     ],
   },

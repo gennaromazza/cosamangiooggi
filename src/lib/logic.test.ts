@@ -1524,3 +1524,18 @@ test('volantino da link: la schermata chiede il link e spiega cosa fare se non �
   for (const needle of ['analyzeFlyerUrl', 'Oppure incolla il link del volantino', 'https://', 'fai uno screenshot delle pagine']) assert.ok(screen.includes(needle), `FlyerAnalysis: manca ${needle}`);
   assert.ok(readFileSync('functions/index.js', 'utf8').includes('exports.analyzeFlyerUrl = onCall'));
 });
+
+test('volantino: dopo la lettura si chiede se rifare il menù, e la scelta è dell\'utente', () => {
+  const screen = readFileSync('src/components/FlyerAnalysis.tsx', 'utf8');
+  for (const needle of ['Vuoi rifare il menù della settimana con queste offerte?', 'Sì, rifai il menù', 'No, grazie', 'Il menù di adesso verrà sostituito', "sessionStorage.setItem('auto_regenerate_plan', '1')", 'setAskRebuild(ingredients.length > 0)', 'setAskRebuild(result.data.ingredients.length > 0)']) {
+    assert.ok(screen.includes(needle), `FlyerAnalysis: manca ${needle}`);
+  }
+  // il menù non si rifà da solo: solo il pulsante "Sì" imposta la richiesta
+  assert.equal((screen.match(/auto_regenerate_plan/g) || []).length, 1);
+  assert.ok(screen.indexOf("sessionStorage.setItem('auto_regenerate_plan'") > screen.indexOf('const rebuildMenu'));
+  const planner = readFileSync('src/components/MealPlanner.tsx', 'utf8');
+  assert.ok(planner.includes("sessionStorage.getItem('auto_regenerate_plan') === '1'") && planner.includes("sessionStorage.removeItem('auto_regenerate_plan')"), 'la richiesta si usa una volta sola');
+  assert.ok(readFileSync('src/App.tsx', 'utf8').includes("onNavigateToPlanner={() => setActiveTab('planner')}"));
+  // le offerte contano nella scelta dei piatti, insieme a gusti e allergie
+  assert.ok(planner.includes('profile.currentOffers') && planner.includes('hardExclusions'));
+});
