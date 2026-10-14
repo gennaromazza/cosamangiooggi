@@ -17,8 +17,9 @@ interface Props {
 export default function FlyerAnalysis({ userId, profile, onNavigateToPlanner }: Props) {
   const [file, setFile] = useState<File | null>(null);
   const [link, setLink] = useState('');
-  // Dopo una lettura riuscita si chiede se rifare il menù con le offerte: la scelta è sempre dell'utente
-  const [askRebuild, setAskRebuild] = useState(false);
+  // Dopo la lettura si sceglie cosa si compra davvero: solo quello conta per il menù. Nulla è scelto in partenza.
+  const [candidates, setCandidates] = useState<string[]>([]);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [scansLeft, setScansLeft] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -57,9 +58,7 @@ export default function FlyerAnalysis({ userId, profile, onNavigateToPlanner }: 
         const ingredients = result.data.ingredients;
         setScansLeft(result.data.remaining);
 
-        setExtractedOffers(ingredients);
-        await saveOffers(ingredients);
-        setAskRebuild(ingredients.length > 0);
+        showCandidates(ingredients);
       } catch (err: any) {
         console.error("Flyer analysis error:", err);
         setError(`Errore: ${err.message || "Impossibile analizzare il volantino. Prova un'immagine più chiara."}`);
@@ -88,9 +87,7 @@ export default function FlyerAnalysis({ userId, profile, onNavigateToPlanner }: 
     try {
       const result = await httpsCallable<{ url: string }, { ingredients: string[]; remaining: number }>(functions, 'analyzeFlyerUrl')({ url });
       setScansLeft(result.data.remaining);
-      setExtractedOffers(result.data.ingredients);
-      await saveOffers(result.data.ingredients);
-      setAskRebuild(result.data.ingredients.length > 0);
+      showCandidates(result.data.ingredients);
     } catch (err: any) {
       console.error('Flyer link error:', err);
       setError(err?.message?.replace(/^.*?: /, '') || 'Non è stato possibile leggere il link. Prova con uno screenshot.');
@@ -110,18 +107,39 @@ export default function FlyerAnalysis({ userId, profile, onNavigateToPlanner }: 
     }
   };
 
-  const rebuildMenu = () => {
-    try {
-      sessionStorage.setItem('auto_regenerate_plan', '1');
-    } catch {
-      /* storage non disponibile */
+  const showCandidates = (ingredients: string[]) => {
+    setCandidates([...new Set(ingredients)]);
+    setPicked(new Set());
+  };
+
+  const togglePick = (name: string) =>
+    setPicked((current) => {
+      const next = new Set(current);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+
+  // Si salva solo ciò che l'utente ha scelto; il menù si rifà solo se lo chiede
+  const confirmPicks = async (rebuild: boolean) => {
+    const chosen = candidates.filter((name) => picked.has(name));
+    setExtractedOffers(chosen);
+    await saveOffers(chosen);
+    setCandidates([]);
+    setPicked(new Set());
+    if (rebuild && chosen.length > 0) {
+      try {
+        sessionStorage.setItem('auto_regenerate_plan', '1');
+      } catch {
+        /* storage non disponibile */
+      }
+      onNavigateToPlanner?.();
     }
-    setAskRebuild(false);
-    onNavigateToPlanner?.();
   };
 
   const clearOffers = () => {
-    setAskRebuild(false);
+    setCandidates([]);
+    setPicked(new Set());
     setExtractedOffers([]);
     saveOffers([]);
     setFile(null);
@@ -279,24 +297,53 @@ export default function FlyerAnalysis({ userId, profile, onNavigateToPlanner }: 
             )}
           </div>
           
-          {askRebuild && onNavigateToPlanner && (
-            <div role="group" aria-label="Rifare il menù con le offerte" className="mt-6 bg-indigo-50 border border-indigo-100 rounded-2xl p-4 space-y-3">
-              <p className="text-sm font-bold text-indigo-950">Vuoi rifare il menù della settimana con queste offerte?</p>
-              <p className="text-xs text-indigo-900 leading-relaxed">
-                Il nuovo menù userà gli ingredienti in offerta e terrà conto di gusti, diete e allergie di tutte le persone. Il menù di adesso verrà sostituito.
-              </p>
-              <div className="flex gap-2">
-                <button onClick={rebuildMenu} className="flex-1 h-11 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold">
-                  Sì, rifai il menù
+          {candidates.length > 0 && (
+            <div role="group" aria-label="Cosa compri davvero" className="mb-6 bg-indigo-50 border border-indigo-100 rounded-2xl p-4 space-y-3">
+              <p className="text-sm font-bold text-indigo-950">Ho trovato {candidates.length} ingredienti in offerta. Quali compri davvero?</p>
+              <p className="text-xs text-indigo-900 leading-relaxed">Tocca solo quelli che vuoi comprare: il menù userà soltanto questi. Gli altri vengono ignorati.</p>
+              <div className="flex flex-wrap gap-2">
+                {candidates.map((name) => (
+                  <button
+                    key={name}
+                    onClick={() => togglePick(name)}
+                    aria-pressed={picked.has(name)}
+                    className={`px-3.5 h-10 rounded-full border text-sm font-semibold ${picked.has(name) ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-indigo-200 text-indigo-900'}`}
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-3 text-xs font-semibold text-indigo-800">
+                <button onClick={() => setPicked(new Set(candidates))} className="underline underline-offset-4">Scegli tutti</button>
+                <button onClick={() => setPicked(new Set())} className="underline underline-offset-4">Nessuno</button>
+                <span className="ml-auto">{picked.size} scelti</span>
+              </div>
+              <div className="flex flex-col gap-2">
+                {onNavigateToPlanner && (
+                  <button
+                    onClick={() => confirmPicks(true)}
+                    disabled={picked.size === 0}
+                    className="h-11 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold disabled:opacity-50"
+                  >
+                    Usali e rifai il menù
+                  </button>
+                )}
+                <button
+                  onClick={() => confirmPicks(false)}
+                  disabled={picked.size === 0}
+                  className="h-11 rounded-xl border border-indigo-200 bg-white text-indigo-900 text-sm font-semibold disabled:opacity-50"
+                >
+                  Usali senza rifare il menù
                 </button>
-                <button onClick={() => setAskRebuild(false)} className="h-11 px-4 rounded-xl border border-indigo-200 bg-white text-indigo-900 text-sm font-semibold">
-                  No, grazie
+                <button onClick={() => { setCandidates([]); setPicked(new Set()); }} className="h-10 text-sm font-semibold text-slate-500 underline underline-offset-4">
+                  Non uso nulla
                 </button>
               </div>
+              <p className="text-xs text-indigo-900/80">Rifacendo il menù, quello di adesso viene sostituito; gusti, diete e allergie di tutti restano rispettati.</p>
             </div>
           )}
 
-          {extractedOffers.length > 0 && !askRebuild && (
+          {extractedOffers.length > 0 && candidates.length === 0 && (
             <div className="mt-6 pt-6 border-t border-slate-200 border-dashed">
               <div className="flex items-start gap-3 bg-emerald-50 border border-emerald-100 p-4 rounded-2xl">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 mt-0.5" />

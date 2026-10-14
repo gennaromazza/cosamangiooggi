@@ -1525,17 +1525,20 @@ test('volantino da link: la schermata chiede il link e spiega cosa fare se non �
   assert.ok(readFileSync('functions/index.js', 'utf8').includes('exports.analyzeFlyerUrl = onCall'));
 });
 
-test('volantino: dopo la lettura si chiede se rifare il menù, e la scelta è dell\'utente', () => {
+test('volantino: si sceglie cosa si compra davvero, e il menù si rifà solo su richiesta', () => {
   const screen = readFileSync('src/components/FlyerAnalysis.tsx', 'utf8');
-  for (const needle of ['Vuoi rifare il menù della settimana con queste offerte?', 'Sì, rifai il menù', 'No, grazie', 'Il menù di adesso verrà sostituito', "sessionStorage.setItem('auto_regenerate_plan', '1')", 'setAskRebuild(ingredients.length > 0)', 'setAskRebuild(result.data.ingredients.length > 0)']) {
+  for (const needle of ['Quali compri davvero?', 'Nulla è scelto in partenza', 'new Set()', 'Usali e rifai il menù', 'Usali senza rifare il menù', 'Non uso nulla', 'Scegli tutti', 'disabled={picked.size === 0}', 'candidates.filter((name) => picked.has(name))', 'Gli altri vengono ignorati']) {
     assert.ok(screen.includes(needle), `FlyerAnalysis: manca ${needle}`);
   }
-  // il menù non si rifà da solo: solo il pulsante "Sì" imposta la richiesta
+  // dopo la lettura non si salva nulla: si salva solo la scelta
+  const afterRead = screen.slice(screen.indexOf('const analyzeFlyer'), screen.indexOf('const showCandidates'));
+  assert.ok(!afterRead.includes('saveOffers('), 'la lettura da sola non salva le offerte');
+  assert.ok(screen.includes('showCandidates(ingredients)') && screen.includes('showCandidates(result.data.ingredients)'));
+  // il menù si rifà solo con il pulsante, e solo se c'è almeno un ingrediente scelto
   assert.equal((screen.match(/auto_regenerate_plan/g) || []).length, 1);
-  assert.ok(screen.indexOf("sessionStorage.setItem('auto_regenerate_plan'") > screen.indexOf('const rebuildMenu'));
+  assert.ok(screen.includes('if (rebuild && chosen.length > 0)'));
   const planner = readFileSync('src/components/MealPlanner.tsx', 'utf8');
   assert.ok(planner.includes("sessionStorage.getItem('auto_regenerate_plan') === '1'") && planner.includes("sessionStorage.removeItem('auto_regenerate_plan')"), 'la richiesta si usa una volta sola');
   assert.ok(readFileSync('src/App.tsx', 'utf8').includes("onNavigateToPlanner={() => setActiveTab('planner')}"));
-  // le offerte contano nella scelta dei piatti, insieme a gusti e allergie
   assert.ok(planner.includes('profile.currentOffers') && planner.includes('hardExclusions'));
 });
