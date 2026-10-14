@@ -209,6 +209,10 @@ jobs:
           CODE=$(curl -s -o "$RUNNER_TEMP/out.json" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"data":{"url":"https://example.com/v.pdf"}}' "$BASE/analyzeFlyerUrl")
           echo "analyzeFlyerUrl senza accesso: HTTP $CODE"
           [ "$CODE" = "401" ] || { echo "::error::analyzeFlyerUrl doveva rispondere 401 senza accesso"; exit 1; }
+          # Scontrini: senza accesso la funzione deve rifiutare (e quindi esistere)
+          CODE=$(curl -s -o "$RUNNER_TEMP/out.json" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"data":{"data":"x","mimeType":"image/jpeg"}}' "$BASE/analyzeReceipt")
+          echo "analyzeReceipt senza accesso: HTTP $CODE"
+          [ "$CODE" = "401" ] || { echo "::error::analyzeReceipt doveva rispondere 401 senza accesso"; exit 1; }
           echo "Funzioni degli inviti e del menù condiviso raggiungibili e protette"
 
       # Se un valore di Stripe era sbagliato, sito e regole sono stati pubblicati ma le funzioni no: il deploy resta rosso finché non si corregge

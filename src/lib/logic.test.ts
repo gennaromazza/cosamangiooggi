@@ -43,7 +43,7 @@ import { addToSlot, buildManualPlan, countManualMeals, emptyManualDays, manualDa
 import { compareBuilds, isNewer } from './updateCheck';
 import { fillPlaceholders } from '../../scripts/landing';
 import { PAGES, pageText, renderPage } from '../../scripts/landing-pages';
-import { dishSuggestionsLeft, limitsFor, normalizePlan, planName, PRICES, yearlySavingPercent, PLAN_LIMITS } from './plans';
+import { RECEIPT_SCANS_PER_MONTH, dishSuggestionsLeft, limitsFor, normalizePlan, planName, PRICES, yearlySavingPercent, PLAN_LIMITS } from './plans';
 
 const item = (id: string, name: string, quantity: number, unit: string): PantryItem =>
   ({ id, name, quantity, unit, category: 'Altro' } as PantryItem);
@@ -1605,4 +1605,63 @@ test('offerte per persona: dice per chi va bene, chi non può e cosa il menù us
 test('volantino: ogni offerta dice per chi della famiglia va bene', () => {
   const screen = readFileSync('src/components/FlyerAnalysis.tsx', 'utf8');
   for (const needle of ['offerFit(', 'rankOffers(', 'Solo quelli per tutti', 'fit.summary', 'disabled={fit.blocked}']) assert.ok(screen.includes(needle), `FlyerAnalysis: manca ${needle}`);
+});
+
+test('scontrini: resoconto del mese, confronto, negozi, doppioni e importi scritti a mano', async () => {
+  const { monthReport, monthsTrend, findDuplicate, parseEuro, receiptProblem, shiftMonth, monthLabel, formatEuro } = await import('./receipts');
+  const r = (id: string, store: string, date: string, total: number) => ({ id, store, date, total, createdAt: Number(id.slice(1)) });
+  const list = [
+    r('r1', 'Esselunga', '2026-10-02', 54.3),
+    r('r2', 'esselunga', '2026-10-09', 40.2),
+    r('r3', 'Lidl', '2026-10-12', 25.5),
+    r('r4', 'Coop', '2026-09-20', 100),
+    r('r5', 'Coop', '2026-08-31', 10),
+  ];
+  const oct = monthReport(list, '2026-10');
+  assert.equal(oct.total, 120);
+  assert.equal(oct.count, 3);
+  assert.equal(oct.average, 40);
+  assert.deepEqual(oct.byStore.map((s) => [s.store, s.total, s.count]), [['Esselunga', 94.5, 2], ['Lidl', 25.5, 1]], 'lo stesso negozio scritto in modi diversi conta una volta');
+  assert.equal(oct.previousTotal, 100);
+  assert.equal(oct.changePercent, 20);
+  assert.deepEqual(oct.receipts.map((x) => x.id), ['r3', 'r2', 'r1'], 'dal più recente');
+  const empty = monthReport(list, '2026-11');
+  assert.equal(empty.total, 0);
+  assert.equal(empty.changePercent, null);
+  assert.equal(monthReport(list, '2026-08').previousTotal, null);
+  assert.deepEqual(monthsTrend(list, '2026-10', 3).map((t) => t.total), [10, 100, 120]);
+
+  assert.equal(shiftMonth('2026-01', -1), '2025-12');
+  assert.equal(shiftMonth('2026-12', 1), '2027-01');
+  assert.equal(monthLabel('2026-10'), 'ottobre 2026');
+  assert.equal(formatEuro(1054.3), '1.054,30 €');
+
+  assert.equal(findDuplicate(list, { store: 'ESSELUNGA ', date: '2026-10-02', total: 54.3 })?.id, 'r1');
+  assert.equal(findDuplicate(list, { store: 'Esselunga', date: '2026-10-03', total: 54.3 }), undefined);
+
+  assert.equal(parseEuro('54,30'), 54.3);
+  assert.equal(parseEuro('54.3'), 54.3);
+  assert.equal(parseEuro('1.054,30 €'), 1054.3);
+  assert.equal(parseEuro('0'), null);
+  assert.equal(parseEuro('dieci'), null);
+  assert.equal(parseEuro('9999'), null);
+  const now = new Date(2026, 9, 14);
+  assert.equal(receiptProblem({ store: 'Coop', date: '2026-10-14', total: '12' }, now), null);
+  assert.match(receiptProblem({ store: 'Coop', date: '2026-10-15', total: '12' }, now)!, /futuro/);
+  assert.match(receiptProblem({ store: 'Coop', date: '2026-10-14', total: '' }, now)!, /totale/);
+});
+
+test('scontrini: la schermata c\'è per tutti, la foto si legge sul server e non si conserva', () => {
+  const screen = readFileSync('src/components/Receipts.tsx', 'utf8');
+  for (const needle of ['analyzeReceipt', 'Fotografa lo scontrino', 'capture="environment"', 'Aggiungi una spesa a mano', 'findDuplicate(', 'non viene conservata', 'Correggi', 'monthReport(']) assert.ok(screen.includes(needle), `Receipts: manca ${needle}`);
+  const app = readFileSync('src/App.tsx', 'utf8');
+  assert.ok(app.includes("{activeTab === 'receipts' && <Receipts userId={user.uid} />}"), 'nessun limite di piano sulla schermata');
+  assert.ok(app.includes("onNavigateToReceipts={() => setActiveTab('receipts')}"));
+  const server = readFileSync('functions/index.js', 'utf8');
+  assert.ok(server.includes('exports.analyzeReceipt = onCall'));
+  const fn = server.slice(server.indexOf('exports.analyzeReceipt'));
+  assert.ok(!fn.includes("plan !== 'pro'") && !fn.includes('.collection(\'receipts\')'), 'per tutti i piani, e il server non salva la foto');
+  assert.ok(server.includes(`RECEIPT_SCANS_PER_MONTH = ${RECEIPT_SCANS_PER_MONTH};`), 'tetto allineato tra app e server');
+  const rules = readFileSync('firestore.rules', 'utf8');
+  assert.ok(rules.includes('match /receipts/{receiptId}') && rules.includes("'receiptUsage'"));
 });

@@ -7,6 +7,7 @@ const Stripe = require('stripe');
 const invites = require('./invites');
 const familyShare = require('./familyShare');
 const flyerUrl = require('./flyerUrl');
+const receipts = require('./receipts');
 const { isStripeSecretKey, describeStripeKey } = require('./config-checks');
 const { GoogleGenAI, Type } = require('@google/genai');
 
@@ -17,6 +18,8 @@ const FLYER_SCANS_PER_MONTH = 30;
 // Tenere allineato a src/lib/plans.ts: 3 di prova per tutti, 50 con Chef IA
 const DISH_SUGGESTIONS_FREE = 3;
 const DISH_SUGGESTIONS_PRO = 50;
+// Scontrini: per tutti i piani, con un tetto che protegge i costi di Gemini (tenere allineato a src/lib/plans.ts)
+const RECEIPT_SCANS_PER_MONTH = 60;
 const FIRESTORE_DB_ID = 'ai-studio-93a2a041-9b02-4ff7-b496-5f2ada58f953';
 
 const STRIPE_SECRET_KEY = defineSecret('STRIPE_SECRET_KEY');
@@ -766,5 +769,76 @@ exports.analyzeFlyerUrl = onCall(
       throw new HttpsError('unavailable', 'Non riesco ad aprire il link.');
     }
     return scanFlyer(uid, file.data, file.mimeType);
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Scontrini della spesa: per tutti i piani. Il server legge la foto e restituisce negozio, data e totale;
+// la foto non si conserva, l'app salva solo questi tre dati.
+// ---------------------------------------------------------------------------
+
+async function reserveReceiptScan(uid) {
+  const month = new Date().toISOString().slice(0, 7);
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(userRef(uid));
+    const usage = snap.exists && snap.data().receiptUsage;
+    const used = usage && usage.month === month ? usage.count || 0 : 0;
+    if (used >= RECEIPT_SCANS_PER_MONTH) {
+      throw new HttpsError('resource-exhausted', `Hai letto ${RECEIPT_SCANS_PER_MONTH} scontrini questo mese: per gli altri aggiungi la spesa a mano.`);
+    }
+    tx.set(userRef(uid), { receiptUsage: { month, count: used + 1 } }, { merge: true });
+    return RECEIPT_SCANS_PER_MONTH - used - 1;
+  });
+}
+
+async function refundReceiptScan(uid) {
+  const month = new Date().toISOString().slice(0, 7);
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(userRef(uid));
+    const usage = snap.exists && snap.data().receiptUsage;
+    if (usage && usage.month === month && usage.count > 0) {
+      tx.set(userRef(uid), { receiptUsage: { month, count: usage.count - 1 } }, { merge: true });
+    }
+  });
+}
+
+exports.analyzeReceipt = onCall(
+  { region: REGION, secrets: [GEMINI_API_KEY], memory: '512MiB', timeoutSeconds: 60 },
+  async (request) => {
+    const uid = requireAuth(request);
+    const { data, mimeType } = request.data || {};
+    if (typeof data !== 'string' || data.length > 8_000_000 || !receipts.RECEIPT_MIME_TYPES.includes(mimeType)) {
+      throw new HttpsError('invalid-argument', 'Foto non valida: usa una foto (JPG o PNG) o un PDF.');
+    }
+    const remaining = await reserveReceiptScan(uid);
+    try {
+      const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY.value() });
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: { parts: [{ inlineData: { mimeType, data } }, { text: receipts.RECEIPT_PROMPT }] },
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              isReceipt: { type: Type.BOOLEAN },
+              store: { type: Type.STRING },
+              date: { type: Type.STRING },
+              total: { type: Type.NUMBER },
+            },
+            required: ['isReceipt', 'store', 'date', 'total'],
+          },
+        },
+      });
+      if (!response.text) throw new HttpsError('internal', 'Nessuna risposta dal modello.');
+      return { receipt: receipts.cleanReceipt(JSON.parse(response.text)), remaining };
+    } catch (err) {
+      // Lettura non riuscita: non conta sul tetto del mese
+      await refundReceiptScan(uid).catch(() => {});
+      if (err instanceof receipts.ReceiptError) throw new HttpsError('failed-precondition', err.message);
+      if (err instanceof HttpsError) throw err;
+      console.error('Lettura scontrino non riuscita', err);
+      throw new HttpsError('internal', 'Non sono riuscito a leggere lo scontrino. Riprova o aggiungi la spesa a mano.');
+    }
   }
 );

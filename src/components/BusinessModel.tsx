@@ -560,6 +560,7 @@ export default function BusinessModel({
                   'Diete e allergie rispettate',
                   `Dispensa fino a ${PLAN_LIMITS.free.maxPantryItems} prodotti`,
                   'Lista della spesa a schermo',
+                  'Scontrini e spese del mese',
                 ].map((t) => (
                   <li key={t} className="flex items-start gap-2.5 text-sm text-slate-600">
                     <Check className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />

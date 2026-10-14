@@ -5,7 +5,7 @@ import { doc, getDoc, collection, getDocs, query, onSnapshot, addDoc, deleteDoc,
 import { handleFirestoreError, OperationType } from '../lib/firebaseUtils';
 import { WeeklyPlan, Recipe, PantryItem, Ingredient, UserProfile } from '../types';
 import { INITIAL_RECIPES } from '../data/recipes';
-import { ShoppingCart, Download, CheckCircle2, Circle, CheckSquare, Plus, Trash2, Sparkles, Search, X, LayoutGrid, ListTodo, ChevronLeft, ChevronRight, Info, Calendar, PenLine, MessageCircle, AlertTriangle, Lock, Tag, Clock } from 'lucide-react';
+import { ShoppingCart, Download, CheckCircle2, Circle, CheckSquare, Plus, Trash2, Sparkles, Search, X, LayoutGrid, ListTodo, ChevronLeft, ChevronRight, Info, Calendar, PenLine, MessageCircle, AlertTriangle, Lock, Tag, Clock, Receipt } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getRawIngredientNames, scaleIngredientAmount } from '../lib/utils';
 import { checkIngredientMatch, isStaple, calculateMissingFromPantry, findPantryDuplicate } from '../lib/pantrySync';
@@ -31,6 +31,8 @@ interface Props {
   userId: string;
   profile?: UserProfile | null;
   onNavigateToBusiness?: () => void;
+  /** Dopo la spesa: si carica lo scontrino */
+  onNavigateToReceipts?: () => void;
 }
 
 interface ShoppingItem {
@@ -40,7 +42,7 @@ interface ShoppingItem {
   needed: boolean;
 }
 
-export default function ShoppingList({ userId, profile, onNavigateToBusiness }: Props) {
+export default function ShoppingList({ userId, profile, onNavigateToBusiness, onNavigateToReceipts }: Props) {
   const [shoppingList, setShoppingList] = useState<ShoppingItem[]>([]);
   const [voiceList, setVoiceList] = useState<any[]>([]);
   const [shoppingSearch, setShoppingSearch] = useState('');
@@ -514,6 +516,11 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
         <div>
           <h2 className="text-3xl font-semibold text-slate-900">La spesa</h2>
           <p className="text-slate-600 mt-1">Quello che ti serve comprare per il menù.</p>
+          {onNavigateToReceipts && (
+            <button onClick={onNavigateToReceipts} className="mt-1 text-sm font-semibold text-indigo-700 underline underline-offset-4 flex items-center gap-1">
+              <Receipt className="w-4 h-4" /> Fatta la spesa? Fotografa lo scontrino
+            </button>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
           {totalLength > 0 && (

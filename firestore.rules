@@ -25,7 +25,7 @@ service cloud.firestore {
     function protectedFields() {
       return ['plan', 'isAdmin', 'isSuspended', 'subscriptionStatus', 'autoRenew',
               'paymentHistory', 'stripeCustomerId', 'stripeSubscriptionId',
-              'aiInteractionsThisMonth', 'aiUsage', 'dishUsage', 'hadSubscription', 'tempOTP', 'tempOTPExpires', 'tempOTPGeneratedAt',
+              'aiInteractionsThisMonth', 'aiUsage', 'dishUsage', 'receiptUsage', 'hadSubscription', 'tempOTP', 'tempOTPExpires', 'tempOTPGeneratedAt',
               'tempPassword', 'tempPasswordGeneratedAt',
               // Collegamento a una famiglia: lo scrive solo il server (funzioni joinFamily / leaveFamily)
               'familyId'];
@@ -40,6 +40,17 @@ service cloud.firestore {
 
     function isValidId(id) {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Scontrino della spesa: solo negozio, data, totale (in euro) e da dove viene. La foto non si salva.
+    function isValidReceipt(d) {
+      return d.keys().hasAll(['store', 'date', 'total', 'createdAt'])
+        && d.keys().hasOnly(['store', 'date', 'total', 'createdAt', 'source'])
+        && d.store is string && d.store.size() >= 1 && d.store.size() <= 60
+        && d.date is string && d.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && d.total is number && d.total > 0 && d.total <= 5000
+        && d.createdAt is int
+        && (!('source' in d) || d.source in ['photo', 'manual']);
     }
 
     function isValidAuditLog(data) {
@@ -109,6 +120,12 @@ service cloud.firestore {
 
       match /shoppingList/{itemId} {
         allow read, write: if isOwner(userId) || isAdmin();
+      }
+
+      // Scontrini: li vede e li modifica solo chi li ha caricati
+      match /receipts/{receiptId} {
+        allow read, delete: if isOwner(userId) || isAdmin();
+        allow create, update: if (isOwner(userId) || isAdmin()) && isValidReceipt(request.resource.data);
       }
     }
 

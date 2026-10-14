@@ -18,6 +18,16 @@ export interface NewsEntry {
 
 export const CHANGELOG: NewsEntry[] = [
   {
+    id: '2026-10-14-scontrini',
+    date: '14 ottobre 2026',
+    title: 'Scontrini e spese del mese',
+    items: [
+      { emoji: '🧾', title: 'Fotografa lo scontrino', text: 'Nel menù trovi «Scontrini»: fai una foto allo scontrino e leggiamo noi negozio, data e totale. Se qualcosa non torna lo correggi con un tocco. È gratis, per tutti.' },
+      { emoji: '📊', title: 'Quanto spendi ogni mese', text: 'Vedi il totale del mese, quante volte hai fatto la spesa, la media, in quali negozi spendi di più e l\'andamento degli ultimi sei mesi.' },
+      { emoji: '🔒', title: 'La foto non resta da nessuna parte', text: 'Serve solo per leggere lo scontrino: salviamo solo negozio, data e totale, e li vedi solo tu.' },
+    ],
+  },
+  {
     id: '2026-10-14-volantino-link',
     date: '14 ottobre 2026',
     title: 'Volantino da un link',

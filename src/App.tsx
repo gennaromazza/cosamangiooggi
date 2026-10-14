@@ -23,7 +23,8 @@ import {
   Sun,
   MoreHorizontal,
   Check,
-  UserCircle
+  UserCircle,
+  Receipt
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Capacitor } from '@capacitor/core';
@@ -37,6 +38,7 @@ import ShoppingList from './components/ShoppingList';
 import FamilySettings from './components/FamilySettings';
 import RecipeList from './components/RecipeList';
 import FlyerAnalysis from './components/FlyerAnalysis';
+import Receipts from './components/Receipts';
 import { FoodPyramid } from './components/FoodPyramid';
 import VoiceAssistant from './components/VoiceAssistant';
 import BusinessModel from './components/BusinessModel';
@@ -453,6 +455,7 @@ export default function App() {
       { id: 'pantry', label: 'Dispensa', icon: Package },
       { id: 'recipes', label: 'Ricette', icon: ChefHat },
       { id: 'family', label: 'Famiglia', icon: Users },
+      { id: 'receipts', label: 'Scontrini', icon: Receipt },
       { id: 'offers', label: 'Offerte', icon: Sparkles },
       { id: 'vacation', label: 'Vacanze', icon: Sun },
       { id: 'guide', label: 'Guida', icon: Info },
@@ -832,8 +835,10 @@ export default function App() {
                 userId={user.uid} 
                 profile={profile} 
                 onNavigateToBusiness={() => setActiveTab('business')} 
+                onNavigateToReceipts={() => setActiveTab('receipts')}
               />
             )}
+            {activeTab === 'receipts' && <Receipts userId={user.uid} />}
             {activeTab === 'family' && (
               <FamilySettings 
                 userId={user.uid} 
