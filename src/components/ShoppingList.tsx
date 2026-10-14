@@ -1,16 +1,18 @@
 import { getSupermarketDepartment } from '../lib/departments';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { db } from '../lib/firebase';
 import { doc, getDoc, collection, getDocs, query, onSnapshot, addDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firebaseUtils';
 import { WeeklyPlan, Recipe, PantryItem, Ingredient, UserProfile } from '../types';
 import { INITIAL_RECIPES } from '../data/recipes';
-import { ShoppingCart, Download, CheckCircle2, Circle, CheckSquare, Plus, Trash2, Sparkles, Search, X, LayoutGrid, ListTodo, ChevronLeft, ChevronRight, Info, Calendar, PenLine, MessageCircle, AlertTriangle, Lock } from 'lucide-react';
+import { ShoppingCart, Download, CheckCircle2, Circle, CheckSquare, Plus, Trash2, Sparkles, Search, X, LayoutGrid, ListTodo, ChevronLeft, ChevronRight, Info, Calendar, PenLine, MessageCircle, AlertTriangle, Lock, Tag, Clock } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getRawIngredientNames, scaleIngredientAmount } from '../lib/utils';
 import { checkIngredientMatch, isStaple, calculateMissingFromPantry, findPantryDuplicate } from '../lib/pantrySync';
 import { limitsFor } from '../lib/plans';
 import { planMeals } from '../lib/memberAlternatives';
+import { allLabels, compareShopping, emptyTags, firstUseOffsets, groupByLabel, labelsOf, offsetFor, toggleLabel, URGENT_LABEL, WHEN_GROUPS, whenGroup, whenText, cleanLabel, type ShoppingTags, type UseOffset } from '../lib/shoppingOrder';
+import { dayNameOf } from '../lib/sharedMenu';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -42,7 +44,37 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
   const [shoppingList, setShoppingList] = useState<ShoppingItem[]>([]);
   const [voiceList, setVoiceList] = useState<any[]>([]);
   const [shoppingSearch, setShoppingSearch] = useState('');
-  const [viewMode, setViewMode] = useState<'all' | 'departments'>('all');
+  type ViewMode = 'when' | 'labels' | 'departments' | 'all';
+  const [viewMode, setViewModeState] = useState<ViewMode>(() => {
+    try {
+      const saved = localStorage.getItem('shopping_view');
+      return saved === 'labels' || saved === 'departments' || saved === 'all' || saved === 'when' ? saved : 'when';
+    } catch {
+      return 'when';
+    }
+  });
+  const setViewMode = (mode: ViewMode) => {
+    setViewModeState(mode);
+    try {
+      localStorage.setItem('shopping_view', mode);
+    } catch {
+      /* storage non disponibile */
+    }
+  };
+  // Quando serve ogni ingrediente e le etichette scelte da chi usa l'app
+  const [uses, setUses] = useState<UseOffset[]>([]);
+  const [tags, setTags] = useState<ShoppingTags>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(`shoppingTags_${userId}`) || 'null') as ShoppingTags | null;
+      return saved && saved.labels ? { labels: saved.labels, custom: saved.custom || [] } : emptyTags();
+    } catch {
+      return emptyTags();
+    }
+  });
+  // Il calcolo di quando serve ogni prodotto è lungo: si rifà solo se cambiano la lista o il menù, non a ogni tasto nella ricerca
+  const offsetByName = useMemo(() => new Map(shoppingList.map(item => [item.name, offsetFor(item.name, uses)] as [string, number | undefined])), [shoppingList, uses]);
+  const [labelling, setLabelling] = useState<string | null>(null);
+  const [newLabel, setNewLabel] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(15);
   const [newItem, setNewItem] = useState({ name: '', amount: 1, unit: 'pz' });
@@ -50,6 +82,30 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
   const [pantryCount, setPantryCount] = useState<number>(0);
   const [showLimitWarningModal, setShowLimitWarningModal] = useState<boolean>(false);
   const [showPdfGate, setShowPdfGate] = useState<boolean>(false);
+
+  useEffect(() => {
+    const fromProfile = profile?.shoppingTags;
+    if (fromProfile && !(userId === 'demo-family-user' || userId.startsWith('local-'))) {
+      setTags({ labels: fromProfile.labels || {}, custom: fromProfile.custom || [] });
+    }
+  }, [profile?.shoppingTags, userId]);
+
+  const saveTags = async (next: ShoppingTags) => {
+    setTags(next);
+    if (userId === 'demo-family-user' || userId.startsWith('local-')) {
+      try {
+        localStorage.setItem(`shoppingTags_${userId}`, JSON.stringify(next));
+      } catch {
+        /* storage non disponibile */
+      }
+      return;
+    }
+    try {
+      await updateDoc(doc(db, `users/${userId}`), { shoppingTags: next });
+    } catch (e) {
+      console.error('Etichette non salvate:', e);
+    }
+  };
 
   useEffect(() => {
     setCurrentPage(1);
@@ -79,9 +135,11 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
 
         if (!activePlan) {
           setShoppingList([]);
+          setUses([]);
           setLoading(false);
           return;
         }
+        setUses(firstUseOffsets({ plan: activePlan, recipes: allRecipes, servings: targetServings, memberIds: localMemberIds, today: dayNameOf(new Date()) }));
 
         const rawRequirements: { name: string; amount: number; unit: string }[] = [];
         // Chi ha un'alternativa mangia quella: si compra per le porzioni reali di ogni piatto
@@ -141,9 +199,11 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
 
           if (!activePlan) {
             setShoppingList([]);
+            setUses([]);
             setLoading(false);
             return;
           }
+          setUses(firstUseOffsets({ plan: activePlan, recipes: allRecipes, servings: targetServings, memberIds, today: dayNameOf(new Date()) }));
 
           // 5. Extract all ingredients from the plan
           const rawRequirements: { name: string; amount: number; unit: string }[] = [];
@@ -354,15 +414,86 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
       ...item,
       id: undefined as string | undefined,
       source: 'menu' as const,
-      department: getSupermarketDepartment(item.name)
+      department: getSupermarketDepartment(item.name),
+      offset: offsetByName.get(item.name),
+      labels: labelsOf(tags, item.name)
     })),
     ...filteredVoiceList.map(item => ({
       ...item,
       id: item.id as string,
       source: 'manual' as const,
-      department: getSupermarketDepartment(item.name)
+      department: getSupermarketDepartment(item.name),
+      offset: undefined as number | undefined,
+      labels: labelsOf(tags, item.name)
     }))
-  ];
+  ].sort(compareShopping);
+  type ListItem = (typeof unifiedList)[number];
+
+  // Per giorno: prima ciò che serve prima
+  const groupedByWhen = WHEN_GROUPS.map(group => ({
+    ...group,
+    items: unifiedList.filter(item => whenGroup(item.offset) === group.id)
+  })).filter(group => group.items.length > 0);
+
+  // Per etichetta
+  const groupedByLabel = groupByLabel(unifiedList, allLabels(tags));
+
+  const renderRow = (item: ListItem, key: string) => {
+    const isManual = item.source === 'manual';
+    const deptInfo = DEPARTMENTS.find(d => d.id === item.department);
+    const urgent = item.labels.includes(URGENT_LABEL);
+    return (
+      <div key={key} className={`px-4 py-3 flex items-center justify-between gap-2 hover:bg-slate-50/50 group transition-all duration-150 ${urgent ? 'bg-amber-50/50' : ''}`}>
+        <div className="flex items-center gap-2 min-w-0">
+          <button
+            onClick={() => handlePurchaseItem(item.name, isManual ? item.amount : Math.ceil(item.amount), item.unit, item.id)}
+            className="w-11 h-11 -ml-2 shrink-0 flex items-center justify-center text-slate-300 hover:text-indigo-600 transition-colors cursor-pointer"
+            title="Segna come acquistato e sposta in dispensa"
+            aria-label={`Ho comprato ${item.name}`}
+          >
+            <Circle className="w-6 h-6 group-hover:scale-110 transition-transform" />
+          </button>
+          <div className="min-w-0">
+            <span className="block font-semibold text-slate-900 capitalize">{item.name}</span>
+            <span className="block text-xs text-slate-500">
+              {[isManual ? 'Aggiunto da te' : deptInfo ? deptInfo.name.split(' ')[0].replace(/[,;]$/, '') : '', whenText(item.offset)].filter(Boolean).join(' · ')}
+            </span>
+            {item.labels.length > 0 && (
+              <span className="flex flex-wrap gap-1 mt-1">
+                {item.labels.map(label => (
+                  <span key={label} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${label === URGENT_LABEL ? 'bg-amber-100 border-amber-300 text-amber-900' : 'bg-indigo-50 border-indigo-100 text-indigo-800'}`}>{label}</span>
+                ))}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className="text-xs font-semibold bg-slate-100 border border-slate-200 text-slate-700 px-2.5 py-1 rounded-lg">
+            {isManual ? item.amount : Math.ceil(item.amount)} {item.unit}
+          </span>
+          <button
+            onClick={() => { setLabelling(item.name); setNewLabel(''); }}
+            aria-label={`Etichette per ${item.name}`}
+            title="Etichette: urgente, surgelato…"
+            className={`w-10 h-10 rounded-full flex items-center justify-center ${item.labels.length > 0 ? 'text-indigo-600' : 'text-slate-300 hover:text-indigo-600'}`}
+          >
+            <Tag className="w-4 h-4" />
+          </button>
+          {isManual && item.id && (
+            <button
+              onClick={() => deleteCustomItem(item.id!)}
+              className="text-slate-300 hover:text-red-500 w-9 h-10 flex items-center justify-center transition-colors cursor-pointer"
+              title="Elimina"
+              aria-label={`Elimina ${item.name}`}
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   // Pagination for the Unified View
   const totalItems = unifiedList.length;
@@ -429,29 +560,26 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
             )}
           </div>
 
-          <div className="flex bg-slate-100 p-1 rounded-xl w-fit">
-            <button
-              onClick={() => setViewMode('all')}
-              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                viewMode === 'all'
-                  ? 'bg-white text-indigo-900 shadow-xs'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              <ListTodo className="w-3.5 h-3.5" />
-              Lista Unica
-            </button>
-            <button
-              onClick={() => setViewMode('departments')}
-              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                viewMode === 'departments'
-                  ? 'bg-white text-indigo-900 shadow-xs'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              <LayoutGrid className="w-3.5 h-3.5" />
-              Per Reparto
-            </button>
+          <div className="flex bg-slate-100 p-1 rounded-xl w-full md:w-fit overflow-x-auto" role="tablist" aria-label="Come vuoi vedere la spesa">
+            {([
+              ['when', 'Per giorno', Clock],
+              ['labels', 'Etichette', Tag],
+              ['departments', 'Per reparto', LayoutGrid],
+              ['all', 'Lista unica', ListTodo],
+            ] as const).map(([id, label, Icon]) => (
+              <button
+                key={id}
+                role="tab"
+                aria-selected={viewMode === id}
+                onClick={() => setViewMode(id)}
+                className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                  viewMode === id ? 'bg-white text-indigo-900 shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                {label}
+              </button>
+            ))}
           </div>
         </div>
       )}
@@ -476,45 +604,7 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
               </div>
 
               <div className="divide-y divide-slate-100">
-                {paginatedList.map((item, index) => {
-                  const isManual = item.source === 'manual';
-                  const deptInfo = DEPARTMENTS.find(d => d.id === item.department);
-                  return (
-                    <div key={`${item.name}-${index}`} className="px-5 py-4 flex items-center justify-between hover:bg-slate-50/50 group transition-all duration-150">
-                      <div className="flex items-center gap-3">
-                        <button
-                          onClick={() => handlePurchaseItem(item.name, isManual ? item.amount : Math.ceil(item.amount), item.unit, item.id)}
-                          className="w-11 h-11 -ml-2 flex items-center justify-center text-slate-300 hover:text-indigo-600 transition-colors cursor-pointer"
-                          title="Segna come acquistato e sposta in dispensa"
-                          aria-label={`Ho comprato ${item.name}`}
-                        >
-                          <Circle className="w-6 h-6 group-hover:scale-110 transition-transform" />
-                        </button>
-                        <div className="min-w-0">
-                          <span className="block font-semibold text-slate-900 capitalize">{item.name}</span>
-                          <span className="block text-xs text-slate-500">
-                            {isManual ? 'Aggiunto da te' : deptInfo ? deptInfo.name.split(' ')[0].replace(/[,;]$/, '') : ''}
-                          </span>
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-center gap-3">
-                        <span className="text-xs font-semibold bg-slate-100 border border-slate-200 text-slate-700 px-2.5 py-1 rounded-lg">
-                          {isManual ? item.amount : Math.ceil(item.amount)} {item.unit}
-                        </span>
-                        {isManual && item.id && (
-                          <button
-                            onClick={() => deleteCustomItem(item.id!)}
-                            className="text-slate-300 hover:text-red-500 p-1.5 transition-colors cursor-pointer"
-                            title="Elimina"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+                {paginatedList.map((item, index) => renderRow(item, `${item.name}-${index}`))}
 
                 {totalItems === 0 && (
                   <div className="p-10 text-center text-slate-400 text-sm">
@@ -534,7 +624,7 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
                 </div>
               )}
             </div>
-          ) : (
+          ) : viewMode === 'departments' ? (
             /* ==================== VISTA PER REPARTO VIEW ==================== */
             <div className="space-y-4">
               {groupedByDept.map(group => (
@@ -550,43 +640,7 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
                   </div>
 
                   <div className="divide-y divide-slate-100">
-                    {group.items.map((item, index) => {
-                      const isManual = item.source === 'manual';
-                      return (
-                        <div key={`${item.name}-${index}`} className="px-5 py-3.5 flex items-center justify-between hover:bg-slate-50/20 group/item transition-colors">
-                          <div className="flex items-center gap-3">
-                            <button
-                              onClick={() => handlePurchaseItem(item.name, isManual ? item.amount : Math.ceil(item.amount), item.unit, item.id)}
-                              className="text-slate-300 hover:text-indigo-650 transition-colors cursor-pointer"
-                              title="Segna come acquistato e sposta in dispensa"
-                            >
-                              <Circle className="w-5 h-5 group-hover/item:scale-110 transition-transform" />
-                            </button>
-                            <div>
-                              <span className="font-bold text-slate-800 text-xs sm:text-sm capitalize">{item.name}</span>
-                              <div className="text-[9px] text-slate-400 mt-0.5">
-                                {isManual ? 'Aggiunto via Manuale/Voce' : 'Dal Menù di questa settimana'}
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-3">
-                            <span className="text-xs font-semibold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md">
-                              {isManual ? item.amount : Math.ceil(item.amount)} {item.unit}
-                            </span>
-                            {isManual && item.id && (
-                              <button
-                                onClick={() => deleteCustomItem(item.id!)}
-                                className="text-slate-305 hover:text-red-500 p-1 cursor-pointer transition-colors"
-                                title="Elimina"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
+                    {group.items.map((item, index) => renderRow(item, `${item.name}-${index}`))}
                   </div>
                 </div>
               ))}
@@ -595,6 +649,46 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
                 <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center text-slate-400 text-sm shadow-sm">
                   {shoppingSearch ? 'Nessun reparto corrisponde alla tua ricerca.' : 'Nessun prodotto categorizzabile in questo momento.'}
                 </div>
+              )}
+            </div>
+          ) : viewMode === 'when' ? (
+            /* ==================== PER GIORNO: PRIMA CIÒ CHE SERVE PRIMA ==================== */
+            <div className="space-y-4">
+              {groupedByWhen.map(group => (
+                <div key={group.id} className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
+                  <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+                    <h4 className="font-bold text-slate-800 text-sm">{group.title}</h4>
+                    <span className="text-[10px] bg-slate-200 text-slate-700 px-2.5 py-0.5 rounded-full font-bold font-mono">{group.items.length}</span>
+                  </div>
+                  <div className="divide-y divide-slate-100">{group.items.map((item, index) => renderRow(item, `${group.id}-${item.name}-${index}`))}</div>
+                </div>
+              ))}
+              {groupedByWhen.length === 0 && (
+                <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center text-slate-400 text-sm shadow-sm">
+                  {shoppingSearch ? 'Nessun prodotto corrisponde alla ricerca.' : 'La tua lista della spesa è vuota! Aggiungi articoli a mano o pianifica un menù.'}
+                </div>
+              )}
+              <p className="text-xs text-slate-500 px-1">Gli articoli urgenti stanno in cima a ogni gruppo. Tocca l'etichetta <Tag className="inline w-3 h-3" /> su un prodotto per segnarlo.</p>
+            </div>
+          ) : (
+            /* ==================== PER ETICHETTA ==================== */
+            <div className="space-y-4">
+              {groupedByLabel.map(group => (
+                <div key={group.label ?? 'senza'} className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
+                  <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+                    <h4 className="font-bold text-slate-800 text-sm">{group.label ?? 'Senza etichetta'}</h4>
+                    <span className="text-[10px] bg-slate-200 text-slate-700 px-2.5 py-0.5 rounded-full font-bold font-mono">{group.items.length}</span>
+                  </div>
+                  <div className="divide-y divide-slate-100">{group.items.map((item, index) => renderRow(item, `${group.label}-${item.name}-${index}`))}</div>
+                </div>
+              ))}
+              {groupedByLabel.length === 0 && (
+                <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center text-slate-400 text-sm shadow-sm">
+                  {shoppingSearch ? 'Nessun prodotto corrisponde alla ricerca.' : 'La tua lista della spesa è vuota! Aggiungi articoli a mano o pianifica un menù.'}
+                </div>
+              )}
+              {groupedByLabel.every(g => g.label === null) && groupedByLabel.length > 0 && (
+                <p className="text-xs text-slate-500 px-1">Nessun prodotto ha ancora un'etichetta: tocca <Tag className="inline w-3 h-3" /> su un prodotto per segnarlo come urgente, surgelato, fresco…</p>
               )}
             </div>
           )}
@@ -645,6 +739,54 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
 
         </div>
       </div>
+
+      {/* Etichette di un prodotto */}
+      {labelling && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/50 sm:p-4" role="dialog" aria-modal="true" aria-label={`Etichette per ${labelling}`} onClick={() => setLabelling(null)}>
+          <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl p-5 space-y-4 max-h-[85dvh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div>
+              <h4 className="text-lg font-semibold text-slate-900 capitalize">{labelling}</h4>
+              <p className="text-sm text-slate-500">Scegli le etichette: gli urgenti salgono in cima alla lista.</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {allLabels(tags).map(label => {
+                const on = labelsOf(tags, labelling).some(l => l.toLowerCase() === label.toLowerCase());
+                return (
+                  <button
+                    key={label}
+                    onClick={() => saveTags(toggleLabel(tags, labelling, label))}
+                    aria-pressed={on}
+                    className={`px-3.5 h-10 rounded-full border text-sm font-semibold ${on ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-200 text-slate-700'}`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const clean = cleanLabel(newLabel);
+                if (!clean) return;
+                if (!labelsOf(tags, labelling).some(l => l.toLowerCase() === clean.toLowerCase())) saveTags(toggleLabel(tags, labelling, clean));
+                setNewLabel('');
+              }}
+              className="flex gap-2"
+            >
+              <input
+                value={newLabel}
+                onChange={(e) => setNewLabel(e.target.value)}
+                maxLength={24}
+                placeholder="Nuova etichetta (es. Mercato)"
+                aria-label="Nuova etichetta"
+                className="flex-1 min-w-0 h-11 bg-slate-50 border border-slate-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+              />
+              <button type="submit" className="h-11 px-4 rounded-xl bg-indigo-600 text-white font-bold text-sm">Aggiungi</button>
+            </form>
+            <button onClick={() => setLabelling(null)} className="w-full h-12 rounded-2xl bg-slate-100 text-slate-800 font-bold">Fatto</button>
+          </div>
+        </div>
+      )}
 
       {/* Modal: Dispensa limit reached */}
       <AnimatePresence>

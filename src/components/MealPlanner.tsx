@@ -12,13 +12,14 @@ import { handleFirestoreError, OperationType } from '../lib/firebaseUtils';
 import { WeeklyPlan, Recipe, UserProfile, DietaryRestriction, PantryItem, DayPlan } from '../types';
 import { INITIAL_RECIPES } from '../data/recipes';
 import { calculateNutrients } from '../lib/nutritionUtils';
-import { Calendar as CalendarIcon, RefreshCcw, Save, Trash2, ChevronLeft, ChevronRight, X, Clock, Gauge, UtensilsCrossed, ChefHat, Info, Tag, Sparkles, Users, Heart, ShoppingCart, Check, AlertTriangle, Package, SlidersHorizontal, Share2 } from 'lucide-react';
+import { Calendar as CalendarIcon, RefreshCcw, Save, Trash2, ChevronLeft, ChevronRight, X, Clock, Gauge, UtensilsCrossed, ChefHat, Info, Tag, Sparkles, Users, Heart, ShoppingCart, Check, AlertTriangle, Package, SlidersHorizontal, Share2, Pencil } from 'lucide-react';
 import { getCurrentSeason, scaleIngredientAmount, getRawIngredientNames } from '../lib/utils';
 import { checkIngredientMatch, isStaple, calculateMissingFromPantry } from '../lib/pantrySync';
 import { findPlanIssues, issuesKey, rebuildAffectedMeals } from '../lib/planCompatibility';
 import ManualPlanEditor from './ManualPlanEditor';
 import FamilyShare from './FamilyShare';
-import { buildManualPlan, manualDaysFromPlan, WEEK_DAYS, type ManualDays } from '../lib/manualPlan';
+import { buildManualPlan, manualDaysFromPlan, replaceRecipeInPlan, WEEK_DAYS, type ManualDays } from '../lib/manualPlan';
+import QuickDishModal from './QuickDishModal';
 import { hitsExclusion, satisfiesDiet } from '../lib/dietFilters';
 import { capPool, dailyKcalTarget, fitMeal, mealBudgets } from '../lib/calories';
 import DayKcalCard from './DayKcalCard';
@@ -42,6 +43,7 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
   const [pantryItems, setPantryItems] = useState<PantryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
+  const [fixingRecipe, setFixingRecipe] = useState<Recipe | null>(null);
   const [targetServings, setTargetServings] = useState(2);
   // Le porzioni partono dalle persone a tavola (come la lista della spesa), finché non le cambi a mano
   const [servingsTouched, setServingsTouched] = useState(false);
@@ -1079,6 +1081,21 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
       return null;
     }
   };
+  // Dal piatto aperto nel menù: correggi ingredienti e preparazione. Quello tuo si aggiorna, uno dell'app diventa una tua versione nel menù.
+  const saveFixedRecipe = async (edited: Omit<Recipe, 'id'>) => {
+    if (!fixingRecipe) return;
+    const original = fixingRecipe;
+    const id = await editManualDish(original, edited);
+    setFixingRecipe(null);
+    if (!id) {
+      setRebuildNotice({ text: 'Non è stato possibile salvare il piatto. Riprova.', tone: 'warn' });
+      return;
+    }
+    const copied = id !== original.id;
+    if (copied && currentPlan) await savePlan(replaceRecipeInPlan(currentPlan, original.id, id));
+    setSelectedRecipe(null);
+    setRebuildNotice({ text: copied ? 'Ho salvato la tua versione di questo piatto e l\'ho messa nel menù: l\'originale resta com\'è.' : 'Piatto aggiornato.', tone: 'ok' });
+  };
   const saveManualPlan = async (days: ManualDays) => {
     const plan = buildManualPlan({ days, recipes, members: familyMembers, pool: familyPool() });
     await savePlan(plan);
@@ -1332,6 +1349,8 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
           </button>
         </div>
       </div>
+
+      {fixingRecipe && <QuickDishModal initial={fixingRecipe} offlineOnly onSave={saveFixedRecipe} onClose={() => setFixingRecipe(null)} />}
 
       {showShare && (
         <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-slate-900/50 p-0 sm:p-4" role="dialog" aria-modal="true" aria-label="Condividi il menù">
@@ -1852,6 +1871,12 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
               className="bg-white w-full max-w-2xl rounded-3xl overflow-hidden shadow-2xl relative z-10 flex flex-col max-h-[90vh]"
             >
               <div className="h-48 bg-indigo-600 flex items-center justify-center relative p-8 text-center">
+                <button
+                  onClick={() => setFixingRecipe(selectedRecipe)}
+                  className="absolute top-4 left-4 bg-white/20 hover:bg-white/40 px-3 py-2 rounded-full text-white text-sm font-bold flex items-center gap-1.5 transition-colors"
+                >
+                  <Pencil className="w-4 h-4" /> {customIds.has(selectedRecipe.id) ? 'Modifica' : 'Crea la tua versione'}
+                </button>
                 <button 
                   onClick={() => setSelectedRecipe(null)}
                   className="absolute top-4 right-4 bg-white/20 hover:bg-white/40 p-2 rounded-full text-white transition-colors"

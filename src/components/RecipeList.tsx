@@ -5,9 +5,11 @@ import { db } from '../lib/firebase';
 import { collection, addDoc, query, onSnapshot, deleteDoc, doc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firebaseUtils';
 import { calculateNutrients } from '../lib/nutritionUtils';
-import { Search, SlidersHorizontal, ChevronRight, ChefHat, Clock, Gauge, X, UtensilsCrossed, Info, Plus, Trash2, Heart, Users, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Search, SlidersHorizontal, ChevronRight, ChefHat, Clock, Gauge, X, UtensilsCrossed, Info, Plus, Trash2, Heart, Users, CheckCircle2, AlertTriangle, Pencil } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import RecipeForm from './RecipeForm';
+import QuickDishModal from './QuickDishModal';
+import { readLocalDishes, saveDishEdit } from '../lib/dishStore';
 import { scaleIngredientAmount, getRawIngredientNames } from '../lib/utils';
 import { checkIngredientMatch, isStaple, consumeIngredientsFromPantry } from '../lib/pantrySync';
 import { FamilyMember } from '../types';
@@ -29,6 +31,8 @@ export default function RecipeList({ userId, voiceSearchQuery, setVoiceSearchQue
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [dietaryFilter, setDietaryFilter] = useState<string[]>([]);
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
+  const [editing, setEditing] = useState<Recipe | null>(null);
+  const [editNotice, setEditNotice] = useState<string | null>(null);
   const [customRecipes, setCustomRecipes] = useState<Recipe[]>([]);
   const [favorites, setFavorites] = useState<string[]>([]);
   const [pantryItems, setPantryItems] = useState<PantryItem[]>([]);
@@ -166,6 +170,22 @@ export default function RecipeList({ userId, voiceSearchQuery, setVoiceSearchQue
     } catch (e) {
       handleFirestoreError(e, OperationType.CREATE, path);
     }
+  };
+
+  // Correzione di un piatto: il tuo si aggiorna, uno dell'app diventa una tua versione (l'originale resta com'è)
+  const handleEditRecipe = async (edited: Omit<Recipe, 'id'>) => {
+    if (!editing) return;
+    const original = editing;
+    const custom = customRecipes.some(r => r.id === original.id);
+    const id = await saveDishEdit(userId, original, edited, custom);
+    setEditing(null);
+    if (!id) {
+      setEditNotice('Non è stato possibile salvare il piatto. Riprova.');
+      return;
+    }
+    if (userId === 'demo-family-user' || userId.startsWith('local-')) setCustomRecipes(readLocalDishes(userId));
+    setSelectedRecipe(null);
+    setEditNotice(custom ? 'Piatto aggiornato.' : 'Ho salvato la tua versione di questo piatto tra le tue ricette: l\'originale resta com\'è.');
   };
 
   const handleDeleteRecipe = async (e: React.MouseEvent, recipeId: string) => {
@@ -375,6 +395,15 @@ export default function RecipeList({ userId, voiceSearchQuery, setVoiceSearchQue
             </button>
             {isCustom(recipe.id) && (
               <button
+                onClick={(e) => { e.stopPropagation(); setEditing(recipe); }}
+                aria-label={`Modifica ${recipe.title}`}
+                className="shrink-0 w-11 h-11 rounded-full flex items-center justify-center text-slate-300 hover:text-indigo-600"
+              >
+                <Pencil className="w-5 h-5" />
+              </button>
+            )}
+            {isCustom(recipe.id) && (
+              <button
                 onClick={(e) => handleDeleteRecipe(e, recipe.id)}
                 aria-label="Elimina ricetta"
                 className="shrink-0 w-11 h-11 rounded-full flex items-center justify-center text-slate-300 hover:text-red-500"
@@ -419,6 +448,12 @@ export default function RecipeList({ userId, voiceSearchQuery, setVoiceSearchQue
               className="bg-white w-full max-w-2xl rounded-3xl overflow-hidden shadow-2xl relative z-10 flex flex-col max-h-[90vh]"
             >
               <div className="h-48 bg-indigo-600 flex items-center justify-center relative p-8 text-center">
+                <button
+                  onClick={() => setEditing(selectedRecipe)}
+                  className="absolute top-4 left-4 bg-white/20 hover:bg-white/40 px-3 py-2 rounded-full text-white text-sm font-bold flex items-center gap-1.5 transition-colors"
+                >
+                  <Pencil className="w-4 h-4" /> {isCustom(selectedRecipe.id) ? 'Modifica' : 'Crea la tua versione'}
+                </button>
                 <button 
                   onClick={() => setSelectedRecipe(null)}
                   className="absolute top-4 right-4 bg-white/20 hover:bg-white/40 p-2 rounded-full text-white transition-colors"
@@ -614,6 +649,14 @@ export default function RecipeList({ userId, voiceSearchQuery, setVoiceSearchQue
       </AnimatePresence>
       
       {/* Add Custom Recipe Form Modal */}
+      {editing && <QuickDishModal initial={editing} offlineOnly onSave={handleEditRecipe} onClose={() => setEditing(null)} />}
+      {editNotice && (
+        <div role="status" className="fixed left-4 right-4 bottom-24 z-[58] bg-slate-900 text-white rounded-2xl px-4 py-3 text-sm shadow-xl flex items-start justify-between gap-3">
+          <span className="leading-relaxed">{editNotice}</span>
+          <button onClick={() => setEditNotice(null)} aria-label="Chiudi" className="font-bold shrink-0">×</button>
+        </div>
+      )}
+
       <AnimatePresence>
         {showAddForm && (
           <RecipeForm 

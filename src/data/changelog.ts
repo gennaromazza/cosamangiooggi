@@ -18,6 +18,17 @@ export interface NewsEntry {
 
 export const CHANGELOG: NewsEntry[] = [
   {
+    id: '2026-10-14-spesa-etichette',
+    date: '14 ottobre 2026',
+    title: 'Spesa organizzata a modo tuo, piatti da correggere',
+    items: [
+      { emoji: '📅', title: 'Prima ciò che serve prima', text: 'La spesa si apre «Per giorno»: in cima quello che ti serve oggi e domani, poi il resto della settimana.' },
+      { emoji: '🏷️', title: 'Le tue etichette', text: 'Tocca l\'etichetta accanto a un prodotto: urgente, poco urgente, fresco, surgelato, lunga conservazione, o creane di tue. Gli urgenti salgono in cima, e c\'è una vista «Etichette» per vederli raggruppati.' },
+      { emoji: '🧺', title: 'Reparti più giusti', text: 'Pasta, spezie, erbe, pesce e latticini finiscono nel reparto corretto.' },
+      { emoji: '✏️', title: 'Aggiungi gli ingredienti dimenticati', text: 'Apri un piatto dal menù o dalle ricette e tocca «Modifica»: aggiungi le carote alla pasta e lenticchie senza rifare il piatto. Uno dell\'app diventa una tua versione.' },
+    ],
+  },
+  {
     id: '2026-10-14-spesa-vegani',
     date: '14 ottobre 2026',
     title: 'Spesa più ordinata, niente piatti vegani a sorpresa',
