@@ -42,6 +42,8 @@ export interface UserProfile {
   tempPassword?: string;
   tempPasswordGeneratedAt?: string;
   hasCompletedWelcomeTour?: boolean;
+  /** Etichette della lista della spesa scelte dall'utente (urgente, surgelato…), per prodotto */
+  shoppingTags?: { labels: Record<string, string[]>; custom: string[] };
   /** Limite di calorie al giorno per persona (stima dagli ingredienti). Assente o 0: nessun limite. */
   dailyKcalTarget?: number;
   /** Il menù comprende anche colazione e due merende */

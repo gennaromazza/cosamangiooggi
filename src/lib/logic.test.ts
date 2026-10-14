@@ -1,4 +1,6 @@
 import { getSupermarketDepartment } from './departments';
+import { allLabels, BUILTIN_LABELS, cleanLabel, compareShopping, emptyTags, firstUseOffsets, groupByLabel, labelsOf, offsetFor, shoppingKey, toggleLabel, URGENT_LABEL, whenGroup, whenText } from './shoppingOrder';
+import { readLocalDishes, saveDishEdit } from './dishStore';
 import { inferDishInfo, parseIngredientText } from './dishInference';
 import { dislikeConsensus, dislikesDish, fitsMember, happyWith, isMain, membersNeedingAlternative, pickAlternatives, planMeals } from './memberAlternatives';
 import { FAMOUS_DISH_IDS, pickTastingDishes, suggestIngredients, verdictPatch } from './tasting';
@@ -36,7 +38,7 @@ import { editedDish, parseSteps } from './dishEdit';
 import { MORNING_RECIPES } from '../data/mornings';
 import { buildMorningDay, DAY_SLOTS, hasMorningMeals, pickMorningMeal, planHasMorningMeals, SLOT_KEY } from './morningMeals';
 import { capPool, clampKcal, dailyKcalTarget, dayKcal, estimateIngredients, fitMeal, kcalOfIds, mealBudgets, MEAL_SHARES, recipeKcal, reservedKcal } from './calories';
-import { addToSlot, buildManualPlan, countManualMeals, emptyManualDays, manualDaysFromPlan, removeFromSlot, replaceInSlot, WEEK_DAYS } from './manualPlan';
+import { addToSlot, buildManualPlan, countManualMeals, emptyManualDays, manualDaysFromPlan, removeFromSlot, replaceInSlot, replaceRecipeInPlan, WEEK_DAYS } from './manualPlan';
 import { compareBuilds, isNewer } from './updateCheck';
 import { fillPlaceholders } from '../../scripts/landing';
 import { PAGES, pageText, renderPage } from '../../scripts/landing-pages';
@@ -1386,4 +1388,131 @@ test('menù del giorno: le calorie si leggono in un solo punto, senza numeri div
   assert.ok(!planner.includes("label: 'Calorie', value: Math.round(totalCal)"), 'niente seconda cifra delle calorie nei valori nutrizionali');
   assert.ok(planner.includes('Le calorie a persona sono nella scheda qui sopra'));
   assert.ok(planner.includes("const savedProfile = localStorage.getItem(`profile_${userId}`)"), 'le scelte di un account senza accesso arrivano al menù');
+});
+
+test('reparti della spesa: gli ingredienti finiscono nel reparto giusto', () => {
+  const cases: [string, string][] = [
+    ['Spaghetti', 'dispensa'], ['Penne rigate', 'dispensa'], ['Cous cous', 'dispensa'], ['Quinoa', 'dispensa'], ['Fecola di patate', 'dispensa'],
+    ['Lievito di birra secco', 'dispensa'], ['Sale marino', 'dispensa'], ['Pesto alla genovese', 'dispensa'], ['Passata di pomodoro', 'dispensa'],
+    ['Tonno sott\'olio sgocciolato', 'dispensa'], ['Olive nere', 'dispensa'], ['Origano secco', 'dispensa'], ['Zafferano', 'dispensa'],
+    ['Cipolla', 'ortofrutta'], ['Scalogno', 'ortofrutta'], ['Menta fresca', 'ortofrutta'], ['Verza', 'ortofrutta'], ['Rosmarino', 'ortofrutta'],
+    ['Succo di limone', 'ortofrutta'], ['Pomodori maturi succosi', 'ortofrutta'], ['Frutti di bosco', 'ortofrutta'], ['Barbabietola', 'ortofrutta'],
+    ['Pollo a pezzi', 'macelleria'], ['Cosce di rana', 'macelleria'], ['Scampi', 'macelleria'], ['Guanciale', 'macelleria'], ['Carne per brodo', 'macelleria'],
+    ['Mozzarella per pizza', 'latticini'], ['Tagliatelle all\'uovo', 'latticini'], ['Gnocchi di patate', 'latticini'], ['Tortellini alla carne', 'latticini'],
+    ['Uova', 'latticini'], ['Latte di soia', 'latticini'], ['Taleggio', 'latticini'], ['Seitan', 'latticini'],
+    ['Pane integrale', 'pane'], ['Freselle', 'pane'], ['Piadina', 'pane'],
+    ['Vino bianco', 'bevande'], ['Piselli surgelati', 'surgelati'], ['Piselli', 'surgelati'], ['Piselli freschi', 'ortofrutta'],
+  ];
+  for (const [name, expected] of cases) assert.equal(getSupermarketDepartment(name), expected, name);
+  // quasi nessun ingrediente dell'app resta "altro"
+  const names = new Set<string>();
+  for (const r of INITIAL_RECIPES) for (const i of r.ingredients) for (const n of getRawIngredientNames(i.name)) if (!isStaple(n)) names.add(n);
+  const other = [...names].filter((n) => getSupermarketDepartment(n) === 'altro');
+  assert.ok(other.length / names.size < 0.03, `ingredienti senza reparto: ${other.length} su ${names.size}`);
+});
+
+test('spesa: etichette scelte dall\'utente, per prodotto', () => {
+  assert.equal(shoppingKey('Parmigiano reggiano grattugiato'), shoppingKey('parmigiano'));
+  assert.notEqual(shoppingKey('Mela'), shoppingKey('Melanzane'));
+  let tags = emptyTags();
+  tags = toggleLabel(tags, 'Pollo', 'Urgente');
+  tags = toggleLabel(tags, 'pollo', 'Fresco');
+  assert.deepEqual(labelsOf(tags, 'Petto di pollo'.replace('Petto di ', '')), ['Urgente', 'Fresco']);
+  tags = toggleLabel(tags, 'Pollo', 'urgente');
+  assert.deepEqual(labelsOf(tags, 'Pollo'), ['Fresco'], 'si toglie anche scrivendola diversa');
+  tags = toggleLabel(tags, 'Pasta', '  Mercato del sabato  ');
+  assert.deepEqual(tags.custom, ['Mercato del sabato'], 'le etichette nuove si ricordano');
+  assert.ok(allLabels(tags).includes('Mercato del sabato') && BUILTIN_LABELS.every((l) => allLabels(tags).includes(l)));
+  tags = toggleLabel(tags, 'Pasta', 'Mercato del sabato');
+  assert.deepEqual(labelsOf(tags, 'Pasta'), []);
+  assert.deepEqual(tags.custom, ['Mercato del sabato'], 'resta tra quelle scelte');
+  assert.equal(toggleLabel(tags, 'Pasta', '   '), tags, 'etichetta vuota: niente');
+  assert.equal(cleanLabel('x'.repeat(60)).length, 24);
+  assert.equal(Object.keys(toggleLabel(toggleLabel(emptyTags(), 'Sale', 'Urgente'), 'Sale', 'Urgente').labels).length, 0, 'senza etichette il prodotto sparisce');
+});
+
+test('spesa: prima ciò che serve prima, urgenti in cima', () => {
+  const ric = (id: string, ings: string[]): Recipe => ({ ...piatto(id, ings), title: id } as Recipe);
+  const recipes = [ric('r-pasta', ['Pasta', 'Parmigiano reggiano']), ric('r-pollo', ['Petto di pollo', 'Limone']), ric('r-pesce', ['Merluzzo', 'Parmigiano'])];
+  const plan: WeeklyPlan = { id: 'c', startDate: 'x', days: {
+    Lunedì: { lunchIds: ['r-pasta'], dinnerIds: [] },
+    Mercoledì: { lunchIds: [], dinnerIds: ['r-pollo'] },
+    Sabato: { lunchIds: ['r-pesce'], dinnerIds: [] },
+  } };
+  const uses = firstUseOffsets({ plan, recipes, servings: 2, today: 'Lunedì' });
+  assert.equal(offsetFor('Pasta', uses), 0);
+  assert.equal(offsetFor('Petto di pollo', uses), 2);
+  assert.equal(offsetFor('Merluzzo', uses), 5);
+  assert.equal(offsetFor('Parmigiano', uses), 0, 'se serve in più giorni conta il primo');
+  assert.equal(offsetFor('Caramelle', uses), undefined);
+  // oggi è mercoledì: lunedì è la prossima settimana
+  const wed = firstUseOffsets({ plan, recipes, servings: 2, today: 'Mercoledì' });
+  assert.equal(offsetFor('Petto di pollo', wed), 0);
+  assert.equal(offsetFor('Merluzzo', wed), 3);
+  assert.equal(offsetFor('Pasta', wed), 5);
+  assert.deepEqual([0, 1, 2, 3, 4, 6, undefined].map(whenGroup), ['oggi', 'domani', 'presto', 'presto', 'dopo', 'dopo', 'senza']);
+  assert.equal(whenText(0), 'serve oggi');
+  assert.equal(whenText(1), 'serve domani');
+  assert.equal(whenText(4), 'serve tra 4 giorni');
+  assert.equal(whenText(undefined), '');
+  const items = [
+    { name: 'Merluzzo', offset: 5, labels: [] as string[] },
+    { name: 'Pasta', offset: 0, labels: [] as string[] },
+    { name: 'Latte', offset: 3, labels: [URGENT_LABEL] },
+    { name: 'Biscotti', offset: undefined, labels: [] as string[] },
+    { name: 'Aglio', offset: 0, labels: [] as string[] },
+  ];
+  assert.deepEqual([...items].sort(compareShopping).map((i) => i.name), ['Latte', 'Aglio', 'Pasta', 'Merluzzo', 'Biscotti']);
+  const groups = groupByLabel([{ name: 'A', offset: 1, labels: ['Fresco', 'Urgente'] }, { name: 'B', offset: 0, labels: ['Fresco'] }, { name: 'C', offset: 0, labels: [] }], ['Urgente', 'Fresco', 'Surgelato']);
+  assert.deepEqual(groups.map((g) => [g.label, g.items.map((i) => i.name)]), [['Urgente', ['A']], ['Fresco', ['A', 'B']], [null, ['C']]]);
+});
+
+test('spesa: la lista ha le viste per giorno, etichetta, reparto e lista unica', () => {
+  const list = readFileSync('src/components/ShoppingList.tsx', 'utf8');
+  for (const needle of ["['when', 'Per giorno'", "['labels', 'Etichette'", "['departments', 'Per reparto'", "['all', 'Lista unica'", 'Serve oggi'.length ? 'renderRow' : '', 'saveTags(toggleLabel(', 'Nuova etichetta', 'firstUseOffsets(', 'compareShopping']) {
+    assert.ok(list.includes(needle), `ShoppingList: manca ${needle}`);
+  }
+  assert.ok(list.includes("shopping_view"), 'si ricorda la vista scelta');
+  assert.ok(readFileSync('src/types.ts', 'utf8').includes('shoppingTags'));
+});
+
+test('modifica piatto: in tutto il menù si sostituisce solo il piatto scelto', () => {
+  const plan: WeeklyPlan = { id: 'c', startDate: 'x', days: {
+    Lunedì: { lunchIds: ['a', 'x'], dinnerIds: ['b'], breakfastIds: ['a'], lunchAlt: { m1: 'a', m2: 'z' } },
+    Martedì: { lunchIds: ['c'], dinnerIds: ['a'] },
+  } };
+  const next = replaceRecipeInPlan(plan, 'a', 'a2');
+  assert.deepEqual(next.days.Lunedì.lunchIds, ['a2', 'x']);
+  assert.deepEqual(next.days.Lunedì.breakfastIds, ['a2']);
+  assert.deepEqual(next.days.Lunedì.lunchAlt, { m1: 'a2', m2: 'z' });
+  assert.deepEqual(next.days.Martedì.dinnerIds, ['a2']);
+  assert.deepEqual(next.days.Martedì.lunchIds, ['c']);
+  assert.deepEqual(plan.days.Lunedì.lunchIds, ['a', 'x'], 'il menù di partenza non cambia');
+  assert.equal(replaceRecipeInPlan(plan, 'a', 'a'), plan);
+});
+
+test('modifica piatto: salvataggio sul dispositivo, piatto tuo aggiornato o copia di uno dell\'app', async () => {
+  const store = new Map<string, string>();
+  (globalThis as any).localStorage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k) };
+  const mine: Recipe = { ...(piatto('custom-1', ['Pasta', 'Lenticchie']) as Recipe), title: 'Pasta e lenticchie' };
+  store.set('customRecipes_local-t', JSON.stringify([mine]));
+  const edited = { ...mine, ingredients: [...mine.ingredients, { name: 'Carote', amount: 100, unit: 'g' }] } as Omit<Recipe, 'id'>;
+  assert.equal(await saveDishEdit('local-t', mine, edited, true), 'custom-1');
+  const saved = readLocalDishes('local-t');
+  assert.equal(saved.length, 1, 'non si crea un doppione');
+  assert.deepEqual(saved[0].ingredients.map((i) => i.name), ['Pasta', 'Lenticchie', 'Carote'], 'le carote dimenticate si aggiungono');
+  // un piatto dell'app non si tocca: se ne salva una copia
+  const builtin = INITIAL_RECIPES.find((r) => r.id === 'meal-spaghetti-gamberi')!;
+  const copyId = await saveDishEdit('local-t', builtin, { ...builtin, title: 'Spaghetti ai gamberi di casa' } as Omit<Recipe, 'id'>, false);
+  assert.ok(copyId && copyId !== builtin.id && copyId.startsWith('custom-'));
+  assert.equal(readLocalDishes('local-t').length, 2);
+  assert.equal(INITIAL_RECIPES.find((r) => r.id === 'meal-spaghetti-gamberi')!.title, 'Spaghetti ai gamberi');
+});
+
+test('modifica piatto: si può correggere dal menù, dall\'elenco delle ricette e dal menù scritto a mano', () => {
+  const planner = readFileSync('src/components/MealPlanner.tsx', 'utf8');
+  for (const needle of ['saveFixedRecipe', 'Crea la tua versione', 'replaceRecipeInPlan(currentPlan', '<QuickDishModal initial={fixingRecipe}']) assert.ok(planner.includes(needle), `MealPlanner: manca ${needle}`);
+  const recipes = readFileSync('src/components/RecipeList.tsx', 'utf8');
+  for (const needle of ['handleEditRecipe', 'Modifica ${recipe.title}', 'Crea la tua versione', 'saveDishEdit(']) assert.ok(recipes.includes(needle), `RecipeList: manca ${needle}`);
+  assert.ok(readFileSync('src/components/ManualPlanEditor.tsx', 'utf8').includes('onEditDish'));
 });

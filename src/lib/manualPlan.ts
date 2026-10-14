@@ -97,3 +97,23 @@ export function buildManualPlan(args: {
   }
   return { id: 'current', startDate: now.toISOString(), manual: true, days: planDays };
 }
+
+/** Sostituisce un piatto con un altro in tutto il menù (per esempio con la versione corretta dall'utente). */
+export function replaceRecipeInPlan(plan: WeeklyPlan, from: string, to: string): WeeklyPlan {
+  if (from === to) return plan;
+  const swap = (ids: string[] | undefined) => (ids ? ids.map((id) => (id === from ? to : id)) : ids);
+  const days: WeeklyPlan['days'] = {};
+  for (const [name, day] of Object.entries(plan.days)) {
+    const next = { ...day } as WeeklyPlan['days'][string];
+    for (const slot of DAY_SLOTS) {
+      const key = SLOT_KEY[slot];
+      if (day[key]) (next as unknown as Record<string, unknown>)[key] = swap(day[key] as string[]);
+    }
+    for (const altKey of ['lunchAlt', 'dinnerAlt'] as const) {
+      const alt = day[altKey];
+      if (alt) next[altKey] = Object.fromEntries(Object.entries(alt).map(([member, id]) => [member, id === from ? to : id]));
+    }
+    days[name] = next;
+  }
+  return { ...plan, days };
+}
