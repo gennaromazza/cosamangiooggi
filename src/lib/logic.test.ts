@@ -1518,3 +1518,9 @@ test('modifica piatto: si può correggere dal menù, dall\'elenco delle ricette 
   for (const needle of ['handleEditRecipe', 'Modifica ${recipe.title}', 'Crea la tua versione', 'saveDishEdit(']) assert.ok(recipes.includes(needle), `RecipeList: manca ${needle}`);
   assert.ok(readFileSync('src/components/ManualPlanEditor.tsx', 'utf8').includes('onEditDish'));
 });
+
+test('volantino da link: la schermata chiede il link e spiega cosa fare se non è un file', () => {
+  const screen = readFileSync('src/components/FlyerAnalysis.tsx', 'utf8');
+  for (const needle of ['analyzeFlyerUrl', 'Oppure incolla il link del volantino', 'https://', 'fai uno screenshot delle pagine']) assert.ok(screen.includes(needle), `FlyerAnalysis: manca ${needle}`);
+  assert.ok(readFileSync('functions/index.js', 'utf8').includes('exports.analyzeFlyerUrl = onCall'));
+});

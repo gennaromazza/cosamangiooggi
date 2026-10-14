@@ -6,6 +6,7 @@ const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const Stripe = require('stripe');
 const invites = require('./invites');
 const familyShare = require('./familyShare');
+const flyerUrl = require('./flyerUrl');
 const { isStripeSecretKey, describeStripeKey } = require('./config-checks');
 const { GoogleGenAI, Type } = require('@google/genai');
 
@@ -702,6 +703,40 @@ exports.suggestDish = onCall(
   }
 );
 
+// Legge il volantino con Gemini e restituisce gli ingredienti in offerta. Conta una scansione del mese; se non riesce, la restituisce.
+async function scanFlyer(uid, data, mimeType) {
+  const remaining = await reserveFlyerScan(uid);
+  try {
+    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY.value() });
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: {
+        parts: [
+          { inlineData: { mimeType, data } },
+          {
+            text: "Analizza questo volantino delle offerte e identifica gli ingredienti alimentari SANI (carne, pesce, verdura, frutta, cereali, legumi, latticini base) che sono in offerta. \n\nREGOLE CRITICHE:\n1. ESCLUDI ASSOLUTAMENTE: alcolici (vino, birra, superalcolici), gelati, dolci industriali (merendine, biscotti farciti), snack fritti e bibite zuccherate.\n2. Includi solo ingredienti 'base' che possono essere usati come componenti di un pasto.\n3. Restituisci SOLO una lista di nomi di ingredienti in italiano, puliti e semplici (es. 'Pollo', 'Salmone', 'Zucchine', 'Bresaola', 'Tacchino', 'Carote', 'Salsiccia').",
+          },
+        ],
+      },
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: { ingredients: { type: Type.ARRAY, items: { type: Type.STRING } } },
+          required: ['ingredients'],
+        },
+      },
+    });
+    if (!response.text) throw new HttpsError('internal', 'Nessuna risposta dal modello.');
+    const ingredients = JSON.parse(response.text).ingredients.map((i) => i.charAt(0).toUpperCase() + i.slice(1).toLowerCase());
+    return { ingredients, remaining };
+  } catch (err) {
+    // La scansione non è andata a buon fine: non va addebitata sul tetto mensile
+    await refundFlyerScan(uid).catch(() => {});
+    throw err;
+  }
+}
+
 exports.analyzeFlyer = onCall(
   { region: REGION, secrets: [GEMINI_API_KEY], memory: '512MiB', timeoutSeconds: 120 },
   async (request) => {
@@ -710,38 +745,26 @@ exports.analyzeFlyer = onCall(
     if (typeof data !== 'string' || !['image/jpeg', 'image/png', 'image/webp', 'application/pdf'].includes(mimeType)) {
       throw new HttpsError('invalid-argument', 'File non valido.');
     }
+    return scanFlyer(uid, data, mimeType);
+  }
+);
 
-    const remaining = await reserveFlyerScan(uid);
+// Volantino da un link: il server scarica il file (solo PDF o immagini, mai pagine) e lo legge come quello caricato dal telefono
+exports.analyzeFlyerUrl = onCall(
+  { region: REGION, secrets: [GEMINI_API_KEY], memory: '512MiB', timeoutSeconds: 120 },
+  async (request) => {
+    const uid = requireAuth(request);
+    let file;
     try {
-      const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY.value() });
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: {
-          parts: [
-            { inlineData: { mimeType, data } },
-            {
-              text: "Analizza questo volantino delle offerte e identifica gli ingredienti alimentari SANI (carne, pesce, verdura, frutta, cereali, legumi, latticini base) che sono in offerta. \n\nREGOLE CRITICHE:\n1. ESCLUDI ASSOLUTAMENTE: alcolici (vino, birra, superalcolici), gelati, dolci industriali (merendine, biscotti farciti), snack fritti e bibite zuccherate.\n2. Includi solo ingredienti 'base' che possono essere usati come componenti di un pasto.\n3. Restituisci SOLO una lista di nomi di ingredienti in italiano, puliti e semplici (es. 'Pollo', 'Salmone', 'Zucchine', 'Bresaola', 'Tacchino', 'Carote', 'Salsiccia').",
-            },
-          ],
-        },
-        config: {
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: { ingredients: { type: Type.ARRAY, items: { type: Type.STRING } } },
-            required: ['ingredients'],
-          },
-        },
-      });
-      if (!response.text) throw new HttpsError('internal', 'Nessuna risposta dal modello.');
-      const ingredients = JSON.parse(response.text).ingredients.map(
-        (i) => i.charAt(0).toUpperCase() + i.slice(1).toLowerCase()
-      );
-      return { ingredients, remaining };
+      file = await flyerUrl.downloadFlyer(request.data && request.data.url);
     } catch (err) {
-      // La scansione non è andata a buon fine: non va addebitata sul tetto mensile
-      await refundFlyerScan(uid).catch(() => {});
-      throw err;
+      if (err instanceof flyerUrl.FlyerUrlError) {
+        // Il download non consuma una scansione: la si prenota solo quando c'è un file da leggere
+        throw new HttpsError(err.code === 'invalid-url' ? 'invalid-argument' : err.code === 'unreachable' ? 'unavailable' : 'failed-precondition', err.message);
+      }
+      console.error('Download volantino non riuscito', err);
+      throw new HttpsError('unavailable', 'Non riesco ad aprire il link.');
     }
+    return scanFlyer(uid, file.data, file.mimeType);
   }
 );

@@ -205,6 +205,10 @@ jobs:
           [ "$CODE" = "404" ] || { echo "::error::getSharedMenu doveva rispondere 404 a un codice falso"; exit 1; }
           curl -s -o /dev/null -D "$RUNNER_TEMP/cors2.txt" -X OPTIONS -H 'Origin: https://che-cucino-oggi.web.app' -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: content-type' "$BASE/getSharedMenu"
           grep -i 'access-control-allow-origin' "$RUNNER_TEMP/cors2.txt" || { echo "::error::Mancano le intestazioni CORS: la pagina del menù condiviso non potrebbe collegarsi"; exit 1; }
+          # Volantino da link: senza accesso la funzione deve rifiutare (e quindi esistere)
+          CODE=$(curl -s -o "$RUNNER_TEMP/out.json" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"data":{"url":"https://example.com/v.pdf"}}' "$BASE/analyzeFlyerUrl")
+          echo "analyzeFlyerUrl senza accesso: HTTP $CODE"
+          [ "$CODE" = "401" ] || { echo "::error::analyzeFlyerUrl doveva rispondere 401 senza accesso"; exit 1; }
           echo "Funzioni degli inviti e del menù condiviso raggiungibili e protette"
 
       # Se un valore di Stripe era sbagliato, sito e regole sono stati pubblicati ma le funzioni no: il deploy resta rosso finché non si corregge

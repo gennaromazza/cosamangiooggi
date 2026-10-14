@@ -18,6 +18,15 @@ export interface NewsEntry {
 
 export const CHANGELOG: NewsEntry[] = [
   {
+    id: '2026-10-14-volantino-link',
+    date: '14 ottobre 2026',
+    title: 'Volantino da un link',
+    items: [
+      { emoji: '🔗', title: 'Incolla il link del volantino', text: 'In «Offerte» puoi incollare l\'indirizzo di un volantino in PDF o in immagine: lo leggiamo noi, senza scaricarlo sul telefono.' },
+      { emoji: '📸', title: 'Se il volantino si sfoglia sul sito', text: 'Molti volantini digitali sono pagine e non file: in quel caso ti diciamo cosa fare, cioè uno screenshot delle pagine da caricare come foto.' },
+    ],
+  },
+  {
     id: '2026-10-14-spesa-etichette',
     date: '14 ottobre 2026',
     title: 'Spesa organizzata a modo tuo, piatti da correggere',

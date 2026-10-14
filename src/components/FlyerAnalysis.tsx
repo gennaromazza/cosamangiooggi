@@ -4,7 +4,7 @@ import { db, functions } from '../lib/firebase';
 import { doc, setDoc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firebaseUtils';
 import { UserProfile } from '../types';
-import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, Sparkles, X } from 'lucide-react';
+import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, Sparkles, X, Link2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface Props {
@@ -14,6 +14,7 @@ interface Props {
 
 export default function FlyerAnalysis({ userId, profile }: Props) {
   const [file, setFile] = useState<File | null>(null);
+  const [link, setLink] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [scansLeft, setScansLeft] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -68,6 +69,28 @@ export default function FlyerAnalysis({ userId, profile }: Props) {
     };
 
     reader.readAsDataURL(file);
+  };
+
+  // Volantino da un link a un PDF o a un'immagine: il server lo scarica e lo legge
+  const analyzeLink = async () => {
+    const url = link.trim();
+    if (!/^https:\/\//i.test(url)) {
+      setError('Incolla l\'indirizzo completo del volantino, che inizia con https://');
+      return;
+    }
+    setIsAnalyzing(true);
+    setError(null);
+    try {
+      const result = await httpsCallable<{ url: string }, { ingredients: string[]; remaining: number }>(functions, 'analyzeFlyerUrl')({ url });
+      setScansLeft(result.data.remaining);
+      setExtractedOffers(result.data.ingredients);
+      await saveOffers(result.data.ingredients);
+    } catch (err: any) {
+      console.error('Flyer link error:', err);
+      setError(err?.message?.replace(/^.*?: /, '') || 'Non è stato possibile leggere il link. Prova con uno screenshot.');
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
   const saveOffers = async (ingredients: string[]) => {
@@ -159,6 +182,33 @@ export default function FlyerAnalysis({ userId, profile }: Props) {
               )}
               {isAnalyzing ? 'Analizzando...' : 'Analizza Offerte'}
             </button>
+            <div className="mt-6 pt-6 border-t border-slate-100 space-y-3">
+              <label htmlFor="flyer-link" className="text-sm font-bold text-slate-700 flex items-center gap-2">
+                <Link2 className="w-4 h-4 text-indigo-600" /> Oppure incolla il link del volantino
+              </label>
+              <div className="flex gap-2">
+                <input
+                  id="flyer-link"
+                  type="url"
+                  inputMode="url"
+                  value={link}
+                  onChange={(e) => { setLink(e.target.value); setError(null); }}
+                  onKeyDown={(e) => e.key === 'Enter' && !isAnalyzing && analyzeLink()}
+                  placeholder="https://…/volantino.pdf"
+                  className="flex-1 min-w-0 h-12 px-3 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                />
+                <button
+                  onClick={analyzeLink}
+                  disabled={isAnalyzing || link.trim().length < 8}
+                  className="shrink-0 h-12 px-4 rounded-xl bg-indigo-600 text-white font-bold text-sm disabled:opacity-50"
+                >
+                  Leggi
+                </button>
+              </div>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Funziona se il link porta direttamente a un PDF o a un'immagine. Se il volantino si sfoglia sul sito, fai uno screenshot delle pagine e caricale come foto.
+              </p>
+            </div>
             {error && (
               <div className="mt-4 p-3 bg-red-50 text-red-600 text-sm rounded-xl border border-red-100 flex items-center gap-2">
                 <AlertCircle className="w-4 h-4" />
