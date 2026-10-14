@@ -2,14 +2,14 @@ import type { Ingredient, Recipe } from '../types';
 
 const word = (words: string) => new RegExp(`(?:^|[^a-zà-ú])(?:${words})`);
 
-const GLUTEN = word(
+export const GLUTEN = word(
   'pasta|spaghett|penne|rigaton|fusill|tagliatell|lasagn|gnocch|farina|pane|pangrattato|panin|pizza|focaccia|piadina|cous ?cous|orzo|farro|semola|segale|seitan|biscott|cracker|grissin|crostin|besciamella|pancarr|cornett|tortellin|ravioli|cannellon|bulgur|avena|cereali|cornflake|muesli|granola|panbauletto|toast|frumento|grano duro|pasta sfoglia',
 );
-const DAIRY = word(
+export const DAIRY = word(
   'latte|burro|formaggi|formaggio|parmigiano|grana|mozzarella|ricotta|panna|yogurt|mascarpone|pecorino|gorgonzola|caprino|provola|stracchino|besciamella|philadelphia|fontina|emmental|scamorza|burrata|feta|caciotta|gelato',
 );
-const EGGS = word('uovo|uova|maionese|albume|tuorlo|frittata');
-const FISH = word('pesce|salmone|tonno|merluzzo|gamber|calamar|vongol|cozze|branzino|orata|sarde|alici|acciughe|polpo|seppie|baccal|scampi|crostace|molluschi');
+export const EGGS = word('uovo|uova|maionese|albume|tuorlo|frittata');
+export const FISH = word('pesce|salmone|tonno|merluzzo|gamber|calamar|vongol|cozze|branzino|orata|sarde|alici|acciughe|polpo|seppie|baccal|scampi|crostace|molluschi');
 const RED_MEAT = word('manzo|vitello|maiale|agnello|salsiccia|salame|prosciutto|pancetta|guanciale|speck|bresaola|mortadella|macinato|bistecca|hamburger|ragù|ragu|wurstel|costin|fettine di manzo');
 const WHITE_MEAT = word('pollo|tacchino|coniglio|anatra|petto di|cotoletta');
 const OTHER_ANIMAL = word('carne|miele|gelatina|strutto|brodo di carne|dado di carne');

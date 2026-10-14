@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../lib/firebase';
-import { doc, setDoc } from 'firebase/firestore';
+import { collection, doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { INITIAL_RECIPES } from '../data/recipes';
+import { offerFit, rankOffers } from '../lib/offerFit';
 import { handleFirestoreError, OperationType } from '../lib/firebaseUtils';
-import { UserProfile } from '../types';
+import { FamilyMember, UserProfile } from '../types';
 import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, Sparkles, X, Link2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -20,6 +22,27 @@ export default function FlyerAnalysis({ userId, profile, onNavigateToPlanner }: 
   // Dopo la lettura si sceglie cosa si compra davvero: solo quello conta per il menù. Nulla è scelto in partenza.
   const [candidates, setCandidates] = useState<string[]>([]);
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  // Chi siede a tavola: per dire di ogni offerta se va bene a tutti o solo ad alcuni
+  const [members, setMembers] = useState<FamilyMember[]>([]);
+  useEffect(() => {
+    if (userId === 'demo-family-user' || userId.startsWith('local-')) {
+      try {
+        setMembers(JSON.parse(localStorage.getItem(`members_${userId}`) || '[]'));
+      } catch {
+        setMembers([]);
+      }
+      return;
+    }
+    return onSnapshot(
+      collection(db, `users/${userId}/familyMembers`),
+      (snap) => setMembers(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<FamilyMember, 'id'>) }))),
+      () => setMembers([]),
+    );
+  }, [userId]);
+  const fits = useMemo(
+    () => rankOffers(candidates.map((name) => offerFit({ name, members, profile, recipes: INITIAL_RECIPES }))),
+    [candidates, members, profile],
+  );
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [scansLeft, setScansLeft] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -300,21 +323,42 @@ export default function FlyerAnalysis({ userId, profile, onNavigateToPlanner }: 
           {candidates.length > 0 && (
             <div role="group" aria-label="Cosa compri davvero" className="mb-6 bg-indigo-50 border border-indigo-100 rounded-2xl p-4 space-y-3">
               <p className="text-sm font-bold text-indigo-950">Ho trovato {candidates.length} ingredienti in offerta. Quali compri davvero?</p>
-              <p className="text-xs text-indigo-900 leading-relaxed">Tocca solo quelli che vuoi comprare: il menù userà soltanto questi. Gli altri vengono ignorati.</p>
-              <div className="flex flex-wrap gap-2">
-                {candidates.map((name) => (
-                  <button
-                    key={name}
-                    onClick={() => togglePick(name)}
-                    aria-pressed={picked.has(name)}
-                    className={`px-3.5 h-10 rounded-full border text-sm font-semibold ${picked.has(name) ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-indigo-200 text-indigo-900'}`}
-                  >
-                    {name}
-                  </button>
-                ))}
-              </div>
+              <p className="text-xs text-indigo-900 leading-relaxed">Tocca solo quelli che vuoi comprare: il menù userà soltanto questi. Gli altri vengono ignorati. Per ognuno ti diciamo per chi va bene, secondo allergie, diete e gusti di ognuno.</p>
+              <ul className="space-y-2">
+                {fits.map((fit) => {
+                  const on = picked.has(fit.name);
+                  return (
+                    <li key={fit.name}>
+                      <button
+                        onClick={() => !fit.blocked && togglePick(fit.name)}
+                        disabled={fit.blocked}
+                        aria-pressed={on}
+                        className={`w-full text-left rounded-xl border px-3 py-2.5 flex items-start gap-3 ${
+                          on ? 'bg-indigo-600 border-indigo-600 text-white' : fit.blocked ? 'bg-slate-50 border-slate-200 text-slate-400' : 'bg-white border-indigo-100 text-slate-900'
+                        }`}
+                      >
+                        <span className={`mt-0.5 w-5 h-5 shrink-0 rounded-md border flex items-center justify-center ${on ? 'bg-white border-white text-indigo-700' : 'border-slate-300'}`}>
+                          {on && <CheckCircle2 className="w-4 h-4" />}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block font-semibold">{fit.name}</span>
+                          <span className={`block text-xs ${on ? 'text-indigo-100' : fit.tone === 'all' ? 'text-emerald-700' : fit.tone === 'some' ? 'text-amber-700' : 'text-slate-500'}`}>
+                            {fit.summary}
+                          </span>
+                          {(fit.likedBy.length > 0 || fit.dislikedBy.length > 0) && (
+                            <span className={`block text-xs ${on ? 'text-indigo-100' : 'text-slate-500'}`}>
+                              {[fit.likedBy.length > 0 ? `Piace a ${fit.likedBy.join(', ')}` : '', fit.dislikedBy.length > 0 ? `Non piace a ${fit.dislikedBy.join(', ')}` : ''].filter(Boolean).join(' · ')}
+                            </span>
+                          )}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
               <div className="flex gap-3 text-xs font-semibold text-indigo-800">
-                <button onClick={() => setPicked(new Set(candidates))} className="underline underline-offset-4">Scegli tutti</button>
+                <button onClick={() => setPicked(new Set(fits.filter((f) => !f.blocked).map((f) => f.name)))} className="underline underline-offset-4">Scegli tutti</button>
+                <button onClick={() => setPicked(new Set(fits.filter((f) => f.tone === 'all' && !f.majorityDislikes).map((f) => f.name)))} className="underline underline-offset-4">Solo quelli per tutti</button>
                 <button onClick={() => setPicked(new Set())} className="underline underline-offset-4">Nessuno</button>
                 <span className="ml-auto">{picked.size} scelti</span>
               </div>

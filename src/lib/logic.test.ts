@@ -21,7 +21,8 @@ import {
   isStaple,
 } from './pantrySync';
 import { getRawIngredientNames, scaleIngredientAmount } from './utils';
-import { hitsExclusion } from './dietFilters';
+import { hitsAllergen, hitsExclusion, satisfiesDiet } from './dietFilters';
+import { offerFit, rankOffers } from './offerFit';
 import { excludesVeganDishes, isVeganDish } from './veganDishes';
 import { extractVoiceArgument } from './voiceText';
 import { INITIAL_RECIPES } from '../data/recipes';
@@ -1541,4 +1542,67 @@ test('volantino: si sceglie cosa si compra davvero, e il menù si rifà solo su 
   assert.ok(planner.includes("sessionStorage.getItem('auto_regenerate_plan') === '1'") && planner.includes("sessionStorage.removeItem('auto_regenerate_plan')"), 'la richiesta si usa una volta sola');
   assert.ok(readFileSync('src/App.tsx', 'utf8').includes("onNavigateToPlanner={() => setActiveTab('planner')}"));
   assert.ok(planner.includes('profile.currentOffers') && planner.includes('hardExclusions'));
+});
+
+const dishOf = (title: string, ...ingredients: string[]) => ({ id: title, title, ingredients: ingredients.map((name) => ({ name, amount: 1, unit: 'pz' })) }) as unknown as Recipe;
+
+test('allergie per categoria: glutine, crostacei, frutta a guscio, latte valgono davvero', () => {
+  assert.equal(hitsExclusion(dishOf('Spaghetti al pomodoro', 'Spaghetti', 'Pomodoro'), ['Glutine']), true);
+  assert.equal(hitsExclusion(dishOf('Pane e olio', 'Pane', 'Olio'), ['Celiachia']), true);
+  assert.equal(hitsExclusion(dishOf('Risotto ai gamberi', 'Riso', 'Gamberi'), ['Crostacei']), true);
+  assert.equal(hitsExclusion(dishOf('Pasta al pesto', 'Pasta', 'Pesto'), ['Frutta a guscio']), true);
+  assert.equal(hitsExclusion(dishOf('Insalata con noci', 'Insalata', 'Noci'), ['Frutta a guscio']), true);
+  assert.equal(hitsExclusion(dishOf('Pasta al pomodoro', 'Pasta', 'Parmigiano'), ['Latte']), true);
+  // quello che non c'entra resta permesso
+  assert.equal(hitsExclusion(dishOf('Purè', 'Patate', 'Noce moscata'), ['Frutta a guscio']), false);
+  assert.equal(hitsExclusion(dishOf('Porridge', 'Riso', 'Latte di soia'), ['Latte']), false);
+  assert.equal(hitsExclusion(dishOf('Frittelle', 'Farina di riso', 'Zucchine'), ['Glutine']), false);
+  assert.equal(hitsExclusion(dishOf('Pasta senza glutine al sugo', 'Pasta senza glutine', 'Pomodoro'), ['Glutine']), false);
+  assert.equal(hitsExclusion(dishOf('Spaghetti di riso', 'Spaghetti di riso', 'Verdure'), ['Glutine']), false);
+  assert.equal(hitsAllergen(dishOf('Pollo', 'Pollo'), 'Peperoni'), undefined, 'un ingrediente qualsiasi non è una categoria');
+  // la dieta senza glutine non si fida di un'etichetta sbagliata
+  const mislabeled = { ...dishOf('Minestrone', 'Verdure', 'Pasta'), tags: ['gluten-free'] } as unknown as Recipe;
+  assert.equal(satisfiesDiet(mislabeled, ['gluten-free']), false);
+  // i piatti dell'app che contengono glutine sono esclusi per chi è celiaco
+  const glutenFreeTagged = INITIAL_RECIPES.filter((r) => r.tags?.includes('gluten-free'));
+  assert.ok(glutenFreeTagged.filter((r) => satisfiesDiet(r, ['gluten-free'])).every((r) => !r.ingredients.some((i) => /^(pasta|spaghetti|pane|farina)$/i.test(i.name.trim()))));
+});
+
+test('offerte per persona: dice per chi va bene, chi non può e cosa il menù userà', () => {
+  const m = (name: string, extra: Partial<FamilyMember> = {}) => ({ id: name, name, allergies: [], dietaryRestrictions: [], likedIngredients: [], dislikedIngredients: [], ...extra }) as unknown as FamilyMember;
+  const members = [m('Antonio', { likedIngredients: ['Ceci'] }), m('Deby'), m('Luca', { allergies: ['Glutine'] })];
+  const recipes = [dishOf('Pasta e ceci', 'Pasta', 'Ceci'), dishOf('Zuppa di ceci', 'Ceci', 'Carote'), dishOf('Zucchine trifolate', 'Zucchine')];
+  const fit = (name: string, profile: any = null, list = members) => offerFit({ name, members: list, profile, recipes });
+
+  const ceci = fit('Ceci');
+  assert.equal(ceci.tone, 'all');
+  assert.equal(ceci.summary, 'Va bene per tutti');
+  assert.deepEqual(ceci.likedBy, ['Antonio']);
+  assert.equal(ceci.dishes, 2);
+
+  const pasta = fit('Pasta');
+  assert.equal(pasta.tone, 'some');
+  assert.deepEqual(pasta.cannot, ['Luca']);
+  assert.equal(pasta.summary, 'Per Antonio e Deby · non per Luca');
+
+  const blocked = fit('Pasta', { dietaryRestrictions: [], excludedIngredients: ['Glutine'] });
+  assert.equal(blocked.blocked, true);
+  assert.equal(blocked.dishes, 0);
+  assert.equal(blocked.tone, 'none');
+
+  assert.equal(fit('Melanzane').summary, 'Va bene per tutti · nessun piatto adatto lo usa');
+
+  const twoHate = [m('Antonio', { dislikedIngredients: ['Zucchine'] }), m('Deby', { dislikedIngredients: ['Zucchine'] }), m('Luca')];
+  const zucchine = fit('Zucchine', null, twoHate);
+  assert.equal(zucchine.majorityDislikes, true);
+  assert.deepEqual(zucchine.dislikedBy, ['Antonio', 'Deby']);
+  assert.ok(zucchine.summary.endsWith('a metà famiglia non piace: il menù lo evita'));
+
+  const ranked = rankOffers([blocked, fit('Melanzane'), pasta, ceci]).map((f) => `${f.name}:${f.tone}`);
+  assert.deepEqual(ranked, ['Ceci:all', 'Melanzane:all', 'Pasta:some', 'Pasta:none']);
+});
+
+test('volantino: ogni offerta dice per chi della famiglia va bene', () => {
+  const screen = readFileSync('src/components/FlyerAnalysis.tsx', 'utf8');
+  for (const needle of ['offerFit(', 'rankOffers(', 'Solo quelli per tutti', 'fit.summary', 'disabled={fit.blocked}']) assert.ok(screen.includes(needle), `FlyerAnalysis: manca ${needle}`);
 });

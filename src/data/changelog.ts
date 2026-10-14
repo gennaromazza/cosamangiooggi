@@ -24,6 +24,8 @@ export const CHANGELOG: NewsEntry[] = [
     items: [
       { emoji: '🔗', title: 'Incolla il link del volantino', text: 'In «Offerte» puoi incollare l\'indirizzo di un volantino in PDF o in immagine: lo leggiamo noi, senza scaricarlo sul telefono.' },
       { emoji: '🍽️', title: 'Scegli cosa compri davvero', text: 'Dopo aver letto un volantino scegli tu quali ingredienti in offerta compri: solo quelli contano per il menù. Poi puoi rifare il menù della settimana con la tua scelta (tenendo conto di gusti, diete e allergie di tutti) oppure lasciarlo com\'è.' },
+      { emoji: '👨‍👩‍👧', title: 'Per chi va bene ogni offerta', text: 'Accanto a ogni ingrediente in offerta vedi se va bene per tutti o solo per alcuni (per esempio «Per Antonio e Deby · non per Luca»), a chi piace, e se il menù lo userà davvero. Quelli vietati dalle allergie di casa non si possono scegliere.' },
+      { emoji: '🛡️', title: 'Allergie più sicure', text: 'Le allergie per categoria (glutine, latte, crostacei, frutta a guscio, sesamo…) ora escludono tutti i piatti che le contengono, anche quando l\'ingrediente ha un altro nome (spaghetti, gamberi, pesto…).' },
       { emoji: '📸', title: 'Se il volantino si sfoglia sul sito', text: 'Molti volantini digitali sono pagine e non file: in quel caso ti diciamo cosa fare, cioè uno screenshot delle pagine da caricare come foto.' },
     ],
   },
