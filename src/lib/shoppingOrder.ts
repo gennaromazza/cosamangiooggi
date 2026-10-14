@@ -29,6 +29,7 @@ export function toggleLabel(tags: ShoppingTags, name: string, label: string): Sh
   const clean = cleanLabel(label);
   if (!clean) return tags;
   const key = shoppingKey(name);
+  if (!key) return tags; // senza nome non c'è un prodotto a cui dare l'etichetta (e il database non ammette chiavi vuote)
   const current = tags.labels[key] || [];
   const has = current.some((l) => l.toLowerCase() === clean.toLowerCase());
   const next = has ? current.filter((l) => l.toLowerCase() !== clean.toLowerCase()) : [...current, clean];
@@ -87,9 +88,11 @@ export function firstUseOffsets(args: {
 export function offsetFor(name: string, uses: UseOffset[]): number | undefined {
   const key = shoppingKey(name);
   let best: number | undefined;
-  for (const use of uses) {
-    if ((shoppingKey(use.name) === key || checkIngredientMatch(use.name, name)) && (best === undefined || use.offset < best)) best = use.offset;
-  }
+  // Strada veloce: stessa chiave del prodotto
+  for (const use of uses) if (shoppingKey(use.name) === key && (best === undefined || use.offset < best)) best = use.offset;
+  if (best !== undefined) return best;
+  // Altrimenti si cerca un ingrediente che combacia (nomi scritti in modo diverso)
+  for (const use of uses) if (checkIngredientMatch(use.name, name) && (best === undefined || use.offset < best)) best = use.offset;
   return best;
 }
 

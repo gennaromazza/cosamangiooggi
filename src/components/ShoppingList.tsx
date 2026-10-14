@@ -1,5 +1,5 @@
 import { getSupermarketDepartment } from '../lib/departments';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { db } from '../lib/firebase';
 import { doc, getDoc, collection, getDocs, query, onSnapshot, addDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firebaseUtils';
@@ -71,6 +71,8 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
       return emptyTags();
     }
   });
+  // Il calcolo di quando serve ogni prodotto è lungo: si rifà solo se cambiano la lista o il menù, non a ogni tasto nella ricerca
+  const offsetByName = useMemo(() => new Map(shoppingList.map(item => [item.name, offsetFor(item.name, uses)] as [string, number | undefined])), [shoppingList, uses]);
   const [labelling, setLabelling] = useState<string | null>(null);
   const [newLabel, setNewLabel] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -413,7 +415,7 @@ export default function ShoppingList({ userId, profile, onNavigateToBusiness }: 
       id: undefined as string | undefined,
       source: 'menu' as const,
       department: getSupermarketDepartment(item.name),
-      offset: offsetFor(item.name, uses),
+      offset: offsetByName.get(item.name),
       labels: labelsOf(tags, item.name)
     })),
     ...filteredVoiceList.map(item => ({

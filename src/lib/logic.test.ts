@@ -1428,6 +1428,8 @@ test('spesa: etichette scelte dall\'utente, per prodotto', () => {
   assert.deepEqual(tags.custom, ['Mercato del sabato'], 'resta tra quelle scelte');
   assert.equal(toggleLabel(tags, 'Pasta', '   '), tags, 'etichetta vuota: niente');
   assert.equal(cleanLabel('x'.repeat(60)).length, 24);
+  assert.equal(toggleLabel(emptyTags(), '   ', 'Urgente').labels[''], undefined, 'un prodotto senza nome non riceve etichette');
+  assert.ok(Object.keys(toggleLabel(emptyTags(), 'Pasta (g)', 'Urgente').labels).every((k) => k && !/[./~*\\[\\]]/.test(k)), 'chiavi valide per il database');
   assert.equal(Object.keys(toggleLabel(toggleLabel(emptyTags(), 'Sale', 'Urgente'), 'Sale', 'Urgente').labels).length, 0, 'senza etichette il prodotto sparisce');
 });
 
