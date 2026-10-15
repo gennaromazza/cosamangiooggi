@@ -158,3 +158,26 @@ test('un amministratore finto (senza claim) non guadagna nulla', { skip }, async
 test('senza emulatore il file non sbaglia', () => {
   assert.ok(true);
 });
+
+test('scontrini: solo chi li carica li vede e li modifica, e solo con dati validi', { skip }, async () => {
+  const mine = as(MOM);
+  const good = { store: 'Esselunga', date: '2026-10-12', total: 54.3, createdAt: 1760000000000, source: 'photo' };
+  await assertSucceeds(setDoc(doc(mine, `users/${MOM}/receipts/r1`), good));
+  await assertSucceeds(getDoc(doc(mine, `users/${MOM}/receipts/r1`)));
+  await assertSucceeds(updateDoc(doc(mine, `users/${MOM}/receipts/r1`), { total: 55 }));
+  // dati sbagliati: totale assurdo, data non valida, campi in più (per esempio la foto)
+  await assertFails(setDoc(doc(mine, `users/${MOM}/receipts/r2`), { ...good, total: -1 }));
+  await assertFails(setDoc(doc(mine, `users/${MOM}/receipts/r2`), { ...good, total: '54' }));
+  await assertFails(setDoc(doc(mine, `users/${MOM}/receipts/r2`), { ...good, date: '12/10/2026' }));
+  await assertFails(setDoc(doc(mine, `users/${MOM}/receipts/r2`), { ...good, photo: 'data:image/jpeg;base64,...' }));
+  await assertFails(setDoc(doc(mine, `users/${MOM}/receipts/r2`), { ...good, source: 'altro' }));
+  // il contatore delle letture lo scrive solo il server
+  await assertFails(updateDoc(doc(mine, `users/${MOM}`), { receiptUsage: { month: '2026-10', count: 0 } }));
+  // nessun altro: né chi è collegato alla famiglia né un estraneo
+  for (const uid of [AUNT, STRANGER]) {
+    await assertFails(getDoc(doc(as(uid), `users/${MOM}/receipts/r1`)));
+    await assertFails(getDocs(collection(as(uid), `users/${MOM}/receipts`)));
+    await assertFails(setDoc(doc(as(uid), `users/${MOM}/receipts/r3`), good));
+  }
+  await assertSucceeds(deleteDoc(doc(mine, `users/${MOM}/receipts/r1`)));
+});

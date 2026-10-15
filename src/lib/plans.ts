@@ -37,6 +37,9 @@ export const PRICES: Record<'smart' | 'pro', Record<BillingInterval, number>> = 
 
 export const TRIAL_DAYS = 7;
 
+/** Scontrini letti dalla foto ogni mese: per tutti i piani (tenere allineato a functions/index.js) */
+export const RECEIPT_SCANS_PER_MONTH = 60;
+
 /** Riporta qualunque valore salvato a un piano valido (gli account demo/locali usano 'premium'). */
 export function normalizePlan(plan?: string | null): PlanId {
   if (plan === 'pro') return 'pro';

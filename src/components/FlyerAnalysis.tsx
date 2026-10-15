@@ -1,19 +1,48 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../lib/firebase';
-import { doc, setDoc } from 'firebase/firestore';
+import { collection, doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { INITIAL_RECIPES } from '../data/recipes';
+import { offerFit, rankOffers } from '../lib/offerFit';
 import { handleFirestoreError, OperationType } from '../lib/firebaseUtils';
-import { UserProfile } from '../types';
-import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, Sparkles, X } from 'lucide-react';
+import { FamilyMember, UserProfile } from '../types';
+import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, Sparkles, X, Link2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface Props {
   userId: string;
   profile: UserProfile | null;
+  /** Porta al menù, dove si può rifare con le offerte appena trovate */
+  onNavigateToPlanner?: () => void;
 }
 
-export default function FlyerAnalysis({ userId, profile }: Props) {
+export default function FlyerAnalysis({ userId, profile, onNavigateToPlanner }: Props) {
   const [file, setFile] = useState<File | null>(null);
+  const [link, setLink] = useState('');
+  // Dopo la lettura si sceglie cosa si compra davvero: solo quello conta per il menù. Nulla è scelto in partenza.
+  const [candidates, setCandidates] = useState<string[]>([]);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  // Chi siede a tavola: per dire di ogni offerta se va bene a tutti o solo ad alcuni
+  const [members, setMembers] = useState<FamilyMember[]>([]);
+  useEffect(() => {
+    if (userId === 'demo-family-user' || userId.startsWith('local-')) {
+      try {
+        setMembers(JSON.parse(localStorage.getItem(`members_${userId}`) || '[]'));
+      } catch {
+        setMembers([]);
+      }
+      return;
+    }
+    return onSnapshot(
+      collection(db, `users/${userId}/familyMembers`),
+      (snap) => setMembers(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<FamilyMember, 'id'>) }))),
+      () => setMembers([]),
+    );
+  }, [userId]);
+  const fits = useMemo(
+    () => rankOffers(candidates.map((name) => offerFit({ name, members, profile, recipes: INITIAL_RECIPES }))),
+    [candidates, members, profile],
+  );
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [scansLeft, setScansLeft] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -52,8 +81,7 @@ export default function FlyerAnalysis({ userId, profile }: Props) {
         const ingredients = result.data.ingredients;
         setScansLeft(result.data.remaining);
 
-        setExtractedOffers(ingredients);
-        await saveOffers(ingredients);
+        showCandidates(ingredients);
       } catch (err: any) {
         console.error("Flyer analysis error:", err);
         setError(`Errore: ${err.message || "Impossibile analizzare il volantino. Prova un'immagine più chiara."}`);
@@ -70,6 +98,27 @@ export default function FlyerAnalysis({ userId, profile }: Props) {
     reader.readAsDataURL(file);
   };
 
+  // Volantino da un link a un PDF o a un'immagine: il server lo scarica e lo legge
+  const analyzeLink = async () => {
+    const url = link.trim();
+    if (!/^https:\/\//i.test(url)) {
+      setError('Incolla l\'indirizzo completo del volantino, che inizia con https://');
+      return;
+    }
+    setIsAnalyzing(true);
+    setError(null);
+    try {
+      const result = await httpsCallable<{ url: string }, { ingredients: string[]; remaining: number }>(functions, 'analyzeFlyerUrl')({ url });
+      setScansLeft(result.data.remaining);
+      showCandidates(result.data.ingredients);
+    } catch (err: any) {
+      console.error('Flyer link error:', err);
+      setError(err?.message?.replace(/^.*?: /, '') || 'Non è stato possibile leggere il link. Prova con uno screenshot.');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
   const saveOffers = async (ingredients: string[]) => {
     const path = `users/${userId}`;
     try {
@@ -81,7 +130,39 @@ export default function FlyerAnalysis({ userId, profile }: Props) {
     }
   };
 
+  const showCandidates = (ingredients: string[]) => {
+    setCandidates([...new Set(ingredients)]);
+    setPicked(new Set());
+  };
+
+  const togglePick = (name: string) =>
+    setPicked((current) => {
+      const next = new Set(current);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+
+  // Si salva solo ciò che l'utente ha scelto; il menù si rifà solo se lo chiede
+  const confirmPicks = async (rebuild: boolean) => {
+    const chosen = candidates.filter((name) => picked.has(name));
+    setExtractedOffers(chosen);
+    await saveOffers(chosen);
+    setCandidates([]);
+    setPicked(new Set());
+    if (rebuild && chosen.length > 0) {
+      try {
+        sessionStorage.setItem('auto_regenerate_plan', '1');
+      } catch {
+        /* storage non disponibile */
+      }
+      onNavigateToPlanner?.();
+    }
+  };
+
   const clearOffers = () => {
+    setCandidates([]);
+    setPicked(new Set());
     setExtractedOffers([]);
     saveOffers([]);
     setFile(null);
@@ -159,6 +240,33 @@ export default function FlyerAnalysis({ userId, profile }: Props) {
               )}
               {isAnalyzing ? 'Analizzando...' : 'Analizza Offerte'}
             </button>
+            <div className="mt-6 pt-6 border-t border-slate-100 space-y-3">
+              <label htmlFor="flyer-link" className="text-sm font-bold text-slate-700 flex items-center gap-2">
+                <Link2 className="w-4 h-4 text-indigo-600" /> Oppure incolla il link del volantino
+              </label>
+              <div className="flex gap-2">
+                <input
+                  id="flyer-link"
+                  type="url"
+                  inputMode="url"
+                  value={link}
+                  onChange={(e) => { setLink(e.target.value); setError(null); }}
+                  onKeyDown={(e) => e.key === 'Enter' && !isAnalyzing && analyzeLink()}
+                  placeholder="https://…/volantino.pdf"
+                  className="flex-1 min-w-0 h-12 px-3 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                />
+                <button
+                  onClick={analyzeLink}
+                  disabled={isAnalyzing || link.trim().length < 8}
+                  className="shrink-0 h-12 px-4 rounded-xl bg-indigo-600 text-white font-bold text-sm disabled:opacity-50"
+                >
+                  Leggi
+                </button>
+              </div>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Funziona se il link porta direttamente a un PDF o a un'immagine. Se il volantino si sfoglia sul sito, fai uno screenshot delle pagine e caricale come foto.
+              </p>
+            </div>
             {error && (
               <div className="mt-4 p-3 bg-red-50 text-red-600 text-sm rounded-xl border border-red-100 flex items-center gap-2">
                 <AlertCircle className="w-4 h-4" />
@@ -212,7 +320,74 @@ export default function FlyerAnalysis({ userId, profile }: Props) {
             )}
           </div>
           
-          {extractedOffers.length > 0 && (
+          {candidates.length > 0 && (
+            <div role="group" aria-label="Cosa compri davvero" className="mb-6 bg-indigo-50 border border-indigo-100 rounded-2xl p-4 space-y-3">
+              <p className="text-sm font-bold text-indigo-950">Ho trovato {candidates.length} ingredienti in offerta. Quali compri davvero?</p>
+              <p className="text-xs text-indigo-900 leading-relaxed">Tocca solo quelli che vuoi comprare: il menù userà soltanto questi. Gli altri vengono ignorati. Per ognuno ti diciamo per chi va bene, secondo allergie, diete e gusti di ognuno.</p>
+              <ul className="space-y-2">
+                {fits.map((fit) => {
+                  const on = picked.has(fit.name);
+                  return (
+                    <li key={fit.name}>
+                      <button
+                        onClick={() => !fit.blocked && togglePick(fit.name)}
+                        disabled={fit.blocked}
+                        aria-pressed={on}
+                        className={`w-full text-left rounded-xl border px-3 py-2.5 flex items-start gap-3 ${
+                          on ? 'bg-indigo-600 border-indigo-600 text-white' : fit.blocked ? 'bg-slate-50 border-slate-200 text-slate-400' : 'bg-white border-indigo-100 text-slate-900'
+                        }`}
+                      >
+                        <span className={`mt-0.5 w-5 h-5 shrink-0 rounded-md border flex items-center justify-center ${on ? 'bg-white border-white text-indigo-700' : 'border-slate-300'}`}>
+                          {on && <CheckCircle2 className="w-4 h-4" />}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block font-semibold">{fit.name}</span>
+                          <span className={`block text-xs ${on ? 'text-indigo-100' : fit.tone === 'all' ? 'text-emerald-700' : fit.tone === 'some' ? 'text-amber-700' : 'text-slate-500'}`}>
+                            {fit.summary}
+                          </span>
+                          {(fit.likedBy.length > 0 || fit.dislikedBy.length > 0) && (
+                            <span className={`block text-xs ${on ? 'text-indigo-100' : 'text-slate-500'}`}>
+                              {[fit.likedBy.length > 0 ? `Piace a ${fit.likedBy.join(', ')}` : '', fit.dislikedBy.length > 0 ? `Non piace a ${fit.dislikedBy.join(', ')}` : ''].filter(Boolean).join(' · ')}
+                            </span>
+                          )}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+              <div className="flex gap-3 text-xs font-semibold text-indigo-800">
+                <button onClick={() => setPicked(new Set(fits.filter((f) => !f.blocked).map((f) => f.name)))} className="underline underline-offset-4">Scegli tutti</button>
+                <button onClick={() => setPicked(new Set(fits.filter((f) => f.tone === 'all' && !f.majorityDislikes).map((f) => f.name)))} className="underline underline-offset-4">Solo quelli per tutti</button>
+                <button onClick={() => setPicked(new Set())} className="underline underline-offset-4">Nessuno</button>
+                <span className="ml-auto">{picked.size} scelti</span>
+              </div>
+              <div className="flex flex-col gap-2">
+                {onNavigateToPlanner && (
+                  <button
+                    onClick={() => confirmPicks(true)}
+                    disabled={picked.size === 0}
+                    className="h-11 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold disabled:opacity-50"
+                  >
+                    Usali e rifai il menù
+                  </button>
+                )}
+                <button
+                  onClick={() => confirmPicks(false)}
+                  disabled={picked.size === 0}
+                  className="h-11 rounded-xl border border-indigo-200 bg-white text-indigo-900 text-sm font-semibold disabled:opacity-50"
+                >
+                  Usali senza rifare il menù
+                </button>
+                <button onClick={() => { setCandidates([]); setPicked(new Set()); }} className="h-10 text-sm font-semibold text-slate-500 underline underline-offset-4">
+                  Non uso nulla
+                </button>
+              </div>
+              <p className="text-xs text-indigo-900/80">Rifacendo il menù, quello di adesso viene sostituito; gusti, diete e allergie di tutti restano rispettati.</p>
+            </div>
+          )}
+
+          {extractedOffers.length > 0 && candidates.length === 0 && (
             <div className="mt-6 pt-6 border-t border-slate-200 border-dashed">
               <div className="flex items-start gap-3 bg-emerald-50 border border-emerald-100 p-4 rounded-2xl">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 mt-0.5" />

@@ -6,6 +6,8 @@ const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const Stripe = require('stripe');
 const invites = require('./invites');
 const familyShare = require('./familyShare');
+const flyerUrl = require('./flyerUrl');
+const receipts = require('./receipts');
 const { isStripeSecretKey, describeStripeKey } = require('./config-checks');
 const { GoogleGenAI, Type } = require('@google/genai');
 
@@ -16,6 +18,8 @@ const FLYER_SCANS_PER_MONTH = 30;
 // Tenere allineato a src/lib/plans.ts: 3 di prova per tutti, 50 con Chef IA
 const DISH_SUGGESTIONS_FREE = 3;
 const DISH_SUGGESTIONS_PRO = 50;
+// Scontrini: per tutti i piani, con un tetto che protegge i costi di Gemini (tenere allineato a src/lib/plans.ts)
+const RECEIPT_SCANS_PER_MONTH = 60;
 const FIRESTORE_DB_ID = 'ai-studio-93a2a041-9b02-4ff7-b496-5f2ada58f953';
 
 const STRIPE_SECRET_KEY = defineSecret('STRIPE_SECRET_KEY');
@@ -702,6 +706,40 @@ exports.suggestDish = onCall(
   }
 );
 
+// Legge il volantino con Gemini e restituisce gli ingredienti in offerta. Conta una scansione del mese; se non riesce, la restituisce.
+async function scanFlyer(uid, data, mimeType) {
+  const remaining = await reserveFlyerScan(uid);
+  try {
+    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY.value() });
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: {
+        parts: [
+          { inlineData: { mimeType, data } },
+          {
+            text: "Analizza questo volantino delle offerte e identifica gli ingredienti alimentari SANI (carne, pesce, verdura, frutta, cereali, legumi, latticini base) che sono in offerta. \n\nREGOLE CRITICHE:\n1. ESCLUDI ASSOLUTAMENTE: alcolici (vino, birra, superalcolici), gelati, dolci industriali (merendine, biscotti farciti), snack fritti e bibite zuccherate.\n2. Includi solo ingredienti 'base' che possono essere usati come componenti di un pasto.\n3. Restituisci SOLO una lista di nomi di ingredienti in italiano, puliti e semplici (es. 'Pollo', 'Salmone', 'Zucchine', 'Bresaola', 'Tacchino', 'Carote', 'Salsiccia').",
+          },
+        ],
+      },
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: { ingredients: { type: Type.ARRAY, items: { type: Type.STRING } } },
+          required: ['ingredients'],
+        },
+      },
+    });
+    if (!response.text) throw new HttpsError('internal', 'Nessuna risposta dal modello.');
+    const ingredients = JSON.parse(response.text).ingredients.map((i) => i.charAt(0).toUpperCase() + i.slice(1).toLowerCase());
+    return { ingredients, remaining };
+  } catch (err) {
+    // La scansione non è andata a buon fine: non va addebitata sul tetto mensile
+    await refundFlyerScan(uid).catch(() => {});
+    throw err;
+  }
+}
+
 exports.analyzeFlyer = onCall(
   { region: REGION, secrets: [GEMINI_API_KEY], memory: '512MiB', timeoutSeconds: 120 },
   async (request) => {
@@ -710,38 +748,97 @@ exports.analyzeFlyer = onCall(
     if (typeof data !== 'string' || !['image/jpeg', 'image/png', 'image/webp', 'application/pdf'].includes(mimeType)) {
       throw new HttpsError('invalid-argument', 'File non valido.');
     }
+    return scanFlyer(uid, data, mimeType);
+  }
+);
 
-    const remaining = await reserveFlyerScan(uid);
+// Volantino da un link: il server scarica il file (solo PDF o immagini, mai pagine) e lo legge come quello caricato dal telefono
+exports.analyzeFlyerUrl = onCall(
+  { region: REGION, secrets: [GEMINI_API_KEY], memory: '512MiB', timeoutSeconds: 120 },
+  async (request) => {
+    const uid = requireAuth(request);
+    let file;
+    try {
+      file = await flyerUrl.downloadFlyer(request.data && request.data.url);
+    } catch (err) {
+      if (err instanceof flyerUrl.FlyerUrlError) {
+        // Il download non consuma una scansione: la si prenota solo quando c'è un file da leggere
+        throw new HttpsError(err.code === 'invalid-url' ? 'invalid-argument' : err.code === 'unreachable' ? 'unavailable' : 'failed-precondition', err.message);
+      }
+      console.error('Download volantino non riuscito', err);
+      throw new HttpsError('unavailable', 'Non riesco ad aprire il link.');
+    }
+    return scanFlyer(uid, file.data, file.mimeType);
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Scontrini della spesa: per tutti i piani. Il server legge la foto e restituisce negozio, data e totale;
+// la foto non si conserva, l'app salva solo questi tre dati.
+// ---------------------------------------------------------------------------
+
+async function reserveReceiptScan(uid) {
+  const month = new Date().toISOString().slice(0, 7);
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(userRef(uid));
+    const usage = snap.exists && snap.data().receiptUsage;
+    const used = usage && usage.month === month ? usage.count || 0 : 0;
+    if (used >= RECEIPT_SCANS_PER_MONTH) {
+      throw new HttpsError('resource-exhausted', `Hai letto ${RECEIPT_SCANS_PER_MONTH} scontrini questo mese: per gli altri aggiungi la spesa a mano.`);
+    }
+    tx.set(userRef(uid), { receiptUsage: { month, count: used + 1 } }, { merge: true });
+    return RECEIPT_SCANS_PER_MONTH - used - 1;
+  });
+}
+
+async function refundReceiptScan(uid) {
+  const month = new Date().toISOString().slice(0, 7);
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(userRef(uid));
+    const usage = snap.exists && snap.data().receiptUsage;
+    if (usage && usage.month === month && usage.count > 0) {
+      tx.set(userRef(uid), { receiptUsage: { month, count: usage.count - 1 } }, { merge: true });
+    }
+  });
+}
+
+exports.analyzeReceipt = onCall(
+  { region: REGION, secrets: [GEMINI_API_KEY], memory: '512MiB', timeoutSeconds: 60 },
+  async (request) => {
+    const uid = requireAuth(request);
+    const { data, mimeType } = request.data || {};
+    if (typeof data !== 'string' || data.length > 8_000_000 || !receipts.RECEIPT_MIME_TYPES.includes(mimeType)) {
+      throw new HttpsError('invalid-argument', 'Foto non valida: usa una foto (JPG o PNG) o un PDF.');
+    }
+    const remaining = await reserveReceiptScan(uid);
     try {
       const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY.value() });
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
-        contents: {
-          parts: [
-            { inlineData: { mimeType, data } },
-            {
-              text: "Analizza questo volantino delle offerte e identifica gli ingredienti alimentari SANI (carne, pesce, verdura, frutta, cereali, legumi, latticini base) che sono in offerta. \n\nREGOLE CRITICHE:\n1. ESCLUDI ASSOLUTAMENTE: alcolici (vino, birra, superalcolici), gelati, dolci industriali (merendine, biscotti farciti), snack fritti e bibite zuccherate.\n2. Includi solo ingredienti 'base' che possono essere usati come componenti di un pasto.\n3. Restituisci SOLO una lista di nomi di ingredienti in italiano, puliti e semplici (es. 'Pollo', 'Salmone', 'Zucchine', 'Bresaola', 'Tacchino', 'Carote', 'Salsiccia').",
-            },
-          ],
-        },
+        contents: { parts: [{ inlineData: { mimeType, data } }, { text: receipts.RECEIPT_PROMPT }] },
         config: {
           responseMimeType: 'application/json',
           responseSchema: {
             type: Type.OBJECT,
-            properties: { ingredients: { type: Type.ARRAY, items: { type: Type.STRING } } },
-            required: ['ingredients'],
+            properties: {
+              isReceipt: { type: Type.BOOLEAN },
+              store: { type: Type.STRING },
+              date: { type: Type.STRING },
+              total: { type: Type.NUMBER },
+            },
+            required: ['isReceipt', 'store', 'date', 'total'],
           },
         },
       });
       if (!response.text) throw new HttpsError('internal', 'Nessuna risposta dal modello.');
-      const ingredients = JSON.parse(response.text).ingredients.map(
-        (i) => i.charAt(0).toUpperCase() + i.slice(1).toLowerCase()
-      );
-      return { ingredients, remaining };
+      return { receipt: receipts.cleanReceipt(JSON.parse(response.text)), remaining };
     } catch (err) {
-      // La scansione non è andata a buon fine: non va addebitata sul tetto mensile
-      await refundFlyerScan(uid).catch(() => {});
-      throw err;
+      // Lettura non riuscita: non conta sul tetto del mese
+      await refundReceiptScan(uid).catch(() => {});
+      if (err instanceof receipts.ReceiptError) throw new HttpsError('failed-precondition', err.message);
+      if (err instanceof HttpsError) throw err;
+      console.error('Lettura scontrino non riuscita', err);
+      throw new HttpsError('internal', 'Non sono riuscito a leggere lo scontrino. Riprova o aggiungi la spesa a mano.');
     }
   }
 );

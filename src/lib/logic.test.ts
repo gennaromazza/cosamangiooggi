@@ -21,7 +21,8 @@ import {
   isStaple,
 } from './pantrySync';
 import { getRawIngredientNames, scaleIngredientAmount } from './utils';
-import { hitsExclusion } from './dietFilters';
+import { hitsAllergen, hitsExclusion, satisfiesDiet } from './dietFilters';
+import { offerFit, rankOffers } from './offerFit';
 import { excludesVeganDishes, isVeganDish } from './veganDishes';
 import { extractVoiceArgument } from './voiceText';
 import { INITIAL_RECIPES } from '../data/recipes';
@@ -42,7 +43,7 @@ import { addToSlot, buildManualPlan, countManualMeals, emptyManualDays, manualDa
 import { compareBuilds, isNewer } from './updateCheck';
 import { fillPlaceholders } from '../../scripts/landing';
 import { PAGES, pageText, renderPage } from '../../scripts/landing-pages';
-import { dishSuggestionsLeft, limitsFor, normalizePlan, planName, PRICES, yearlySavingPercent, PLAN_LIMITS } from './plans';
+import { RECEIPT_SCANS_PER_MONTH, dishSuggestionsLeft, limitsFor, normalizePlan, planName, PRICES, yearlySavingPercent, PLAN_LIMITS } from './plans';
 
 const item = (id: string, name: string, quantity: number, unit: string): PantryItem =>
   ({ id, name, quantity, unit, category: 'Altro' } as PantryItem);
@@ -1517,4 +1518,150 @@ test('modifica piatto: si può correggere dal menù, dall\'elenco delle ricette 
   const recipes = readFileSync('src/components/RecipeList.tsx', 'utf8');
   for (const needle of ['handleEditRecipe', 'Modifica ${recipe.title}', 'Crea la tua versione', 'saveDishEdit(']) assert.ok(recipes.includes(needle), `RecipeList: manca ${needle}`);
   assert.ok(readFileSync('src/components/ManualPlanEditor.tsx', 'utf8').includes('onEditDish'));
+});
+
+test('volantino da link: la schermata chiede il link e spiega cosa fare se non è un file', () => {
+  const screen = readFileSync('src/components/FlyerAnalysis.tsx', 'utf8');
+  for (const needle of ['analyzeFlyerUrl', 'Oppure incolla il link del volantino', 'https://', 'fai uno screenshot delle pagine']) assert.ok(screen.includes(needle), `FlyerAnalysis: manca ${needle}`);
+  assert.ok(readFileSync('functions/index.js', 'utf8').includes('exports.analyzeFlyerUrl = onCall'));
+});
+
+test('volantino: si sceglie cosa si compra davvero, e il menù si rifà solo su richiesta', () => {
+  const screen = readFileSync('src/components/FlyerAnalysis.tsx', 'utf8');
+  for (const needle of ['Quali compri davvero?', 'Nulla è scelto in partenza', 'new Set()', 'Usali e rifai il menù', 'Usali senza rifare il menù', 'Non uso nulla', 'Scegli tutti', 'disabled={picked.size === 0}', 'candidates.filter((name) => picked.has(name))', 'Gli altri vengono ignorati']) {
+    assert.ok(screen.includes(needle), `FlyerAnalysis: manca ${needle}`);
+  }
+  // dopo la lettura non si salva nulla: si salva solo la scelta
+  const afterRead = screen.slice(screen.indexOf('const analyzeFlyer'), screen.indexOf('const showCandidates'));
+  assert.ok(!afterRead.includes('saveOffers('), 'la lettura da sola non salva le offerte');
+  assert.ok(screen.includes('showCandidates(ingredients)') && screen.includes('showCandidates(result.data.ingredients)'));
+  // il menù si rifà solo con il pulsante, e solo se c'è almeno un ingrediente scelto
+  assert.equal((screen.match(/auto_regenerate_plan/g) || []).length, 1);
+  assert.ok(screen.includes('if (rebuild && chosen.length > 0)'));
+  const planner = readFileSync('src/components/MealPlanner.tsx', 'utf8');
+  assert.ok(planner.includes("sessionStorage.getItem('auto_regenerate_plan') === '1'") && planner.includes("sessionStorage.removeItem('auto_regenerate_plan')"), 'la richiesta si usa una volta sola');
+  assert.ok(readFileSync('src/App.tsx', 'utf8').includes("onNavigateToPlanner={() => setActiveTab('planner')}"));
+  assert.ok(planner.includes('profile.currentOffers') && planner.includes('hardExclusions'));
+});
+
+const dishOf = (title: string, ...ingredients: string[]) => ({ id: title, title, ingredients: ingredients.map((name) => ({ name, amount: 1, unit: 'pz' })) }) as unknown as Recipe;
+
+test('allergie per categoria: glutine, crostacei, frutta a guscio, latte valgono davvero', () => {
+  assert.equal(hitsExclusion(dishOf('Spaghetti al pomodoro', 'Spaghetti', 'Pomodoro'), ['Glutine']), true);
+  assert.equal(hitsExclusion(dishOf('Pane e olio', 'Pane', 'Olio'), ['Celiachia']), true);
+  assert.equal(hitsExclusion(dishOf('Risotto ai gamberi', 'Riso', 'Gamberi'), ['Crostacei']), true);
+  assert.equal(hitsExclusion(dishOf('Pasta al pesto', 'Pasta', 'Pesto'), ['Frutta a guscio']), true);
+  assert.equal(hitsExclusion(dishOf('Insalata con noci', 'Insalata', 'Noci'), ['Frutta a guscio']), true);
+  assert.equal(hitsExclusion(dishOf('Pasta al pomodoro', 'Pasta', 'Parmigiano'), ['Latte']), true);
+  // quello che non c'entra resta permesso
+  assert.equal(hitsExclusion(dishOf('Purè', 'Patate', 'Noce moscata'), ['Frutta a guscio']), false);
+  assert.equal(hitsExclusion(dishOf('Porridge', 'Riso', 'Latte di soia'), ['Latte']), false);
+  assert.equal(hitsExclusion(dishOf('Frittelle', 'Farina di riso', 'Zucchine'), ['Glutine']), false);
+  assert.equal(hitsExclusion(dishOf('Pasta senza glutine al sugo', 'Pasta senza glutine', 'Pomodoro'), ['Glutine']), false);
+  assert.equal(hitsExclusion(dishOf('Spaghetti di riso', 'Spaghetti di riso', 'Verdure'), ['Glutine']), false);
+  assert.equal(hitsAllergen(dishOf('Pollo', 'Pollo'), 'Peperoni'), undefined, 'un ingrediente qualsiasi non è una categoria');
+  // la dieta senza glutine non si fida di un'etichetta sbagliata
+  const mislabeled = { ...dishOf('Minestrone', 'Verdure', 'Pasta'), tags: ['gluten-free'] } as unknown as Recipe;
+  assert.equal(satisfiesDiet(mislabeled, ['gluten-free']), false);
+  // i piatti dell'app che contengono glutine sono esclusi per chi è celiaco
+  const glutenFreeTagged = INITIAL_RECIPES.filter((r) => r.tags?.includes('gluten-free'));
+  assert.ok(glutenFreeTagged.filter((r) => satisfiesDiet(r, ['gluten-free'])).every((r) => !r.ingredients.some((i) => /^(pasta|spaghetti|pane|farina)$/i.test(i.name.trim()))));
+});
+
+test('offerte per persona: dice per chi va bene, chi non può e cosa il menù userà', () => {
+  const m = (name: string, extra: Partial<FamilyMember> = {}) => ({ id: name, name, allergies: [], dietaryRestrictions: [], likedIngredients: [], dislikedIngredients: [], ...extra }) as unknown as FamilyMember;
+  const members = [m('Antonio', { likedIngredients: ['Ceci'] }), m('Deby'), m('Luca', { allergies: ['Glutine'] })];
+  const recipes = [dishOf('Pasta e ceci', 'Pasta', 'Ceci'), dishOf('Zuppa di ceci', 'Ceci', 'Carote'), dishOf('Zucchine trifolate', 'Zucchine')];
+  const fit = (name: string, profile: any = null, list = members) => offerFit({ name, members: list, profile, recipes });
+
+  const ceci = fit('Ceci');
+  assert.equal(ceci.tone, 'all');
+  assert.equal(ceci.summary, 'Va bene per tutti');
+  assert.deepEqual(ceci.likedBy, ['Antonio']);
+  assert.equal(ceci.dishes, 2);
+
+  const pasta = fit('Pasta');
+  assert.equal(pasta.tone, 'some');
+  assert.deepEqual(pasta.cannot, ['Luca']);
+  assert.equal(pasta.summary, 'Per Antonio e Deby · non per Luca');
+
+  const blocked = fit('Pasta', { dietaryRestrictions: [], excludedIngredients: ['Glutine'] });
+  assert.equal(blocked.blocked, true);
+  assert.equal(blocked.dishes, 0);
+  assert.equal(blocked.tone, 'none');
+
+  assert.equal(fit('Melanzane').summary, 'Va bene per tutti · nessun piatto adatto lo usa');
+
+  const twoHate = [m('Antonio', { dislikedIngredients: ['Zucchine'] }), m('Deby', { dislikedIngredients: ['Zucchine'] }), m('Luca')];
+  const zucchine = fit('Zucchine', null, twoHate);
+  assert.equal(zucchine.majorityDislikes, true);
+  assert.deepEqual(zucchine.dislikedBy, ['Antonio', 'Deby']);
+  assert.ok(zucchine.summary.endsWith('a metà famiglia non piace: il menù lo evita'));
+
+  const ranked = rankOffers([blocked, fit('Melanzane'), pasta, ceci]).map((f) => `${f.name}:${f.tone}`);
+  assert.deepEqual(ranked, ['Ceci:all', 'Melanzane:all', 'Pasta:some', 'Pasta:none']);
+});
+
+test('volantino: ogni offerta dice per chi della famiglia va bene', () => {
+  const screen = readFileSync('src/components/FlyerAnalysis.tsx', 'utf8');
+  for (const needle of ['offerFit(', 'rankOffers(', 'Solo quelli per tutti', 'fit.summary', 'disabled={fit.blocked}']) assert.ok(screen.includes(needle), `FlyerAnalysis: manca ${needle}`);
+});
+
+test('scontrini: resoconto del mese, confronto, negozi, doppioni e importi scritti a mano', async () => {
+  const { monthReport, monthsTrend, findDuplicate, parseEuro, receiptProblem, shiftMonth, monthLabel, formatEuro } = await import('./receipts');
+  const r = (id: string, store: string, date: string, total: number) => ({ id, store, date, total, createdAt: Number(id.slice(1)) });
+  const list = [
+    r('r1', 'Esselunga', '2026-10-02', 54.3),
+    r('r2', 'esselunga', '2026-10-09', 40.2),
+    r('r3', 'Lidl', '2026-10-12', 25.5),
+    r('r4', 'Coop', '2026-09-20', 100),
+    r('r5', 'Coop', '2026-08-31', 10),
+  ];
+  const oct = monthReport(list, '2026-10');
+  assert.equal(oct.total, 120);
+  assert.equal(oct.count, 3);
+  assert.equal(oct.average, 40);
+  assert.deepEqual(oct.byStore.map((s) => [s.store, s.total, s.count]), [['Esselunga', 94.5, 2], ['Lidl', 25.5, 1]], 'lo stesso negozio scritto in modi diversi conta una volta');
+  assert.equal(oct.previousTotal, 100);
+  assert.equal(oct.changePercent, 20);
+  assert.deepEqual(oct.receipts.map((x) => x.id), ['r3', 'r2', 'r1'], 'dal più recente');
+  const empty = monthReport(list, '2026-11');
+  assert.equal(empty.total, 0);
+  assert.equal(empty.changePercent, null);
+  assert.equal(monthReport(list, '2026-08').previousTotal, null);
+  assert.deepEqual(monthsTrend(list, '2026-10', 3).map((t) => t.total), [10, 100, 120]);
+
+  assert.equal(shiftMonth('2026-01', -1), '2025-12');
+  assert.equal(shiftMonth('2026-12', 1), '2027-01');
+  assert.equal(monthLabel('2026-10'), 'ottobre 2026');
+  assert.equal(formatEuro(1054.3), '1.054,30 €');
+
+  assert.equal(findDuplicate(list, { store: 'ESSELUNGA ', date: '2026-10-02', total: 54.3 })?.id, 'r1');
+  assert.equal(findDuplicate(list, { store: 'Esselunga', date: '2026-10-03', total: 54.3 }), undefined);
+
+  assert.equal(parseEuro('54,30'), 54.3);
+  assert.equal(parseEuro('54.3'), 54.3);
+  assert.equal(parseEuro('1.054,30 €'), 1054.3);
+  assert.equal(parseEuro('0'), null);
+  assert.equal(parseEuro('dieci'), null);
+  assert.equal(parseEuro('9999'), null);
+  const now = new Date(2026, 9, 14);
+  assert.equal(receiptProblem({ store: 'Coop', date: '2026-10-14', total: '12' }, now), null);
+  assert.match(receiptProblem({ store: 'Coop', date: '2026-10-15', total: '12' }, now)!, /futuro/);
+  assert.match(receiptProblem({ store: 'Coop', date: '2026-10-14', total: '' }, now)!, /totale/);
+});
+
+test('scontrini: la schermata c\'è per tutti, la foto si legge sul server e non si conserva', () => {
+  const screen = readFileSync('src/components/Receipts.tsx', 'utf8');
+  for (const needle of ['analyzeReceipt', 'Fotografa lo scontrino', 'capture="environment"', 'Aggiungi una spesa a mano', 'findDuplicate(', 'non viene conservata', 'Correggi', 'monthReport(']) assert.ok(screen.includes(needle), `Receipts: manca ${needle}`);
+  const app = readFileSync('src/App.tsx', 'utf8');
+  assert.ok(app.includes("{activeTab === 'receipts' && <Receipts userId={user.uid} />}"), 'nessun limite di piano sulla schermata');
+  assert.ok(app.includes("onNavigateToReceipts={() => setActiveTab('receipts')}"));
+  const server = readFileSync('functions/index.js', 'utf8');
+  assert.ok(server.includes('exports.analyzeReceipt = onCall'));
+  const fn = server.slice(server.indexOf('exports.analyzeReceipt'));
+  assert.ok(!fn.includes("plan !== 'pro'") && !fn.includes('.collection(\'receipts\')'), 'per tutti i piani, e il server non salva la foto');
+  assert.ok(server.includes(`RECEIPT_SCANS_PER_MONTH = ${RECEIPT_SCANS_PER_MONTH};`), 'tetto allineato tra app e server');
+  const rules = readFileSync('firestore.rules', 'utf8');
+  assert.ok(rules.includes('match /receipts/{receiptId}') && rules.includes("'receiptUsage'"));
 });

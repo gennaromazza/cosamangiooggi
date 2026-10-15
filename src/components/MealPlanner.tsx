@@ -1288,6 +1288,27 @@ export default function MealPlanner({ userId, onNavigateToShopping, onNavigateTo
     return () => clearTimeout(timer);
   }, [loading, currentPlan]);
 
+  // Chi ha scelto "Sì, rifai il menù" dopo aver letto un volantino: si rifà (anche se c'è già un menù) quando le offerte sono arrivate
+  useEffect(() => {
+    if (loading) return;
+    let wanted = false;
+    try {
+      wanted = sessionStorage.getItem('auto_regenerate_plan') === '1';
+    } catch {
+      /* storage non disponibile */
+    }
+    if (!wanted) return;
+    const timer = setTimeout(() => {
+      try {
+        sessionStorage.removeItem('auto_regenerate_plan');
+      } catch {
+        /* storage non disponibile */
+      }
+      generateRef.current();
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [loading, profile?.currentOffers]);
+
   return (
     <div className="space-y-5">
       {/* Intestazione: titolo, chi mangia, e due piccoli comandi */}
